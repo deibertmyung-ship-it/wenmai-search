@@ -8,7 +8,7 @@
         "--browser", "chrome",
         "--headless",
         "--viewport-size", "1440,1000",
-        "--output-dir", "./out/knowledge-retrieval-survey/knowledge-web/tests/e2e/mcp-output"
+        "--output-dir", "./knowledge-web/tests/e2e/mcp-output"
       ]
     }
   }

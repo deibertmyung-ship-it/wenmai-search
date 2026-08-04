@@ -25,9 +25,9 @@ async def lifespan(_: FastAPI):
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
-        title="kbsvc",
+        title="Wenmai Search API",
         version="0.1.0",
-        description="Self-hosted knowledge retrieval: ingest, hybrid search, citations.",
+        description="Self-hosted, traceable hybrid knowledge retrieval via REST and MCP.",
         lifespan=lifespan,
     )
 

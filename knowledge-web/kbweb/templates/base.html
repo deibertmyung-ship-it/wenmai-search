@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}典藏检索{% endblock %} · kbweb</title>
+<title>{% block title %}文脉检索{% endblock %} · Wenmai Search</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📜</text></svg>">
@@ -19,7 +19,7 @@
 </head>
 <body>
 <header class="masthead">
-  <a class="masthead__mark" href="{{ url_for('search.index') }}">典藏检索</a>
+  <a class="masthead__mark" href="{{ url_for('search.index') }}">文脉</a>
   <nav class="masthead__nav" aria-label="主导航">
     <a class="masthead__link" href="{{ url_for('search.index') }}"
        {% if request.endpoint == 'search.index' %}aria-current="page"{% endif %}>检索</a>
