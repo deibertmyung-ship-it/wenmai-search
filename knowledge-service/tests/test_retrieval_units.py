@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from kbsvc.embedding.dense_fastembed import _local_model_path
 from kbsvc.embedding.dense_hash import HashDenseEmbedder
 from kbsvc.embedding.sparse_bm25 import Bm25SparseEmbedder, StaticTermStats, term_index, tokenize
 from kbsvc.retrieval.citation import build_snippet, source_anchor
@@ -57,6 +58,14 @@ def test_hash_embedder_is_deterministic_and_normalized():
 
 def test_hash_embedder_handles_empty_input():
     assert HashDenseEmbedder(dim=8).embed_query("") == [0.0] * 8
+
+
+def test_fastembed_detects_preloaded_local_model(tmp_path):
+    model_dir = tmp_path / "fast-bge-small-zh-v1.5"
+    model_dir.mkdir()
+    (model_dir / "model_optimized.onnx").touch()
+
+    assert _local_model_path(str(tmp_path), "BAAI/bge-small-zh-v1.5") == model_dir
 
 
 # --- fusion -------------------------------------------------------------

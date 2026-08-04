@@ -8,21 +8,17 @@
 
 ## 为什么走 HTTP 而不是直接 import kbsvc
 
-`local` profile 下嵌入式 Qdrant 对数据目录持**独占锁**。Flask 若直接 import kbsvc，
-它会抢走锁，后端 API 就起不来。走 HTTP 之后，前端还能指向远程 kbsvc，两种 profile 一致。
+当前 `local` profile 把嵌入式 Qdrant 和常驻 worker 放在同一个 API 进程中，Web 仍是独立
+表现层。Web 只走 HTTP，可以避免复制检索、任务和存储逻辑，也能无缝指向远程 kbsvc，
+使 `local` 与 `server` 两种 profile 保持相同前后端边界。
 
 顺带的好处：API Key 只存在 Flask 服务端，浏览器永远拿不到。
 
 ## 起步
 
-后端先跑起来（另一个终端）：
-```bash
-cd ../knowledge-service
-export KB_DATA_DIR="$PWD/.kbdata"
-python -m kbsvc.cli serve            # http://127.0.0.1:8077
-```
+推荐在仓库根目录用 `run.bat` 启动后端 API（内含 Qdrant 与 worker）和 Web。
+单独开发前端时，先确保 kbsvc API 已运行，然后：
 
-然后：
 ```bash
 uv venv --python 3.11 .venv
 uv pip install --python .venv -e ".[dev,prod]"

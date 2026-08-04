@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import logging
 import socket
-import time
 from collections import Counter
 from dataclasses import dataclass
 from datetime import timedelta
+from threading import Event
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -50,14 +50,18 @@ class IngestWorker:
 
     # --- loop -----------------------------------------------------------
 
-    def run_forever(self, *, max_jobs: int | None = None) -> int:
+    def run_forever(
+        self, *, max_jobs: int | None = None, stop_event: Event | None = None
+    ) -> int:
+        stop = stop_event or Event()
         processed = 0
-        while max_jobs is None or processed < max_jobs:
+        while not stop.is_set() and (max_jobs is None or processed < max_jobs):
             outcome = self.run_once()
             if outcome is None:
                 if max_jobs is not None:
                     break
-                time.sleep(self.settings.worker_poll_interval)
+                if stop.wait(self.settings.worker_poll_interval):
+                    break
                 continue
             processed += 1
         return processed

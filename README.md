@@ -23,7 +23,7 @@ CLI 与 MCP 暴露统一结果。
 - **混合检索**：dense 与字符级 BM25 sparse 双路召回，经 RRF 融合并可选 rerank；支持来源、文档、类型、ACL 和章节过滤。
 - **可解释调试**：可返回查询改写、双路原始排名、融合贡献、重排分数、实际过滤条件和各阶段耗时。
 - **多种接入面**：FastAPI REST、只读 MCP 工具、Typer CLI，以及服务端渲染的 Flask Web 界面。
-- **本地与服务端双配置**：默认单机零外部服务运行，也可切换 PostgreSQL、S3/MinIO 和独立 Qdrant。
+- **本地与服务端双配置**：本地使用 SQLite、本地文件、嵌入式 Qdrant 与 API 内置 worker；服务端可切换 PostgreSQL、S3/MinIO、独立 Qdrant 并水平扩展 worker。
 
 ## 架构
 
@@ -45,48 +45,59 @@ CLI    ────────────────────────�
 
 ## 快速开始
 
-需要 Python 3.11+ 和 [uv](https://docs.astral.sh/uv/)。默认 `local` profile 使用 SQLite、
-本地文件系统和嵌入式 Qdrant，不需要 Docker、外部数据库或在线模型。
+只需要 Python 3.11+ 和 [uv](https://docs.astral.sh/uv/)，本地模式不需要 Docker。
+默认 `local` profile 将 SQLite、原始文件和嵌入式 Qdrant 都保存在 `.kbdata/`。
 
-### 1. 安装并初始化后端
+### 1. 安装后端与 Web
 
 ```bash
 git clone https://github.com/deibertmyung-ship-it/wenmai-search.git
 cd wenmai-search/knowledge-service
 
 uv venv --python 3.11 .venv
-uv pip install --python .venv -e ".[dev]"
-uv run kbsvc init
+uv pip install --python .venv -e ".[dev,fastembed]"
+
+cd ../knowledge-web
+uv venv --python 3.11 .venv
+uv pip install --python .venv -e ".[dev,prod]"
 ```
 
-### 2. 导入示例语料并检索
+### 2. 一键启动本地服务
+
+从仓库根目录执行：
+
+```bat
+run.bat
+```
+
+API 进程会同时持有嵌入式 Qdrant 和常驻 worker，脚本随后启动 Web。首次运行会自动初始化
+SQLite 与 Qdrant 集合。访问 <http://127.0.0.1:5055> 后，上传任务会自动处理。
+
+### 3. 使用 CLI 导入示例语料（可选）
+
+嵌入式 Qdrant 不能跨进程共享。先停止 API，再运行本地 CLI：
 
 ```bash
+cd ..
+run.bat stop
+cd knowledge-service
 uv run kbsvc ingest ../book --source guji --patterns "*.txt,*.md"
 uv run kbsvc search "贼克如何取用神" --top-k 5
 ```
 
-`book/` 只是演示语料；也可以换成自己的 TXT、Markdown，或安装可选解析器后导入 PDF、
-Office 文档和图片。
+完成后回到仓库根目录重新执行 `run.bat`。日常导入建议直接使用 Web 页面，它会交给 API
+内置 worker 自动处理。
 
-### 3. 启动 REST 与 Web
+`book/` 只是演示语料；也可以换成自己的 TXT、Markdown、PDF、Office 文档和图片。
+Docling、Unstructured 与 Marker 已作为后端默认依赖安装，无需另装解析器。
 
-先在后端目录启动 API：
+REST 文档位于 <http://127.0.0.1:8077/docs>。停止、查看状态或重启整个本地栈：
 
-```bash
-uv run kbsvc serve
+```bat
+run.bat stop
+run.bat status
+run.bat restart
 ```
-
-REST 文档位于 <http://127.0.0.1:8077/docs>。另开终端启动 Web：
-
-```bash
-cd knowledge-web
-uv venv --python 3.11 .venv
-uv pip install --python .venv -e ".[dev,prod]"
-uv run flask --app wsgi run --port 5055
-```
-
-访问 <http://127.0.0.1:5055>，即可使用检索、阅读器、书库、导入和任务监控界面。
 
 ## MCP 接入
 
@@ -113,10 +124,10 @@ uv run kbsvc mcp
 |---|---|---|
 | 元数据 | SQLite | PostgreSQL |
 | 原始文件 | 本地文件系统 | S3 / MinIO |
-| 向量库 | 嵌入式 Qdrant | Qdrant 服务 |
-| dense embedding | 确定性 hash（零下载） | FastEmbed 或 OpenAI-compatible endpoint |
+| 向量库 | API 进程内嵌 Qdrant（本地目录） | Qdrant Server |
+| dense embedding | FastEmbed（默认 bge-small-zh-v1.5） | FastEmbed 或 OpenAI-compatible endpoint |
 | sparse retrieval | 字符 1-gram / 2-gram + BM25 | 同左 |
-| 任务执行 | 元数据库队列 + 单 worker | 共享队列 + 可水平扩展 worker |
+| 任务执行 | API 内置单 worker 线程，上传后自动处理 | 独立常驻 worker，可水平扩展 |
 
 服务端 Docker Compose 模板位于 [`knowledge-service/deploy/`](knowledge-service/deploy/)。所有配置项及默认值见 [`knowledge-service/.env.example`](knowledge-service/.env.example) 与 [`knowledge-web/.env.example`](knowledge-web/.env.example)。
 
@@ -126,6 +137,7 @@ uv run kbsvc mcp
 .
 ├── knowledge-service/   # kbsvc：导入、索引、检索、REST、MCP、CLI
 ├── knowledge-web/       # kbweb：检索 UI、阅读器、书库与任务管理
+├── QA/                  # 项目问答与改造结论（HTML）
 ├── book/                # 中文古籍演示语料
 ├── knowledge-retrieval-github-survey.md
 │                        # 立项阶段的 GitHub 技术架构调研
@@ -140,6 +152,7 @@ uv run kbsvc mcp
 - [`knowledge-service/docs/04-runbook.md`](knowledge-service/docs/04-runbook.md)：部署、备份、排障与重建索引
 - [`knowledge-service/docs/05-performance.md`](knowledge-service/docs/05-performance.md)：性能测试与扩容边界
 - [`knowledge-web/docs/01-frontend-design.md`](knowledge-web/docs/01-frontend-design.md)：Web 端信息架构与视觉设计
+- [`QA/2026-08-04-QA.html`](QA/2026-08-04-QA.html)：本次项目问答、故障分析与架构改造结论
 - [`knowledge-retrieval-github-survey.md`](knowledge-retrieval-github-survey.md)：技术选型调研及原始候选依据
 
 ## 开发与验证

@@ -20,12 +20,12 @@ _LOCAL_DIR_PREFIX = "fast-"
 _ONNX_GLOB = "*.onnx"
 
 
-def _weights_present(cache_dir: str, model_name: str) -> bool:
+def _local_model_path(cache_dir: str, model_name: str) -> Path | None:
     short = model_name.split("/")[-1]
     for candidate in (Path(cache_dir) / f"{_LOCAL_DIR_PREFIX}{short}", Path(cache_dir) / short):
         if candidate.is_dir() and any(candidate.glob(_ONNX_GLOB)):
-            return True
-    return False
+            return candidate
+    return None
 
 
 class FastEmbedDenseEmbedder:
@@ -46,13 +46,20 @@ class FastEmbedDenseEmbedder:
             ) from exc
         self.model_name = model_name
         self.batch_size = batch_size
-        if cache_dir and _weights_present(cache_dir, model_name):
+        local_model_path = _local_model_path(cache_dir, model_name) if cache_dir else None
+        model_kwargs: dict[str, str] = {}
+        if local_model_path is not None:
             # fastembed probes the Hub on every init even when weights are already
             # cached. On a restricted network that probe hangs for minutes instead
             # of failing, so go offline once the local copy is known-good.
             os.environ.setdefault("HF_HUB_OFFLINE", "1")
-            logger.debug("local weights found; forcing HF_HUB_OFFLINE")
-        self._model = TextEmbedding(model_name=model_name, cache_dir=cache_dir)
+            model_kwargs["specific_model_path"] = str(local_model_path)
+            logger.debug("using local model path %s", local_model_path)
+        self._model = TextEmbedding(
+            model_name=model_name,
+            cache_dir=cache_dir,
+            **model_kwargs,
+        )
         self._has_query_embed = hasattr(self._model, "query_embed")
         self._has_passage_embed = hasattr(self._model, "passage_embed")
         self.dim = self._detect_dim(dim)

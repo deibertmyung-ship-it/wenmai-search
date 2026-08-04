@@ -39,7 +39,8 @@ class Settings(BaseSettings):
     s3_region: str = "us-east-1"
 
     # --- vector store ---------------------------------------------------
-    qdrant_url: str = ""  # empty -> embedded mode under data_dir/qdrant
+    # Empty -> embedded mode under data_dir/qdrant. A URL selects Qdrant Server.
+    qdrant_url: str = ""
     qdrant_api_key: str = ""
     qdrant_collection: str = "kb_chunks"
     qdrant_timeout: float = 30.0
@@ -79,6 +80,10 @@ class Settings(BaseSettings):
     worker_max_attempts: int = 3
     worker_backoff_base: float = 5.0
     worker_backoff_cap: float = 600.0
+    # None derives the safe default: enabled only for local + embedded mode.
+    # Server deployments keep their independently scalable worker processes.
+    api_worker_enabled: bool | None = None
+    api_worker_shutdown_timeout: float = 30.0
 
     # --- api ------------------------------------------------------------
     auth_required: bool = False
@@ -116,6 +121,12 @@ class Settings(BaseSettings):
     @property
     def use_embedded_qdrant(self) -> bool:
         return not self.qdrant_url
+
+    @property
+    def run_api_worker(self) -> bool:
+        if self.api_worker_enabled is not None:
+            return self.api_worker_enabled
+        return self.profile == "local" and self.use_embedded_qdrant
 
 
 @lru_cache(maxsize=1)

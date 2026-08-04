@@ -1,7 +1,8 @@
 # 性能特征与调优
 
-数据来自本机实测：Windows 10、Python 3.11、`local` profile（SQLite + 本地 FS + 嵌入式
-Qdrant）、`hash` 稠密嵌入、语料为 `book/` 下 202 部中文古籍（26 MB，主要为 UTF-16 txt）。
+当前 `local` profile 使用 SQLite + 本地 FS + 嵌入式 Qdrant + API 内置 worker。下列基线
+环境为 Windows 10、Python 3.11、202 部中文古籍（26 MB，主要为 UTF-16 txt）；它反映
+嵌入式模式的容量边界，不应直接外推到 server profile。
 
 ## 实测吞吐
 
@@ -29,12 +30,12 @@ Qdrant）、`hash` 稠密嵌入、语料为 `book/` 下 202 部中文古籍（26
 
 ## 提速手段（按性价比排序）
 
-**多开 worker**（server profile）。任务表用租约抢占，worker 之间不会重复处理同一任务，
-线性扩展：
+**切换 server profile 后多开 worker**。本地嵌入式目录只能由 API 进程持有，不能多开本地
+worker；任务表的租约机制让完整 server profile 可以直接水平扩展：
 ```bash
 docker compose up -d --scale worker=4
 ```
-`local` profile 做不到——嵌入式 Qdrant 对目录持独占锁，同一 `KB_DATA_DIR` 只能有一个进程。
+当前 local profile 在 API 内只启动一个 worker 线程，适合单机和中小语料。
 
 **放大 SQL 批大小**。`db/repo.py` 的 `_SQL_VAR_BATCH = 500` 是保守值（兼容老 SQLite 的
 999 参数上限）。现代 SQLite 与 PostgreSQL 都支持 32766，调到 5000 可显著减少语句数。
@@ -43,12 +44,12 @@ docker compose up -d --scale worker=4
 tokenize 的总量线性上升。512 是召回与成本的平衡点。
 
 **换 `fastembed` 未必更慢**。ONNX 批量推理（约 866 段/秒）比 Python 循环的 `hash` 投影
-快得多，瓶颈会从 CPU 循环转到向量库写入。`reembed --batch-size 256` 实测 22350 段约 5 分钟，
-其中嵌入只占约 30 秒，其余是嵌入式 Qdrant 的 upsert。
+快得多，瓶颈会从 CPU 循环转到向量库写入。`reembed --batch-size 256` 的耗时主要来自
+嵌入式 Qdrant 写入。
 
 ## 检索阶段
 
-在 22350 段的全量语料上实测（`local` profile，嵌入式 Qdrant，fastembed 512 维）：
+以下是在 22350 段全量语料上的**当前嵌入式模式基线**（fastembed 512 维）：
 
 ```json
 // 进程内第一次查询
@@ -63,11 +64,11 @@ tokenize 的总量线性上升。512 是召回与成本的平衡点。
 
 1. **`store_init` 7.4 秒**是嵌入式 Qdrant 打开 310MB 集合，**每进程一次**。常驻服务里只有
    第一次查询付这个代价，CLI 每次都付——所以别用 CLI 的耗时判断线上延迟。
-2. 热态下**稀疏检索占 93%**（5.4s / 5.8s）。 原因是嵌入式 Qdrant 对稀疏向量做全量扫描，而中文查询经
+2. 热态下**稀疏检索占 93%**（5.4s / 5.8s）。原因是嵌入式 Qdrant 对稀疏向量做全量扫描，而中文查询经
 字符 1/2-gram 展开后有几十个 term，每个都要扫全库。Qdrant 服务端对稀疏向量建**倒排索引**，
-这一项会降到几十毫秒——这是切 server profile 最直接的收益，比多开 worker 更急迫。
+这是语料继续增长时切换 server profile 的主要信号之一。
 
-在此之前的临时缓解：
+本地嵌入式模式的缓解方式如下：
 - `mode=dense` 单路检索只要约 350ms
 - 调小 `KB_RETRIEVAL_OVERFETCH`（默认 4）
 - 语料控制在 2 万段以内（Qdrant 自己在超过 20000 点时就会告警）
@@ -75,12 +76,12 @@ tokenize 的总量线性上升。512 是召回与成本的平衡点。
 `store_init` + `dense_search` + `sparse_search` 精确等于 `search`——分项对不上的计时是
 误导性的，有测试守着这个恒等式。融合与重排合计不到 10ms，调优空间不在那里。
 
-## 何时该换 Profile
+## 当前架构与扩容信号
 
 | 信号 | 动作 |
 |---|---|
-| 单 worker 追不上导入速度 | 切 server profile，扩 worker |
-| 需要 API 与 worker 同时运行 | 切 server profile（嵌入式 Qdrant 独占锁） |
-| **稀疏检索超过 1 秒** | Qdrant 服务模式——倒排索引，这是最先撞到的墙（约 2 万段） |
-| chunk 数超过百万级 | Qdrant 服务模式 + payload 索引（嵌入式模式索引无效） |
+| 单 worker 追不上导入速度 | 切 PostgreSQL + Qdrant Server profile，再增加独立 worker |
+| 需要 API 与 worker 同时运行 | local 默认在同一 API 进程中同时运行 |
+| **稀疏检索超过 1 秒** | 先调低 overfetch/控制语料；持续过慢则切 Qdrant Server |
+| chunk 数超过百万级 | 使用完整 server profile、Qdrant payload 索引并独立规划容量 |
 | 需要真实语义召回 | `KB_DENSE_PROVIDER=fastembed` 或 `openai`，然后 reindex |

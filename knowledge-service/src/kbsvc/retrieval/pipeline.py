@@ -164,9 +164,8 @@ class RetrievalService:
     def _run_retrievers(
         self, queries: list[str], mode: Mode, limit: int, flt: SearchFilter, tenant_id: str
     ) -> tuple[dict[str, list[SearchHit]], dict[str, float]]:
-        # Timed separately: opening an embedded Qdrant collection is lazy and can
-        # dominate the first query. Folding it into dense/sparse would make the
-        # sub-timings fail to add up to `search`, which is worse than slow.
+        # Timed separately: opening the default embedded collection is lazy and can
+        # dominate the first query. Keep it visible in timing reconciliation.
         started = time.perf_counter()
         store = get_vector_store()
         runs: dict[str, list[SearchHit]] = {}

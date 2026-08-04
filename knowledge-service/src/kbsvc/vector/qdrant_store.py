@@ -13,6 +13,8 @@ import gc
 import logging
 import shutil
 import time
+from collections.abc import Iterator
+from threading import RLock
 
 from qdrant_client import QdrantClient, models
 
@@ -35,10 +37,14 @@ class QdrantVectorStore:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self.collection = self.settings.qdrant_collection
+        self._local_lock = RLock() if self.settings.use_embedded_qdrant else None
         if self.settings.use_embedded_qdrant:
             path = self.settings.qdrant_local_path
             path.mkdir(parents=True, exist_ok=True)
-            self.client = QdrantClient(path=str(path))
+            self.client = QdrantClient(
+                path=str(path),
+                force_disable_check_same_thread=True,
+            )
         else:
             self.client = QdrantClient(
                 url=self.settings.qdrant_url,
@@ -47,25 +53,37 @@ class QdrantVectorStore:
             )
         self._ready = False
 
+    @contextlib.contextmanager
+    def _client_access(self) -> Iterator[None]:
+        """Serialize embedded operations shared by API and worker threads."""
+        if self._local_lock is None:
+            yield
+            return
+        with self._local_lock:
+            yield
+
     # --- lifecycle ------------------------------------------------------
 
     def ensure_collection(self, dim: int) -> None:
-        if self._ready:
-            return
-        if not self.client.collection_exists(self.collection):
-            self.client.create_collection(
-                collection_name=self.collection,
-                vectors_config={
-                    DENSE_VECTOR: models.VectorParams(size=dim, distance=models.Distance.COSINE)
-                },
-                sparse_vectors_config={SPARSE_VECTOR: models.SparseVectorParams()},
-            )
-            # Embedded Qdrant scans payloads directly; indexes only matter on a server.
-            if not self.settings.use_embedded_qdrant:
-                for field in _PAYLOAD_KEYWORD_INDEXES:
-                    self._create_index(field, models.PayloadSchemaType.KEYWORD)
-                self._create_index("is_current", models.PayloadSchemaType.BOOL)
-        self._ready = True
+        with self._client_access():
+            if self._ready:
+                return
+            if not self.client.collection_exists(self.collection):
+                self.client.create_collection(
+                    collection_name=self.collection,
+                    vectors_config={
+                        DENSE_VECTOR: models.VectorParams(
+                            size=dim, distance=models.Distance.COSINE
+                        )
+                    },
+                    sparse_vectors_config={SPARSE_VECTOR: models.SparseVectorParams()},
+                )
+                # Embedded Qdrant scans payloads directly; indexes matter on a server.
+                if not self.settings.use_embedded_qdrant:
+                    for field in _PAYLOAD_KEYWORD_INDEXES:
+                        self._create_index(field, models.PayloadSchemaType.KEYWORD)
+                    self._create_index("is_current", models.PayloadSchemaType.BOOL)
+            self._ready = True
 
     def recreate_collection(self, dim: int) -> None:
         """Drop and rebuild the collection.
@@ -73,14 +91,15 @@ class QdrantVectorStore:
         Required whenever the dense model changes: vector dimension and vector
         space are both baked into the collection at creation time.
         """
-        if self.client.collection_exists(self.collection):
-            self.client.delete_collection(self.collection)
-        self._ready = False
+        with self._client_access():
+            if self.client.collection_exists(self.collection):
+                self.client.delete_collection(self.collection)
+            self._ready = False
 
-        if self.settings.use_embedded_qdrant:
-            self._purge_local_collection()
+            if self.settings.use_embedded_qdrant:
+                self._purge_local_collection()
 
-        self.ensure_collection(dim)
+            self.ensure_collection(dim)
 
     def _purge_local_collection(self) -> None:
         """Physically remove an embedded collection and reopen the client.
@@ -121,7 +140,10 @@ class QdrantVectorStore:
                 {"path": str(target), "reason": str(last_error) if last_error else "still present"},
             )
 
-        self.client = QdrantClient(path=str(path))
+        self.client = QdrantClient(
+            path=str(path),
+            force_disable_check_same_thread=True,
+        )
         logger.info("purged embedded collection storage at %s", target)
 
     def _create_index(self, field: str, schema: models.PayloadSchemaType) -> None:
@@ -133,7 +155,7 @@ class QdrantVectorStore:
             logger.warning("payload index %s not created: %s", field, exc)
 
     def close(self) -> None:
-        with contextlib.suppress(Exception):  # best effort teardown
+        with self._client_access(), contextlib.suppress(Exception):
             self.client.close()
 
     # --- writes ---------------------------------------------------------
@@ -141,32 +163,34 @@ class QdrantVectorStore:
     def upsert(self, points: list[VectorPoint]) -> None:
         if not points:
             return
-        self.client.upsert(
-            collection_name=self.collection,
-            points=[
-                models.PointStruct(
-                    id=point.id,
-                    vector={
-                        DENSE_VECTOR: point.dense,
-                        SPARSE_VECTOR: models.SparseVector(
-                            indices=list(point.sparse), values=list(point.sparse.values())
-                        ),
-                    },
-                    payload=point.payload,
-                )
-                for point in points
-            ],
-            wait=True,
-        )
+        with self._client_access():
+            self.client.upsert(
+                collection_name=self.collection,
+                points=[
+                    models.PointStruct(
+                        id=point.id,
+                        vector={
+                            DENSE_VECTOR: point.dense,
+                            SPARSE_VECTOR: models.SparseVector(
+                                indices=list(point.sparse), values=list(point.sparse.values())
+                            ),
+                        },
+                        payload=point.payload,
+                    )
+                    for point in points
+                ],
+                wait=True,
+            )
 
     def delete_by_ids(self, ids: list[str]) -> None:
         if not ids:
             return
-        self.client.delete(
-            collection_name=self.collection,
-            points_selector=models.PointIdsList(points=ids),
-            wait=True,
-        )
+        with self._client_access():
+            self.client.delete(
+                collection_name=self.collection,
+                points_selector=models.PointIdsList(points=ids),
+                wait=True,
+            )
 
     def delete_by_document(self, tenant_id: str, document_id: str) -> None:
         self._delete_where(
@@ -189,13 +213,14 @@ class QdrantVectorStore:
         )
 
     def _delete_where(self, conditions: list) -> None:
-        if not self.client.collection_exists(self.collection):
-            return
-        self.client.delete(
-            collection_name=self.collection,
-            points_selector=models.FilterSelector(filter=models.Filter(must=conditions)),
-            wait=True,
-        )
+        with self._client_access():
+            if not self.client.collection_exists(self.collection):
+                return
+            self.client.delete(
+                collection_name=self.collection,
+                points_selector=models.FilterSelector(filter=models.Filter(must=conditions)),
+                wait=True,
+            )
 
     # --- reads ----------------------------------------------------------
 
@@ -224,20 +249,21 @@ class QdrantVectorStore:
         return models.Filter(must=must)
 
     def _query(self, query, using: str, limit: int, flt: SearchFilter) -> list[SearchHit]:
-        if not self.client.collection_exists(self.collection):
-            return []
-        response = self.client.query_points(
-            collection_name=self.collection,
-            query=query,
-            using=using,
-            limit=limit,
-            query_filter=self._build_filter(flt),
-            with_payload=True,
-        )
-        return [
-            SearchHit(id=str(point.id), score=float(point.score), payload=point.payload or {})
-            for point in response.points
-        ]
+        with self._client_access():
+            if not self.client.collection_exists(self.collection):
+                return []
+            response = self.client.query_points(
+                collection_name=self.collection,
+                query=query,
+                using=using,
+                limit=limit,
+                query_filter=self._build_filter(flt),
+                with_payload=True,
+            )
+            return [
+                SearchHit(id=str(point.id), score=float(point.score), payload=point.payload or {})
+                for point in response.points
+            ]
 
     def search_dense(
         self, vector: list[float], *, limit: int, flt: SearchFilter
@@ -253,17 +279,18 @@ class QdrantVectorStore:
         return self._query(query, SPARSE_VECTOR, limit, flt)
 
     def count(self, tenant_id: str | None = None) -> int:
-        if not self.client.collection_exists(self.collection):
-            return 0
-        count_filter = None
-        if tenant_id:
-            count_filter = models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="tenant_id", match=models.MatchValue(value=tenant_id)
-                    )
-                ]
-            )
-        return self.client.count(
-            collection_name=self.collection, count_filter=count_filter, exact=True
-        ).count
+        with self._client_access():
+            if not self.client.collection_exists(self.collection):
+                return 0
+            count_filter = None
+            if tenant_id:
+                count_filter = models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="tenant_id", match=models.MatchValue(value=tenant_id)
+                        )
+                    ]
+                )
+            return self.client.count(
+                collection_name=self.collection, count_filter=count_filter, exact=True
+            ).count

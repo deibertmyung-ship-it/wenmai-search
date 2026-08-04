@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="文脉检索项目 2026-08-04 问答整理">
+  <title>文脉检索项目 QA · 2026-08-04</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f7f4ed;
+      --surface: #fffdf8;
+      --ink: #20231f;
+      --muted: #667064;
+      --line: #d9ded4;
+      --brand: #1f6d55;
+      --brand-soft: #e4f1eb;
+      --warm: #a5592d;
+      --code: #18211d;
+      --shadow: 0 18px 50px rgba(42, 52, 45, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 0%, rgba(31, 109, 85, 0.11), transparent 32rem),
+        var(--paper);
+      font: 16px/1.75 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "Microsoft YaHei", sans-serif;
+    }
+
+    a { color: var(--brand); }
+
+    .shell {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    header {
+      padding: 64px 0 38px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow {
+      margin: 0 0 12px;
+      color: var(--brand);
+      font-size: 0.82rem;
+      font-weight: 750;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 800px;
+      margin: 0;
+      font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+      font-size: clamp(2.3rem, 6vw, 4.9rem);
+      font-weight: 650;
+      letter-spacing: -0.035em;
+      line-height: 1.05;
+    }
+
+    .lead {
+      max-width: 760px;
+      margin: 24px 0 0;
+      color: var(--muted);
+      font-size: 1.08rem;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    .pill {
+      padding: 5px 11px;
+      border: 1px solid #c7d8cf;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.58);
+      color: #395246;
+      font-size: 0.82rem;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 230px minmax(0, 1fr);
+      gap: 48px;
+      padding: 42px 0 72px;
+    }
+
+    aside {
+      position: sticky;
+      top: 24px;
+      align-self: start;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 253, 248, 0.78);
+      backdrop-filter: blur(10px);
+    }
+
+    aside strong {
+      display: block;
+      margin-bottom: 10px;
+      font-size: 0.83rem;
+      letter-spacing: 0.08em;
+    }
+
+    aside a {
+      display: block;
+      padding: 6px 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      text-decoration: none;
+    }
+
+    aside a:hover { color: var(--brand); }
+
+    main { min-width: 0; }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 48px;
+    }
+
+    .summary article {
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .summary span {
+      display: block;
+      color: var(--brand);
+      font-size: 1.6rem;
+      font-weight: 800;
+    }
+
+    .summary p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    section { scroll-margin-top: 22px; }
+
+    h2 {
+      margin: 52px 0 20px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--line);
+      font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
+      font-size: 1.7rem;
+    }
+
+    .qa {
+      margin: 0 0 18px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--surface);
+      box-shadow: 0 8px 30px rgba(42, 52, 45, 0.045);
+    }
+
+    .question {
+      margin: 0;
+      padding: 20px 22px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(100deg, var(--brand-soft), transparent 70%);
+      font-size: 1.05rem;
+      font-weight: 760;
+    }
+
+    .question::before {
+      content: "Q";
+      display: inline-grid;
+      width: 27px;
+      height: 27px;
+      margin-right: 10px;
+      place-items: center;
+      border-radius: 8px;
+      background: var(--brand);
+      color: white;
+      font: 750 0.78rem/1 system-ui, sans-serif;
+    }
+
+    .answer { padding: 21px 22px 23px; }
+
+    .answer > :first-child { margin-top: 0; }
+    .answer > :last-child { margin-bottom: 0; }
+
+    .answer strong { color: #164d3c; }
+
+    ul, ol { padding-left: 1.35rem; }
+
+    table {
+      width: 100%;
+      margin: 16px 0;
+      border-collapse: collapse;
+      font-size: 0.93rem;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th { background: #eef3ee; }
+
+    code {
+      padding: 0.12em 0.35em;
+      border-radius: 5px;
+      background: #edf0eb;
+      color: #2c4a3c;
+      font: 0.9em/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+
+    pre {
+      overflow-x: auto;
+      margin: 16px 0;
+      padding: 17px 18px;
+      border-radius: 13px;
+      background: var(--code);
+      color: #e9f2ed;
+      line-height: 1.6;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+      color: inherit;
+    }
+
+    .note {
+      margin: 16px 0;
+      padding: 13px 15px;
+      border-left: 4px solid var(--warm);
+      border-radius: 0 10px 10px 0;
+      background: #fff3e8;
+      color: #684128;
+    }
+
+    .flow {
+      padding: 15px 18px;
+      border-radius: 13px;
+      background: #edf5f0;
+      color: #244b3b;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      text-align: center;
+      word-spacing: 0.18em;
+    }
+
+    footer {
+      padding: 26px 0 40px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    @media (max-width: 840px) {
+      .layout { grid-template-columns: 1fr; }
+      aside { position: static; }
+      .summary { grid-template-columns: 1fr; }
+    }
+
+    @media print {
+      body { background: white; }
+      aside { display: none; }
+      .layout { display: block; }
+      .qa, .summary article { break-inside: avoid; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <p class="eyebrow">Wenmai Search · Daily Q&amp;A</p>
+      <h1>文脉检索项目<br>问答整理</h1>
+      <p class="lead">
+        汇总今天关于 GitHub 发布、文档解析、后台任务、Qdrant 与嵌入模型的提问和结论。
+        内容以当前项目代码及本地运行状态为准。
+      </p>
+      <div class="meta">
+        <span class="pill">日期：2026-08-04</span>
+        <span class="pill">项目：wenmai-search</span>
+        <span class="pill">格式：HTML</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="shell layout">
+    <aside aria-label="目录">
+      <strong>内容导航</strong>
+      <a href="#publish">项目发布</a>
+      <a href="#formats">文档格式与解析器</a>
+      <a href="#word-job">Word 任务问题</a>
+      <a href="#qdrant">Qdrant 基础</a>
+      <a href="#embedding">嵌入模型</a>
+      <a href="#actions">后续建议</a>
+    </aside>
+
+    <main>
+      <div class="summary" aria-label="核心结论">
+        <article>
+          <span>75</span>
+          <p>本次 Word 文档成功生成的知识分块数量</p>
+        </article>
+        <article>
+          <span>3</span>
+          <p>部署时默认安装的富文档解析器</p>
+        </article>
+        <article>
+          <span>512</span>
+          <p>当前 bge-small-zh-v1.5 的向量维度</p>
+        </article>
+      </div>
+
+      <section id="publish">
+        <h2>一、项目发布与仓库维护</h2>
+
+        <article class="qa">
+          <h3 class="question">项目如何上传到 GitHub，并建立 public 项目？</h3>
+          <div class="answer">
+            <p>
+              项目已经发布到公开 GitHub 仓库：
+              <a href="https://github.com/deibertmyung-ship-it/wenmai-search">deibertmyung-ship-it/wenmai-search</a>。
+              本地仓库的远程地址也已经同步为该仓库。
+            </p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">项目是否添加了 MIT 协议？</h3>
+          <div class="answer">
+            <p>已在项目根目录添加 <code>LICENSE</code>，使用 MIT License，允许使用、复制、修改、合并、发布和再分发，但需要保留版权及许可声明。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">原项目名和 README 不合适，如何处理？</h3>
+          <div class="answer">
+            <p>
+              项目已根据实际能力重命名为 <strong>文脉检索 / Wenmai Search</strong>，仓库名为
+              <code>wenmai-search</code>。README 已改为围绕知识检索、文档导入、混合检索、REST、MCP 和 Web 界面介绍项目。
+            </p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">前期要求“合并”的修改如何理解？</h3>
+          <div class="answer">
+            <p>前期项目命名、README、许可证及仓库发布相关修改已完成合并。今天新增的解析器默认依赖修改目前属于本地工作区修改，提交和推送前仍应复查差异。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="formats">
+        <h2>二、文档格式与解析器</h2>
+
+        <article class="qa">
+          <h3 class="question">项目目前支持解析哪些文档格式？</h3>
+          <div class="answer">
+            <table>
+              <thead>
+                <tr><th>解析器</th><th>主要格式</th><th>说明</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>内置 TextParser</td>
+                  <td>txt、md、markdown、text、rst、log、csv</td>
+                  <td>直接解析，不需要模型或外部服务</td>
+                </tr>
+                <tr>
+                  <td>Docling</td>
+                  <td>pdf、docx、pptx、xlsx、html、图片等</td>
+                  <td>默认富文档解析器</td>
+                </tr>
+                <tr>
+                  <td>Unstructured</td>
+                  <td>doc、ppt、xls、epub、eml、msg、rtf、odt，以及常见 PDF/Office/图片</td>
+                  <td>Docling 失败时的通用降级解析器</td>
+                </tr>
+                <tr>
+                  <td>Marker</td>
+                  <td>pdf</td>
+                  <td>面向 PDF 的高质量兜底解析器</td>
+                </tr>
+              </tbody>
+            </table>
+            <p>默认解析链为：<code>docling → unstructured → marker</code>；纯文本输入始终优先使用内置解析器。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">部署时是否会自动安装 Docling、Unstructured、Marker？</h3>
+          <div class="answer">
+            <p>
+              已将三者从可选依赖调整为后端核心依赖。标准 Python 安装和 Docker 镜像构建都会安装三种解析器；Docker 还会安装
+              <code>libmagic</code>、Poppler、Tesseract 等常见 PDF/OCR 系统组件，并在构建阶段校验项目实际使用的 import 路径。
+            </p>
+            <div class="note">Marker 当前固定在兼容现有适配器的 1.x 版本，避免 2.x 公共 API 变化导致运行时错误。</div>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">安装三个解析库后，还需要配置相关 API 吗？</h3>
+          <div class="answer">
+            <p><strong>不需要。</strong>当前实现中三者都在本机进程内解析：</p>
+            <ul>
+              <li>Docling 使用本地 <code>DocumentConverter</code>。</li>
+              <li>Unstructured 使用本地 <code>partition</code>。</li>
+              <li>Marker 使用本地模型推理。</li>
+            </ul>
+            <p>部分 PDF/OCR 首次解析可能下载模型权重，因此需要允许首次联网或预先准备模型缓存，但这不是解析 API，也不需要 API Key。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="word-job">
+        <h2>三、Word 上传与后台任务</h2>
+
+        <article class="qa">
+          <h3 class="question">为什么上传 Word 后任务一直未完成？</h3>
+          <div class="answer">
+            <p>诊断时发现两个独立问题：</p>
+            <ol>
+              <li>任务状态为 <code>pending</code>、尝试次数为 0，说明没有 worker 领取任务。</li>
+              <li>当时环境没有安装 Docling、Unstructured 或 Marker；即使 worker 启动，DOCX 解析也会因缺少依赖失败。</li>
+            </ol>
+            <p>
+              处理后，文档“承载网规划管理岗位知识点汇编.docx”状态已变为 <code>completed</code>，成功生成
+              <strong>75 个 chunk</strong>，当前版本已写入索引。
+            </p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">为什么上传后不自动解析，还要手动运行 run.bat worker？</h3>
+          <div class="answer">
+            <p>问题发生时，本地工作流把“登记任务”和“执行任务”分开：</p>
+            <div class="flow">Web 上传 → 文件落盘 → 创建 pending 任务 → worker 解析/切分/嵌入/索引</div>
+            <p>旧版 <code>run.bat</code> 只启动 API 和 Web，不启动常驻 worker。安装解析库只能保证 worker 能解析文件，不能自动启动 worker。</p>
+            <p>
+              另外，旧版本地使用嵌入式 Qdrant，同一数据目录不能由独立 API 与 worker 进程同时占用。因此
+              <code>run.bat worker</code> 会暂时停止 API、排空队列，然后恢复 API。
+            </p>
+            <div class="note">该限制现已解决：本地仍使用嵌入式 Qdrant，但 worker 改为 API 进程内的常驻线程，与请求线程共享同一个 Qdrant 客户端。</div>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">正式部署后也需要手工运行 worker 吗？</h3>
+          <div class="answer">
+            <p>
+              不需要。完整 server profile 使用独立常驻 worker；Windows local profile 由 API 生命周期
+              自动启动内置 worker。<code>run.bat worker</code> 仅作为兼容命令重启整个本地栈。
+            </p>
+          </div>
+        </article>
+      </section>
+
+      <section id="qdrant">
+        <h2>四、Qdrant 基础</h2>
+
+        <article class="qa">
+          <h3 class="question">Qdrant 是什么？</h3>
+          <div class="answer">
+            <p>Qdrant 是一个向量数据库，用于保存文档向量并查找语义最相近的内容。它不负责解析 Word，也不负责生成最终回答。</p>
+            <div class="flow">文档 → 解析文字 → 切分 chunk → 嵌入模型生成向量 → Qdrant 保存并检索</div>
+            <p>
+              例如用户搜索“光缆一公里有多少延迟”，即使原文写的是“光纤传输 1km 的时延约为 5μs”，向量检索仍有机会根据语义相似度找到它。
+            </p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">“本地使用嵌入式 Qdrant”是什么模式？</h3>
+          <div class="answer">
+            <p>“嵌入式”表示 Qdrant 不作为独立服务运行，而是由 Python 直接打开本地目录：</p>
+            <pre><code>QdrantClient(path=".kbdata/qdrant")</code></pre>
+            <table>
+              <thead><tr><th>模式</th><th>优点</th><th>限制</th></tr></thead>
+              <tbody>
+                <tr><td>嵌入式 Qdrant</td><td>无需 Docker、端口和独立服务</td><td>本地目录有进程独占限制</td></tr>
+                <tr><td>Qdrant Server</td><td>API 与多个 worker 可同时连接</td><td>需要运行服务或容器</td></tr>
+              </tbody>
+            </table>
+            <p>这里的“嵌入式”是部署方式，不是“文本嵌入模型”。当前项目本地默认使用该模式，数据位于 <code>.kbdata/qdrant</code>；server profile 才使用独立 Qdrant Server。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">什么是 Sparse 检索？</h3>
+          <div class="answer">
+            <p>Sparse（稀疏）检索主要依据关键词、字符或词项是否匹配。本项目使用字符 1-gram / 2-gram 与 BM25，特别适合中文专有名词、设备编号、标准号和原文措辞。</p>
+            <table>
+              <thead><tr><th>检索方式</th><th>判断依据</th><th>擅长场景</th></tr></thead>
+              <tbody>
+                <tr><td>Sparse / BM25</td><td>关键词和字符匹配</td><td>G.655、PTN7900、5μs/km 等精确内容</td></tr>
+                <tr><td>Dense / 向量</td><td>语义相似度</td><td>查询与原文说法不同但意思相近</td></tr>
+              </tbody>
+            </table>
+            <p>项目将两路结果通过 RRF 融合：Dense 负责“意思像不像”，Sparse 负责“关键词对不对”。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">本地切换到独立 Qdrant Server 和常驻 worker，工程量和依赖大吗？为什么最初没有默认这样设计？</h3>
+          <div class="answer">
+            <p>核心后端原本就支持 <code>KB_QDRANT_URL</code> 和常驻 <code>kbsvc worker</code>，所以改造量主要在本地编排、进程管理、健康检查、日志和旧索引迁移，属于小到中等工程。</p>
+            <p>无需新增 Python 依赖；需要 Docker Desktop（或 Docker Engine）运行 Qdrant Server。最初选择嵌入式模式，是为了做到不安装 Docker 即可演示，但牺牲了 API 与 worker 并行运行能力。</p>
+            <p>曾完成独立 Qdrant Server 方案，但评估 Docker 依赖后，最终本地方案调整为：</p>
+            <div class="flow">SQLite + 本地文件存储 + 嵌入式 Qdrant + API 内置 worker</div>
+            <ul>
+              <li><code>run.bat</code> 只启动 API 与 Web，不需要 Docker。</li>
+              <li>上传任务自动处理，不再要求手动排空队列。</li>
+              <li>API 请求与 worker 线程共享进程级 Qdrant 单例，并串行化嵌入式读写。</li>
+              <li>需要多 API 或多 worker 时，再切换完整 server profile。</li>
+            </ul>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">为什么独立 Qdrant 方案需要 Docker？没有 Docker 能否实现？</h3>
+          <div class="answer">
+            <p>Qdrant 本身不强制依赖 Docker；Docker 只是负责稳定运行独立服务、固定版本、映射端口和保存数据卷。也可以使用原生 Qdrant、WSL、Podman 或远程 Qdrant。</p>
+            <p>对于本项目的单机使用场景，最终选择更轻量的无 Docker 方案：将 worker 放进 API 进程，使它和请求线程共享嵌入式 Qdrant。代价是本地只能运行一个 API 进程、不能水平扩展 worker。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="embedding">
+        <h2>五、嵌入模型与自定义</h2>
+
+        <article class="qa">
+          <h3 class="question">本项目实际使用哪个嵌入模型？</h3>
+          <div class="answer">
+            <p>通过 <code>run.bat</code> 启动时，当前实际配置为：</p>
+            <ul>
+              <li>Provider：<code>fastembed</code></li>
+              <li>模型：<code>BAAI/bge-small-zh-v1.5</code></li>
+              <li>向量维度：模型自动检测为 <code>512</code></li>
+              <li>Sparse 检索：字符级 BM25，不需要神经网络模型</li>
+            </ul>
+            <p>代码的零配置兜底是 <code>hash</code> 384 维，它用于离线测试，不是真正的语义嵌入模型。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">默认嵌入模型能否自定义？</h3>
+          <div class="answer">
+            <p>可以。主要环境变量如下：</p>
+            <table>
+              <thead><tr><th>环境变量</th><th>用途</th></tr></thead>
+              <tbody>
+                <tr><td><code>KB_DENSE_PROVIDER</code></td><td><code>fastembed</code>、<code>openai</code> 或 <code>hash</code></td></tr>
+                <tr><td><code>KB_DENSE_MODEL</code></td><td>模型名称</td></tr>
+                <tr><td><code>KB_DENSE_DIM</code></td><td>向量维度；FastEmbed 会优先探测实际维度</td></tr>
+                <tr><td><code>KB_DENSE_BATCH_SIZE</code></td><td>嵌入批大小</td></tr>
+                <tr><td><code>KB_MODEL_CACHE_DIR</code></td><td>本地模型缓存目录</td></tr>
+                <tr><td><code>KB_OPENAI_BASE_URL</code></td><td>OpenAI 兼容嵌入服务地址</td></tr>
+                <tr><td><code>KB_OPENAI_API_KEY</code></td><td>OpenAI 兼容服务密钥</td></tr>
+              </tbody>
+            </table>
+            <p>本地 <code>run.bat</code> 会提供 FastEmbed 默认值，但尊重外部已经设置的环境变量；自定义 provider 和模型无需再修改脚本硬编码。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">更换嵌入模型后，已有文档需要重新上传吗？</h3>
+          <div class="answer">
+            <p>不需要重新上传或重新解析，但必须重新生成全部向量：</p>
+            <pre><code>run.bat reembed</code></pre>
+            <p><code>reembed</code> 会复用已经保存的 chunk，重建 Qdrant 集合。若不重建，新旧向量语义空间不一致；维度不同时还会直接报错。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="actions">
+        <h2>六、改造结论与后续建议</h2>
+        <article class="qa">
+          <h3 class="question">当前最值得继续优化的地方是什么？</h3>
+          <div class="answer">
+            <ol>
+              <li><strong>本地上传体验：</strong>已切换为嵌入式 Qdrant + API 内置常驻 worker，无需 Docker。</li>
+              <li><strong>预热解析模型：</strong>部署阶段提前下载 Docling/Marker 权重，避免首次解析等待。</li>
+              <li><strong>统一模型配置：</strong><code>run.bat</code> 已改为尊重外部环境变量。</li>
+              <li><strong>提交本次依赖修改：</strong>复查后提交并推送解析器核心依赖、Dockerfile 和文档改动。</li>
+            </ol>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <footer>
+    <div class="shell">
+      本文档根据 2026-08-04 的项目问答整理生成。运行状态、依赖版本和部署方式以后续代码变更为准。
+    </div>
+  </footer>
+</body>
+</html>

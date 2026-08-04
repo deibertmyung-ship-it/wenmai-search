@@ -27,9 +27,9 @@ class UnstructuredParser:
     def parse(self, data: bytes, *, filename: str, mime: str) -> ParsedDocument:
         try:
             from unstructured.partition.auto import partition
-        except ImportError as exc:  # pragma: no cover - optional extra
+        except ImportError as exc:  # pragma: no cover - broken deployment
             raise DependencyMissingError(
-                "unstructured is not installed; install kbsvc[unstructured]"
+                "unstructured is not installed; reinstall kbsvc and verify deployment dependencies"
             ) from exc
         try:
             from importlib.metadata import version as pkg_version
@@ -44,7 +44,7 @@ class UnstructuredParser:
             temp_path = Path(handle.name)
         try:
             elements = partition(filename=str(temp_path))
-        except Exception as exc:  # pragma: no cover - optional extra
+        except Exception as exc:  # pragma: no cover - external document formats
             raise ParserError(f"unstructured failed to parse {filename}: {exc}") from exc
         finally:
             temp_path.unlink(missing_ok=True)

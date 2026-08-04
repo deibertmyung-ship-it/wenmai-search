@@ -1,25 +1,36 @@
 # 运维手册
 
-## 1. 本地起步（无 Docker）
+## 1. 本地起步（SQLite + LocalFS + Embedded Qdrant）
 
-```bash
+本地模式不需要 Docker。完成 Python 环境后，从仓库根目录使用统一脚本：
+
+```powershell
+cd knowledge-service
 uv venv --python 3.11 .venv
-uv pip install --python .venv -e ".[dev]"
+uv pip install --python .venv -e ".[dev,fastembed]"
 
-export KB_DATA_DIR="$PWD/.kbdata"
-python -m kbsvc.cli init
-python -m kbsvc.cli ingest ../book --source guji --patterns "*.txt,*.md"
-python -m kbsvc.cli search "贼克如何取用神" --top-k 5
+cd ../knowledge-web
+uv venv --python 3.11 .venv
+uv pip install --python .venv -e ".[dev,prod]"
+
+cd ..
+run.bat               # API（嵌入式 Qdrant + worker）→ Web
+run.bat status
+run.bat stop
 ```
 
-数据全部落在 `KB_DATA_DIR`：
+`run.bat` 首次启动会创建 SQLite 和嵌入式 Qdrant 集合。应用数据位于 `KB_DATA_DIR`：
 ```
 .kbdata/
 ├── kbsvc.db        # SQLite 元数据
 ├── objects/        # 原始文件（按 hash 派生 key）
-└── qdrant/         # 嵌入式向量库
+├── models/         # 本地 embedding / parser 模型
+└── qdrant/         # 嵌入式 Qdrant 数据
 ```
-删除该目录 = 完全重置。
+
+API 生命周期会启动一个后台 worker 线程，并与请求线程共享同一个 Qdrant 客户端。停止 API
+会同时停止 worker。不要在 API 运行期间另开 `kbsvc worker`、`kbsvc search` 或本地 stdio MCP
+进程访问同一 `.kbdata/qdrant`，否则第二个进程会因目录独占锁失败。
 
 ## 2. 服务端 Profile
 
@@ -46,7 +57,9 @@ docker compose up -d --scale worker=4      # 按吞吐扩 worker
 
 ## 4. 常见排障
 
-**任务卡在 `pending`** — worker 没起。`kbsvc worker --once` 手动排空，或看 `docker compose logs worker`。
+**任务卡在 `pending`** — 先执行 `run.bat status`。本地 worker 与 API 共用
+`logs/kbsvc.log`；执行 `run.bat restart` 会同时重启 API 内置 worker 与 Web。server profile
+查看 `docker compose logs worker`。
 
 **任务 `failed`** — 查错误后重试：
 ```bash
@@ -54,7 +67,10 @@ curl -s localhost:8077/v1/jobs?state=failed | jq '.[] | {id, last_error}'
 curl -X POST localhost:8077/v1/jobs/<id>/retry
 ```
 
-**PDF 解析失败** — 默认没装 docling。`pip install '.[docling]'`；仍失败则链路会自动降级到 unstructured / marker（需各自安装）。实际生效的解析器记录在 `document_version.parser`。
+**PDF/Office 解析失败** — Docling、Unstructured 与 Marker 已默认安装；先执行
+`python -c "import docling, unstructured, marker"` 检查部署完整性。若 import 正常，查看 job 的
+`last_error` 判断是否缺少模型权重或系统组件；链路会按 Docling → Unstructured → Marker 自动降级。
+实际生效的解析器记录在 `document_version.parser`。
 
 **检索召回差** —
 1. 先 `debug: true` 看 `retrievers.dense` 与 `retrievers.sparse` 各自命中了什么。
@@ -62,12 +78,11 @@ curl -X POST localhost:8077/v1/jobs/<id>/retry
 3. 只有 dense 有结果 → 查询词在语料里不以原字出现，属正常。
 4. 两路都为空 → 检查 `filter`：`current_only` 与 `acl` 是最常见的误杀。
 
-**embedded Qdrant 报锁冲突** — 同一 `KB_DATA_DIR` 只能有一个进程持有。要同时跑 API 与 worker，请切到 server profile（Qdrant 服务模式）。
+**Qdrant 目录被占用** — 本地嵌入式 Qdrant 只允许一个进程持有 `.kbdata/qdrant`。先执行
+`run.bat stop`，并关闭仍在运行的 `kbsvc search`、`kbsvc worker` 或 stdio MCP 进程，再重新启动。
 
-**换了 embedding 模型** — 见第 8 节，用 ，不需要手工删目录。```bash
-rm -rf "$KB_DATA_DIR/qdrant"          # 或 server 上删 collection
-# 逐文档重新入队（reindex job 复用已存的原始字节，不需要重新上传）
-```
+**换了 embedding 模型** — 见第 8 节，使用 `run.bat reembed` 或 `kbsvc reembed`，不需要
+删除原始文件或重新解析文档。
 
 ## 5. 一致性保证
 
@@ -82,7 +97,7 @@ rm -rf "$KB_DATA_DIR/qdrant"          # 或 server 上删 collection
 |---|---|
 | 元数据 | `pg_dump` / 复制 `kbsvc.db` |
 | 原始文件 | S3 bucket / `objects/` 目录 |
-| 向量 | Qdrant snapshot / `qdrant/` 目录 |
+| 向量 | server 使用 Qdrant snapshot；local 停止 API 后复制 `qdrant/` |
 
 原始文件是唯一不可再生的部分——向量与 chunk 都能从它重建。优先保它。
 
@@ -97,12 +112,16 @@ rm -rf "$KB_DATA_DIR/qdrant"          # 或 server 上删 collection
       "args": ["-m", "kbsvc.cli", "mcp", "--transport", "stdio"],
       "env": {
         "KB_DATA_DIR": "C:/path/to/knowledge-service/.kbdata",
+        "KB_QDRANT_URL": "",
         "PYTHONIOENCODING": "utf-8"
       }
     }
   }
 }
 ```
+
+嵌入式目录不能跨进程共享：运行上述 stdio MCP 前必须先 `run.bat stop`。若需要 Web/API 与
+stdio MCP 同时在线，应改用 server profile 的 Qdrant Server，或让客户端连接远程 MCP。
 
 **远程 streamable-http**：
 ```json
@@ -125,11 +144,12 @@ export KB_DENSE_PROVIDER=fastembed
 export KB_DENSE_MODEL=BAAI/bge-small-zh-v1.5     # 512 维，92MB
 
 # 3) 重建向量（不重新解析原文件）
+# Windows 本地一键方式：从仓库根目录运行 run.bat reembed
 kbsvc reembed --batch-size 256
 ```
 
 `reembed` 从**已存的 chunk 表**重新计算向量：chunk_id、字符偏移、heading_path 都与模型
-无关，因此不需要重跑解析与切分。202 部古籍 / 22350 段的实测约 5 分钟。
+无关，因此不需要重跑解析与切分。耗时取决于模型、CPU 和 Qdrant 写入速度。
 
 只有改了切分参数（`KB_CHUNK_*`）才需要走 `reindex`——那会从对象存储里的原始文件重新解析。
 
@@ -159,14 +179,14 @@ Hub，在受限网络上会挂住数分钟而不是快速失败。
 
 ### 换模型必须重建
 
-向量维度与向量空间在建集合时就固定了。`reembed` 默认会重建集合（`--keep-collection`
-仅在维度不变时可用）。嵌入式 Qdrant 下，kbsvc 会物理删除集合目录——`delete_collection`
-在本地模式只改配置、不清向量存储，不删目录就会在 upsert 时报维度不匹配。
+向量维度与向量空间在建集合时就固定了。`reembed` 默认会重建当前 Qdrant 集合；
+`--keep-collection` 仅在维度不变且执行断点续跑时使用。只改模型配置而不重建，会导致
+语义空间不一致或在 upsert 时出现维度不匹配。
 
 ### reembed 期间索引不可用
 
-`reembed` 会先删掉集合再逐批写入，**重建过程中检索返回空结果**。22350 段实测需要
-30–60 分钟（嵌入只占约 30 秒，其余是嵌入式 Qdrant 的 upsert，且随集合增大而变慢）。
+`reembed` 会先删掉集合再逐批写入，**重建过程中检索返回空结果**。本地 `run.bat reembed`
+会先停止 API（包含 worker）和 Web，完成后自动恢复全部服务，避免并发写入旧集合。
 
 ### 中途被打断怎么办
 
@@ -206,5 +226,5 @@ KB_QDRANT_COLLECTION=kb_chunks_v2 kbsvc search "贼克" --top-k 3
 export KB_QDRANT_COLLECTION=kb_chunks_v2
 ```
 
-首版没有把这套切换做成一条命令——它需要集合别名，而别名只有 Qdrant 服务端支持，
-嵌入式模式没有。`local` profile 下只能接受这段停机。
+server profile 可进一步实现集合别名原子切换；local 嵌入式模式不支持零停机切换，
+`run.bat reembed` 会先停止 API 与 Web，再采用更简单可靠的停机重建策略。

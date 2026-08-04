@@ -9,20 +9,21 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "sqlalchemy>=2.0.36",
-    "qdrant-client>=1.12",
+    "qdrant-client>=1.18,<1.19",
     "httpx>=0.27",
     "typer>=0.15",
     "python-multipart>=0.0.12",
     "mcp>=1.2",
+    "docling>=2.15",
+    "unstructured[all-docs]>=0.16",
+    # Marker 2.x has a different public API; the parser adapter targets 1.x.
+    "marker-pdf>=1.2,<2.0",
 ]
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.2"]
 s3 = ["boto3>=1.35"]
 fastembed = ["fastembed>=0.4"]
-docling = ["docling>=2.15"]
-unstructured = ["unstructured[all-docs]>=0.16"]
-marker = ["marker-pdf>=1.2"]
 rerank = ["sentence-transformers>=3.3"]
 dev = ["pytest>=8.3", "pytest-cov>=6.0", "ruff>=0.8"]
 
