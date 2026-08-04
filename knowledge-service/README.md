@@ -11,30 +11,33 @@
                                                                 (rewrite→fuse→rerank→citation)
 ```
 
-## 为什么能直接跑
+## 本地默认架构
 
-默认 `local` profile **不需要 Docker、不需要外部服务、不下载任何模型**：
+默认 `local` profile 无外部基础设施依赖，业务数据全部保存在本地：
 
 | 组件 | local（默认） | server |
 |---|---|---|
 | 元数据 | SQLite | PostgreSQL |
 | 对象存储 | 本地文件系统 | S3 / MinIO |
-| 向量库 | Qdrant 嵌入式 | Qdrant 服务 |
-| 队列 | 元数据库 + 租约 | 同左（可水平扩 worker） |
+| 向量库 | API 进程内嵌 Qdrant | Qdrant Server |
+| 队列 | SQLite + 租约 + API 内置 worker 线程 | PostgreSQL + 租约，可水平扩 worker |
 
-切换只改 `.env`。`deploy/docker-compose.yml` 已备好 server profile。
+根目录 `run.bat` 启动 API 与 Web；API 生命周期负责启动和停止内置 worker，并与请求线程
+共享同一个嵌入式 Qdrant 客户端。完整 server profile 仍使用 `deploy/docker-compose.yml`。
 
 ## 60 秒上手
 
-```bash
+```powershell
 uv venv --python 3.11 .venv
-uv pip install --python .venv -e ".[dev]"
+uv pip install --python .venv -e ".[dev,fastembed]"
 
-export KB_DATA_DIR="$PWD/.kbdata"
-python -m kbsvc.cli init
-python -m kbsvc.cli ingest ../book --source guji --patterns "*.txt,*.md"
-python -m kbsvc.cli search "贼克如何取用神" --top-k 5
+cd ..
+run.bat
 ```
+
+`run.bat` 会自动初始化数据库并在 API 内启动常驻 worker，随后可通过 Web 上传文档。若要在
+`knowledge-service` 目录运行 `python -m kbsvc.cli ingest ...`，请先停止 API，避免第二个进程
+争用嵌入式 Qdrant 目录。
 
 ```
 [1] 六壬存验-清-吴师青 › 一、断例
@@ -57,7 +60,8 @@ Qdrant point，不产生脏数据。文件 sha256 未变则整个跳过。
 
 **上传只落盘 + 入队。** 解析、切分、嵌入、索引全部由 worker 按状态机执行：
 `pending → parsing → chunking → embedding → indexing → completed`，失败指数退避重试，
-超限进 `failed` 并保留错误。worker 用租约抢占任务，崩溃后任务自动被接管。
+超限进 `failed` 并保留错误。local worker 是 API 内的单线程，server worker 是独立进程；
+二者都使用租约抢占任务，崩溃后任务可被重新接管。
 
 **每个 chunk 都能追回原文。** 携带 `char_start/char_end`（对齐解析后全文）、
 `heading_path`、`page_from/page_to`、`bbox`、`source_uri`、`parser_version`。
@@ -77,13 +81,15 @@ Qdrant point，不产生脏数据。文件 sha256 未变则整个跳过。
 
 | 维度 | 默认 | 可选 |
 |---|---|---|
-| 解析 | `text`（txt/md 内置） | `docling`(默认 PDF/Office) → `unstructured` → `marker` 自动降级 |
+| 解析 | `text`（txt/md 内置） | `docling`（PDF/Office）→ `unstructured` → `marker` 自动降级，三者默认安装 |
 | 稠密嵌入 | `hash`（离线确定性） | **`fastembed`（本地 ONNX，本仓库已切到 bge-small-zh-v1.5 / 512 维）**、`openai`（任意兼容端点） |
 | 重排 | `lexical`（离线） | `none`、`cross-encoder` |
 | 存储 | 本地 FS | S3 / MinIO |
 | 元数据 | SQLite | PostgreSQL |
 
-装可选依赖：`pip install '.[docling]' '.[fastembed]' '.[postgres,s3]'`
+Docling、Unstructured 与 Marker 随后端默认安装；它们在当前本地解析链中不需要第三方 API。
+可选基础设施依赖：`pip install '.[fastembed]' '.[postgres,s3]'`。
+部分 PDF/OCR 首次解析会下载本地模型权重，因此生产环境应允许首次下载或预热模型缓存。
 
 > `hash` 稠密嵌入不是语义模型，是字符 n-gram 的确定性随机投影。它保证零配置可跑通、
 > 可测试；语义召回由 `fastembed`/`openai` 提供。稀疏侧无论如何都是真实 BM25。

@@ -32,20 +32,34 @@
 ┌────────┐ ┌──────────┐ ┌─────────────┐
 │ 元数据  │ │ 对象存储  │ │ 向量库       │
 │ PG/SQLite│ │ S3/MinIO │ │ Qdrant      │
-│         │ │ /LocalFS │ │ (server/嵌入)│
+│         │ │ /LocalFS │ │ Server      │
 └────────┘ └──────────┘ └─────────────┘
 ```
 
 ## 2. 两套 Profile（同一份代码）
 
-| 组件 | `local`（默认，零外部依赖） | `server`（生产） |
+| 组件 | `local`（默认） | `server`（生产） |
 |---|---|---|
 | 元数据库 | SQLite | PostgreSQL 16 |
 | 对象存储 | 本地文件系统 | S3 / MinIO |
-| 向量库 | Qdrant 嵌入式（`path=`） | Qdrant 服务（gRPC/HTTP） |
-| 队列 | 元数据库中的 `ingest_job` 表 + 租约（lease） | 同左（同一实现，可水平扩 worker） |
+| 向量库 | API 进程内嵌 Qdrant（本地目录） | Qdrant Server（HTTP） |
+| 队列 | SQLite `ingest_job` + API 内置 worker 线程 | PostgreSQL `ingest_job` + 可水平扩 worker |
 
-切换只改 `.env`，不改代码。`server` 的 `deploy/docker-compose.yml` 已就绪。
+`local` 不依赖 Docker。SQLite、原始文件和 Qdrant 数据均在 `KB_DATA_DIR`；根目录
+`run.bat` 只需编排 API 与 Web：
+
+```text
+Web ──HTTP──▶ API 进程
+              ├── SQLite / LocalFS
+              ├── embedded Qdrant（进程级单例）
+              └── 常驻 worker 线程 ◀── ingest_job
+```
+
+API 请求线程与 worker 线程共享进程级 Qdrant 单例；适配器允许跨线程访问并用可重入锁
+串行化嵌入式读写，因此只有一个进程持有目录锁，Web 上传后仍可自动处理。该模式只允许
+一个 API 进程，不支持本地多 worker；需要多进程或扩容时切换完整 `server` profile 的
+PostgreSQL、S3/MinIO、Qdrant Server 与独立 worker。
+
 选择"数据库即队列 + 租约"而不是 Redis/Celery：worker 崩溃后租约到期任务自动回收，无额外中间件，且 SQLite/PG 语义一致。
 
 ## 3. 核心不变量
@@ -96,7 +110,7 @@ ParsedDocument
 | 3 | `unstructured` | docling 失败时的兜底 |
 | 4 | `marker` | 学术 PDF 高保真兜底 |
 
-fallback 链可配置 `KB_PARSER_CHAIN=docling,unstructured,marker`，逐个尝试，记录最终 `parser`/`parser_version` 到 version 表与 chunk payload。Docling/Unstructured/Marker 是**可选 extras**，不装也能跑（纯文本链路完整可用）。
+fallback 链可配置 `KB_PARSER_CHAIN=docling,unstructured,marker`，逐个尝试，记录最终 `parser`/`parser_version` 到 version 表与 chunk payload。Docling、Unstructured 与 Marker 是后端核心依赖，标准安装和 Docker 镜像都会安装；三者均在本地进程中解析，不要求第三方解析 API。
 
 ## 6. 切分：结构感知 + 可追溯
 

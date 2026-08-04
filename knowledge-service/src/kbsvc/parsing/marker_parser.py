@@ -27,9 +27,9 @@ class MarkerParser:
             from marker.converters.pdf import PdfConverter
             from marker.models import create_model_dict
             from marker.output import text_from_rendered
-        except ImportError as exc:  # pragma: no cover - optional extra
+        except ImportError as exc:  # pragma: no cover - broken deployment
             raise DependencyMissingError(
-                "marker-pdf is not installed; install kbsvc[marker]"
+                "marker-pdf is not installed; reinstall kbsvc and verify deployment dependencies"
             ) from exc
         try:
             from importlib.metadata import version as pkg_version
@@ -47,7 +47,7 @@ class MarkerParser:
         try:
             rendered = self._converter(str(temp_path))
             markdown, _, _ = text_from_rendered(rendered)
-        except Exception as exc:  # pragma: no cover - optional extra
+        except Exception as exc:  # pragma: no cover - model/runtime dependent
             raise ParserError(f"marker failed to parse {filename}: {exc}") from exc
         finally:
             temp_path.unlink(missing_ok=True)

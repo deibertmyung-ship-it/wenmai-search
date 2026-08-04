@@ -2,24 +2,71 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
+from threading import Event, Thread
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from ..config import get_settings
 from ..db.session import init_db
+from ..embedding import get_dense_embedder
 from ..errors import KbError
+from ..ingest.worker import IngestWorker
+from ..vector import get_vector_store, reset_vector_store
 from .routers import admin, documents, ingest, search, sources
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(app: FastAPI):
+    settings = get_settings()
     init_db()
-    yield
+    stop_event: Event | None = None
+    worker_thread: Thread | None = None
+
+    app.state.ingest_worker_thread = None
+    if settings.run_api_worker:
+        # Initialize expensive process-wide singletons before request and worker
+        # threads can race to create separate embedded Qdrant/model instances.
+        embedder = get_dense_embedder()
+        get_vector_store().ensure_collection(embedder.dim)
+
+        stop_event = Event()
+        worker = IngestWorker(settings=settings, owner="api-embedded-worker")
+
+        def run_worker() -> None:
+            try:
+                worker.run_forever(stop_event=stop_event)
+            except Exception:
+                logger.exception("API-embedded ingest worker stopped unexpectedly")
+
+        worker_thread = Thread(
+            target=run_worker,
+            name="kbsvc-ingest-worker",
+            daemon=True,
+        )
+        app.state.ingest_worker_thread = worker_thread
+        worker_thread.start()
+        logger.info("started API-embedded ingest worker")
+
+    try:
+        yield
+    finally:
+        if stop_event is not None and worker_thread is not None:
+            stop_event.set()
+            await asyncio.to_thread(worker_thread.join, settings.api_worker_shutdown_timeout)
+            if worker_thread.is_alive():
+                logger.warning(
+                    "ingest worker did not stop within %.1fs; current lease will be reclaimed",
+                    settings.api_worker_shutdown_timeout,
+                )
+            else:
+                logger.info("stopped API-embedded ingest worker")
+                reset_vector_store()
 
 
 def create_app() -> FastAPI:
@@ -45,7 +92,11 @@ def create_app() -> FastAPI:
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict:
-        return {"status": "ok", "profile": settings.profile}
+        thread = getattr(app.state, "ingest_worker_thread", None)
+        worker = "running" if thread is not None and thread.is_alive() else "disabled"
+        if settings.run_api_worker and thread is not None and not thread.is_alive():
+            worker = "stopped"
+        return {"status": "ok", "profile": settings.profile, "worker": worker}
 
     @app.get("/readyz", tags=["ops"])
     def readyz() -> dict:
@@ -60,6 +111,9 @@ def create_app() -> FastAPI:
             checks["database"] = "ok"
         except Exception as exc:
             checks["database"] = f"error: {exc}"
+        if settings.run_api_worker:
+            thread = getattr(app.state, "ingest_worker_thread", None)
+            checks["worker"] = "ok" if thread is not None and thread.is_alive() else "error"
         return {"status": "ok" if all(v == "ok" for v in checks.values()) else "degraded", **checks}
 
     for router in (search.router, sources.router, documents.router, ingest.router, admin.router):

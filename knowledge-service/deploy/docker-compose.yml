@@ -18,7 +18,7 @@ services:
       retries: 20
 
   qdrant:
-    image: qdrant/qdrant:v1.12.4
+    image: qdrant/qdrant:v1.18.2
     environment:
       QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?set QDRANT_API_KEY in .env}
     volumes:
@@ -64,6 +64,7 @@ services:
       KB_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       KB_QDRANT_URL: http://qdrant:6333
       KB_QDRANT_API_KEY: ${QDRANT_API_KEY}
+      KB_API_WORKER_ENABLED: "false"
       KB_DENSE_PROVIDER: ${KB_DENSE_PROVIDER:-fastembed}
       KB_DENSE_MODEL: ${KB_DENSE_MODEL:-BAAI/bge-small-zh-v1.5}
       KB_AUTH_REQUIRED: "true"

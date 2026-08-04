@@ -8,9 +8,9 @@ kbweb 是 kbsvc 的**表现层**，不是第二个后端。它：
 - 不持有任何检索逻辑（rewrite/fusion/rerank 全在 kbsvc）
 - 只负责：会话、表单、渲染、渐进增强
 
-**为什么必须走 HTTP 而不是直接 import kbsvc**：`local` profile 下嵌入式 Qdrant 对数据目录
-持**独占锁**。若 Flask 进程直接 import，它会抢走锁，kbsvc API 就起不来。走 HTTP 后，
-前端还能指向远程 kbsvc，两种 profile 行为一致。
+**为什么必须走 HTTP 而不是直接 import kbsvc**：当前 `local` profile 将嵌入式 Qdrant 与
+常驻 worker 放在 API 进程中，Web 不应成为第二个 Qdrant 持有者。HTTP 边界让 Web 不复制
+检索、队列和存储逻辑，也能直接指向远程 kbsvc，使两种 profile 行为一致。
 
 ```
 浏览器 ──▶ Flask (kbweb) ──HTTP──▶ kbsvc REST ──▶ Qdrant / PG / S3

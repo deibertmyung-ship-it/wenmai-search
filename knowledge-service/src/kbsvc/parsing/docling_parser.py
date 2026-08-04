@@ -34,9 +34,9 @@ class DoclingParser:
             return self._converter
         try:
             from docling.document_converter import DocumentConverter
-        except ImportError as exc:  # pragma: no cover - optional extra
+        except ImportError as exc:  # pragma: no cover - broken deployment
             raise DependencyMissingError(
-                "docling is not installed; install kbsvc[docling] or configure another parser"
+                "docling is not installed; reinstall kbsvc and verify deployment dependencies"
             ) from exc
         try:
             from importlib.metadata import version as pkg_version
