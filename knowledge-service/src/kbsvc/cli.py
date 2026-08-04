@@ -16,7 +16,7 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
-app = typer.Typer(help="kbsvc - self-hosted knowledge retrieval", no_args_is_help=True)
+app = typer.Typer(help="Wenmai Search - self-hosted knowledge retrieval", no_args_is_help=True)
 
 
 def _setup_logging(verbose: bool) -> None:

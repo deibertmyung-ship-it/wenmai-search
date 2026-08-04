@@ -7,7 +7,7 @@
         "command": "python",
         "args": ["-m", "kbsvc.cli", "mcp", "--transport", "stdio"],
         "env": {
-          "KB_DATA_DIR": "C:/Users/Administrator/Desktop/saibo/out/knowledge-retrieval-survey/knowledge-service/.kbdata",
+          "KB_DATA_DIR": "C:/path/to/wenmai-search/knowledge-service/.kbdata",
           "KB_DENSE_PROVIDER": "hash",
           "PYTHONIOENCODING": "utf-8"
         }
@@ -19,10 +19,10 @@
     "_comment": "Use the project venv directly so no activation step is needed.",
     "mcpServers": {
       "kbsvc": {
-        "command": "C:/Users/Administrator/Desktop/saibo/out/knowledge-retrieval-survey/knowledge-service/.venv/Scripts/python.exe",
+        "command": "C:/path/to/wenmai-search/knowledge-service/.venv/Scripts/python.exe",
         "args": ["-m", "kbsvc.cli", "mcp", "--transport", "stdio"],
         "env": {
-          "KB_DATA_DIR": "C:/Users/Administrator/Desktop/saibo/out/knowledge-retrieval-survey/knowledge-service/.kbdata",
+          "KB_DATA_DIR": "C:/path/to/wenmai-search/knowledge-service/.kbdata",
           "PYTHONIOENCODING": "utf-8"
         }
       }
