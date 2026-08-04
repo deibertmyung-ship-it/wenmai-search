@@ -75,3 +75,8 @@ Web 端端到端测试需本机安装 Chrome，并按 [`knowledge-web/README.md`
 ## 语料说明
 
 `book/` 中的文本用于检索演示与研究。语料来源及公共领域声明见 [`book/README.md`](book/README.md)。
+
+## 许可证
+
+项目源码及原创文档采用 [MIT License](LICENSE)。`book/` 中的语料不属于 MIT 授权范围，
+其权利状态以原始作品及 [`book/README.md`](book/README.md) 中的说明为准。
