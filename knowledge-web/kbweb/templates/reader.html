@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}{{ document.title }}{% endblock %}
+
+{% block content %}
+<article class="reader"
+         data-reader
+         data-document-id="{{ document.id }}"
+         data-next-from="{{ next_from }}"
+         data-has-more="{{ 'true' if has_more else 'false' }}"
+         data-page-size="{{ page_size }}"
+         data-chunks-url="{{ url_for('api.chunks', document_id=document.id) }}">
+
+  <header class="reader__head">
+    <h1 class="reader__title">{{ document.title }}</h1>
+    <p class="reader__sub">
+      共 {{ document.chunk_count }} 段 · 版本 {{ document.version_count }} ·
+      <a href="{{ url_for('library.document', document_id=document.id) }}">详情</a> ·
+      <a href="{{ url_for('search.index', q='', source_id=document.source_id) }}">在本来源中检索</a>
+    </p>
+  </header>
+
+  <div data-chunks>
+    {% set ns = namespace(last_heading=None) %}
+    {% for chunk in chunks %}
+      {% set crumb = chunk.heading_path | breadcrumb %}
+      <section class="chunk" id="c{{ chunk.ordinal }}"
+               {% if focus is not none and chunk.ordinal == focus %}data-focus="true"{% endif %}>
+        <span class="chunk__ordinal">{{ chunk.ordinal }}</span>
+        <div class="chunk__body">
+          {# running head: print the breadcrumb only where the section changes #}
+          {% if chunk.heading_path and crumb != ns.last_heading %}
+            <p class="chunk__heading">{{ crumb }}</p>
+          {% endif %}
+          {% set ns.last_heading = crumb if chunk.heading_path else ns.last_heading %}
+          <p class="chunk__text">{{ chunk.text }}</p>
+        </div>
+      </section>
+    {% else %}
+      <div class="empty">
+        <span class="empty__mark">阙</span>
+        <h2>此处无正文</h2>
+        <p>该文档在第 {{ start }} 段之后没有内容。</p>
+      </div>
+    {% endfor %}
+  </div>
+
+  {# Works without JS; the script upgrades it to append-in-place. #}
+  {% if has_more %}
+    <div class="reader__more" data-more>
+      <a class="btn btn--ghost"
+         href="{{ url_for('library.read', document_id=document.id, **{'from': next_from}) }}">
+        续读下一段
+      </a>
+    </div>
+  {% endif %}
+
+  {% if start > 0 %}
+    <div class="reader__more">
+      <a class="btn btn--ghost"
+         href="{{ url_for('library.read', document_id=document.id, **{'from': [start - page_size, 0] | max}) }}">
+        返回上一段
+      </a>
+    </div>
+  {% endif %}
+</article>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/reader.js') }}" defer></script>
+{% endblock %}

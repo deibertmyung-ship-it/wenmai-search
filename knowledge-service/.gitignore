@@ -1,0 +1,9 @@
+.venv/
+.kbdata/
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/.pytest-kbdata/
+.coverage
+.ruff_cache/

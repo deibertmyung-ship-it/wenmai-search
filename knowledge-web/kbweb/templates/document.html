@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ document.title }} · 详情{% endblock %}
+
+{% block content %}
+<h1 class="section-title">{{ document.title }}</h1>
+
+<div class="panel">
+  <h2>元数据</h2>
+  <div class="table-wrap">
+    <table class="table">
+      <tbody>
+        <tr><td>document_id</td><td class="table__mono">{{ document.id }}</td></tr>
+        <tr><td>外部标识</td><td class="table__mono">{{ document.external_id }}</td></tr>
+        <tr><td>当前版本</td><td class="table__mono">{{ document.current_version_id | short_id }}（共 {{ document.version_count }} 版）</td></tr>
+        <tr><td>段落数</td><td>{{ document.chunk_count }}</td></tr>
+        <tr><td>访问标签</td><td>{% for tag in document.acl %}<span class="pill">{{ tag }}</span> {% endfor %}</td></tr>
+        <tr><td>创建 / 更新</td><td class="table__mono">{{ document.created_at | timeago }} / {{ document.updated_at | timeago }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>开篇</h2>
+  {% for chunk in preview %}
+    <section class="chunk">
+      <span class="chunk__ordinal">{{ chunk.ordinal }}</span>
+      <div class="chunk__body">
+        {% if chunk.heading_path %}<p class="chunk__heading">{{ chunk.heading_path | breadcrumb }}</p>{% endif %}
+        <p class="chunk__text">{{ chunk.text[:400] }}{% if chunk.text|length > 400 %}……{% endif %}</p>
+      </div>
+    </section>
+  {% endfor %}
+  <p style="margin-top: var(--space-4)">
+    <a class="btn btn--ghost btn--sm" href="{{ url_for('library.read', document_id=document.id) }}">通读全文</a>
+  </p>
+</div>
+
+<div class="panel">
+  <h2>维护</h2>
+  <p class="form-row__hint">重建索引会从对象存储中已保存的原始文件重新解析与嵌入，无需重新上传。</p>
+  <form method="post" action="{{ url_for('library.reindex', document_id=document.id) }}" style="margin-top: var(--space-3)">
+    <button class="btn btn--ghost btn--sm" type="submit">重建此文档索引</button>
+  </form>
+</div>
+{% endblock %}

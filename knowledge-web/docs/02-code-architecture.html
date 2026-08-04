@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>kbweb 代码架构分析</title>
+<style>
+:root{color-scheme:light dark;
+--paper:oklch(97.5% .012 85);--paper-raised:oklch(99% .008 85);--paper-sunk:oklch(94.5% .018 82);
+--paper-edge:oklch(89% .022 80);--ink:oklch(22% .012 60);--ink-strong:oklch(14% .014 60);
+--ink-soft:oklch(46% .010 60);--ink-faint:oklch(63% .008 60);
+--seal:oklch(48% .17 25);--seal-wash:oklch(92% .045 30);
+--indigo:oklch(42% .09 250);--indigo-wash:oklch(93% .03 250);
+--jade:oklch(48% .09 155);
+--font-serif:"Songti SC","SimSun","Noto Serif CJK SC","Source Han Serif SC",Georgia,serif;
+--font-sans:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",-apple-system,"Segoe UI",system-ui,sans-serif;
+--font-mono:"Cascadia Mono","SFMono-Regular",Consolas,monospace;
+--rule:1px solid var(--paper-edge)}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){
+--paper:oklch(19% .022 65);--paper-raised:oklch(23% .024 65);--paper-sunk:oklch(16% .02 65);
+--paper-edge:oklch(34% .028 65);--ink:oklch(90% .01 80);--ink-strong:oklch(97% .008 80);
+--ink-soft:oklch(70% .01 70);--ink-faint:oklch(54% .01 70);
+--seal:oklch(70% .14 30);--seal-wash:oklch(30% .07 28);
+--indigo:oklch(74% .09 250);--indigo-wash:oklch(28% .05 250);--jade:oklch(72% .08 155)}}
+:root[data-theme=dark]{
+--paper:oklch(19% .022 65);--paper-raised:oklch(23% .024 65);--paper-sunk:oklch(16% .02 65);
+--paper-edge:oklch(34% .028 65);--ink:oklch(90% .01 80);--ink-strong:oklch(97% .008 80);
+--ink-soft:oklch(70% .01 70);--ink-faint:oklch(54% .01 70);
+--seal:oklch(70% .14 30);--seal-wash:oklch(30% .07 28);
+--indigo:oklch(74% .09 250);--indigo-wash:oklch(28% .05 250);--jade:oklch(72% .08 155)}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font-sans);
+line-height:1.75;font-size:16px}
+.wrap{display:grid;grid-template-columns:minmax(0,1fr);max-width:1180px;margin:0 auto;padding:0 1.5rem 6rem}
+@media(min-width:1000px){.wrap{grid-template-columns:230px minmax(0,1fr);gap:3.5rem}}
+header.top{border-bottom:2px solid var(--ink-strong);padding:2.5rem 1.5rem 1.25rem;
+max-width:1180px;margin:0 auto;display:flex;align-items:baseline;gap:1.5rem;flex-wrap:wrap}
+h1{font-family:var(--font-serif);font-size:clamp(1.8rem,1.3rem+2vw,2.6rem);margin:0;
+color:var(--ink-strong);line-height:1.25}
+h1::first-letter{color:var(--seal)}
+.top .meta{font-family:var(--font-mono);font-size:.75rem;color:var(--ink-faint);margin-left:auto}
+.theme{background:none;border:var(--rule);color:var(--ink-soft);font:inherit;font-size:.72rem;
+padding:.2rem .7rem;border-radius:3px;cursor:pointer}
+.theme:hover{background:var(--paper-sunk);color:var(--ink-strong)}
+nav.toc{font-size:.82rem;align-self:start}
+@media(min-width:1000px){nav.toc{position:sticky;top:1.5rem;padding-top:2.5rem}}
+nav.toc ol{list-style:none;margin:0;padding:0}
+nav.toc li{margin:.35rem 0}
+nav.toc a{color:var(--ink-soft);text-decoration:none;border-left:2px solid transparent;padding-left:.7rem;display:block}
+nav.toc a:hover{color:var(--seal);border-left-color:var(--seal)}
+main{min-width:0;padding-top:2.5rem}
+h2{font-family:var(--font-serif);font-size:1.5rem;color:var(--ink-strong);
+margin:3rem 0 1rem;padding-bottom:.4rem;border-bottom:2px solid var(--ink-strong);scroll-margin-top:1rem}
+h2:first-child{margin-top:0}
+h3{font-family:var(--font-serif);font-size:1.15rem;color:var(--ink-strong);margin:2rem 0 .6rem}
+p{margin:0 0 1rem;max-width:72ch}
+strong{color:var(--ink-strong);font-weight:600}
+a{color:var(--seal);text-underline-offset:.2em}
+ul,ol{max-width:72ch;padding-left:1.4rem}li{margin:.35rem 0}
+code{font-family:var(--font-mono);font-size:.86em;background:var(--paper-sunk);
+padding:.12em .35em;border-radius:2px;color:var(--ink-strong);
+/* long identifiers must wrap; a single unbreakable token otherwise sets the
+   min-content width of its table cell and pushes the whole page wide */
+overflow-wrap:anywhere;word-break:break-word}
+pre{background:var(--paper-sunk);border:var(--rule);border-radius:4px;padding:1rem 1.1rem;
+overflow-x:auto;margin:1.2rem 0;line-height:1.55}
+pre code{background:none;padding:0;font-size:.8rem;color:var(--ink-soft);
+white-space:pre;overflow-wrap:normal;word-break:normal}
+blockquote{margin:0 0 1.6rem;padding:.8rem 1.1rem;border-left:3px solid var(--indigo);
+background:var(--indigo-wash);color:var(--indigo);font-size:.88rem;border-radius:0 4px 4px 0}
+blockquote p{margin:0;max-width:none}
+blockquote p+p{margin-top:.3rem}
+.tbl{overflow-x:auto;max-width:100%;margin:1.2rem 0}
+table{border-collapse:collapse;width:100%;font-size:.86rem}
+th{text-align:left;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;
+color:var(--ink-faint);font-weight:500;padding:.5rem .7rem;border-bottom:2px solid var(--ink-strong);
+white-space:nowrap}
+td{padding:.55rem .7rem;border-bottom:var(--rule);vertical-align:top}
+tbody tr:hover{background:var(--paper-sunk)}
+td code{font-size:.82em}
+hr{border:none;border-top:var(--rule);margin:2.5rem 0}
+footer{max-width:1180px;margin:0 auto;padding:2rem 1.5rem 3rem;border-top:var(--rule);
+font-size:.76rem;color:var(--ink-faint);font-family:var(--font-mono)}
+@media print{nav.toc,.theme{display:none}.wrap{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>kbweb 代码架构分析</h1>
+  <div class="meta">kbweb · 401 节点 / 1546 边 · 2026-08-02
+    <button class="theme" type="button" data-theme-toggle>明/暗</button>
+  </div>
+</header>
+<div class="wrap">
+  <nav class="toc" aria-label="目录"><ol><li><a href="#s1">1. 规模</a></li><li><a href="#s2">2. 包依赖：三层 DAG</a></li><li><a href="#s3">3. 唯一的后端出口</a></li><li><a href="#s4">4. 复杂度：全项目最高认知复杂度只有 8</a></li><li><a href="#s5">5. 渐进增强：图上可见的降级路径</a></li><li><a href="#s6">6. 社区检测</a></li><li><a href="#s7">7. 配置面</a></li><li><a href="#s8">8. 前后端边界</a></li><li><a href="#s9">9. 结论与建议</a></li></ol></nav>
+  <main><blockquote><p>本文的结论来自代码知识图谱的静态分析（401 节点 / 1546 边），不是对设计意图的复述。</p><p>复杂度、依赖方向、环检测均为实测值。</p><p>索引名 <code>kbweb</code>，索引时间 2026-08-02。</p></blockquote>
+<h2 id="s1">1. 规模</h2>
+<div class="tbl"><table><thead><tr>
+<th>维度</th>
+<th>数值</th>
+</tr></thead><tbody>
+<tr><td>生产代码</td><td>Python 23 文件 · HTML 13 · JavaScript 4 · CSS 2，合计 2260 行</td></tr>
+<tr><td>测试</td><td>37 单元 + 50 E2E</td></tr>
+<tr><td>图节点</td><td>401（Function 136 / Method 42 / Class 19 / Route 11 / EnvVar 9）</td></tr>
+<tr><td>图边</td><td>1546（DEFINES 557 / USAGE 351 / CALLS 193 / SEMANTICALLY_RELATED 126）</td></tr>
+<tr><td>Flask 路由</td><td>11 条</td></tr>
+</tbody></table></div>
+<p>最大的几个文件：</p>
+<div class="tbl"><table><thead><tr>
+<th>文件</th>
+<th>行数</th>
+<th>说明</th>
+</tr></thead><tbody>
+<tr><td><code>static/css/app.css</code></td><td>511</td><td>组件样式。全项目最大的单文件</td></tr>
+<tr><td><code>client.py</code></td><td>188</td><td>kbsvc REST 的唯一出口</td></tr>
+<tr><td><code>static/css/tokens.css</code></td><td>135</td><td>设计令牌</td></tr>
+<tr><td><code>filters.py</code></td><td>117</td><td>Jinja 过滤器</td></tr>
+<tr><td><code>templates/search.html</code></td><td>112</td><td>检索页</td></tr>
+<tr><td><code>static/js/reader.js</code></td><td>112</td><td>阅读器渐进增强</td></tr>
+</tbody></table></div>
+<p><strong>CSS 占了全项目 29% 的行数</strong>（646 / 2260）。对一个服务端渲染、无构建步骤的前端来说这是正常比例——样式没有被打包工具切碎，全部是可读的手写 CSS。</p>
+<h2 id="s2">2. 包依赖：三层 DAG</h2>
+<p>对 <code>kbweb/</code> 下所有相对导入做 AST 提取后做环检测，<strong>结果是 NONE</strong>。</p>
+<pre><code>   ┌──────────────────────────────────────┐
+   │ (root)  __init__ / filters / config  │   应用装配层  out=5
+   │         errors / client              │
+   └───────────────┬──────────────────────┘
+                   │
+                   ▼
+   ┌──────────────────────────────────────┐
+   │ views   search / library / ingest    │   视图层  out=3, in=1
+   │         jobs / api / _common         │
+   └──────┬──────────┬──────────┬─────────┘
+          ▼          ▼          ▼
+     ┌────────┐ ┌────────┐ ┌────────┐
+     │ client │ │ config │ │ errors │      基础层  out=0
+     │  in=2  │ │  in=2  │ │  in=2  │
+     └────────┘ └────────┘ └────────┘</code></pre>
+<div class="tbl"><table><thead><tr>
+<th>包</th>
+<th>out</th>
+<th>in</th>
+<th>依赖</th>
+</tr></thead><tbody>
+<tr><td><code>(root)</code></td><td>5</td><td>0</td><td>client, config, errors, views</td></tr>
+<tr><td><code>views</code></td><td>3</td><td>1</td><td>client, config, errors</td></tr>
+<tr><td><code>client</code></td><td>0</td><td>2</td><td>—</td></tr>
+<tr><td><code>config</code></td><td>0</td><td>2</td><td>—</td></tr>
+<tr><td><code>errors</code></td><td>0</td><td>2</td><td>—</td></tr>
+</tbody></table></div>
+<p>依赖图只有三层、五个节点。这不是"架构简单"，而是<strong>前端刻意不承担任何领域逻辑</strong>的结果：没有 model 层、没有 service 层、没有状态管理层，因为检索逻辑全在 kbsvc 里。视图只做「解析请求 → 调 client → 渲染」。</p>
+<h2 id="s3">3. 唯一的后端出口</h2>
+<p>图分析给出的扇入排名：</p>
+<div class="tbl"><table><thead><tr>
+<th>符号</th>
+<th>扇入</th>
+<th>说明</th>
+</tr></thead><tbody>
+<tr><td><code>dict.get</code></td><td>43</td><td>内置</td></tr>
+<tr><td><code>KbClient._request</code></td><td><strong>14</strong></td><td>所有后端调用的收口</td></tr>
+<tr><td><code>views._common.client</code></td><td>13</td><td>获取请求作用域的 client</td></tr>
+<tr><td><code>filters.highlight_segments</code></td><td>6</td><td>高亮切分</td></tr>
+<tr><td><code>views._common.as_int</code></td><td>4</td><td>参数钳制</td></tr>
+<tr><td><code>create_app</code></td><td>3</td><td>应用工厂</td></tr>
+</tbody></table></div>
+<p><strong><code>KbClient._request</code> 扇入 14 且没有旁路</strong>——<code>client.py</code> 的 19 个公开方法全部经它转发，没有任何视图直接构造 httpx 请求。这一条收口带来三个可验证的性质：</p>
+<ol>
+<li><strong>认证只在一处</strong>：<code>Authorization: Bearer</code> 头在 <code>KbClient.__init__</code> 设置，API Key 不可能泄漏到浏览器（有测试 <code>test_api_key_is_sent_to_the_backend_but_never_to_the_browser</code> 守着）</li>
+<li><strong>超时只在一处</strong>：<code>httpx.Client(timeout=...)</code></li>
+<li><strong>错误翻译只在一处</strong>：<code>_parse_error</code> 把后端信封转成 <code>BackendError</code>，<code>httpx.HTTPError</code> 转成 <code>BackendUnavailable</code></li>
+</ol>
+<p><code>views</code> 包 out=3、只依赖 client/config/errors，从依赖方向上就排除了"某个视图偷偷绕过 client 直连后端"的可能。</p>
+<h2 id="s4">4. 复杂度：全项目最高认知复杂度只有 8</h2>
+<div class="tbl"><table><thead><tr>
+<th>函数</th>
+<th>文件</th>
+<th>圈复杂度</th>
+<th>认知</th>
+<th>循环深度</th>
+<th>行数</th>
+</tr></thead><tbody>
+<tr><td><code>highlight_segments</code></td><td>filters.py</td><td>6</td><td>8</td><td>1</td><td>28</td></tr>
+<tr><td><code>search.index</code></td><td>views/search.py</td><td>5</td><td>8</td><td>0</td><td>53</td></tr>
+<tr><td><code>timeago</code></td><td>filters.py</td><td>6</td><td>8</td><td>1</td><td>15</td></tr>
+<tr><td><code>_parse_error</code></td><td>client.py</td><td>4</td><td>7</td><td>0</td><td>16</td></tr>
+<tr><td><code>_request</code></td><td>client.py</td><td>4</td><td>5</td><td>0</td><td>12</td></tr>
+<tr><td><code>ingest.upload</code></td><td>views/ingest.py</td><td>4</td><td>5</td><td>0</td><td>24</td></tr>
+<tr><td><code>reader.js:load</code></td><td>static/js/reader.js</td><td>3</td><td>3</td><td>0</td><td>39</td></tr>
+</tbody></table></div>
+<p>对比后端最高 22，前端最高 8。<strong>没有一个函数需要重构</strong>。</p>
+<p>三个 8 分函数各自的复杂度来源不同，都不是写法问题：</p>
+<ul>
+<li><strong><code>highlight_segments</code></strong>：要处理 span 越界、重叠、空文本三类退化输入。这些分支是刻意的——后端给的偏移一旦不可信，必须降级成纯文本而不是打乱原文。有 6 个测试专门覆盖这些分支。</li>
+<li><strong><code>search.index</code></strong>：11 个查询参数要解析、钳制、回填表单。其中隐藏的 <code>f=1</code> 标记位逻辑（区分"复选框未勾选"与"表单未提交"）本身就值 2 分认知复杂度，但去掉它会产生一个真实 bug。</li>
+<li><strong><code>timeago</code></strong>：多档相对时间 + 非法输入退化。</li>
+</ul>
+<h2 id="s5">5. 渐进增强：图上可见的降级路径</h2>
+<p>前端声称「JS 全挂时页面仍可用」。这在结构上是可验证的——4 个 JS 文件的调用图与 Python 视图<strong>没有任何交叉</strong>：</p>
+<div class="tbl"><table><thead><tr>
+<th>脚本</th>
+<th>行数</th>
+<th>增强</th>
+<th>降级路径</th>
+</tr></thead><tbody>
+<tr><td><code>reader.js</code></td><td>112</td><td>原地追加下一批 chunk</td><td>服务端渲染的 <code>&lt;a href="?from=N"&gt;</code> 链接</td></tr>
+<tr><td><code>drawer.js</code></td><td>60</td><td>调试抽屉开合</td><td>抽屉内容仍在 DOM 中，可滚动</td></tr>
+<tr><td><code>jobs.js</code></td><td>40</td><td>任务轮询 + 退避</td><td>手动刷新</td></tr>
+<tr><td><code>theme.js</code></td><td>25</td><td>主题记忆</td><td>跟随 <code>prefers-color-scheme</code></td></tr>
+</tbody></table></div>
+<p>JS 只通过 <code>/api/*</code> 两个端点取数（<code>api.chunks</code>、<code>api.jobs</code>），这两个端点在图上是独立的 Route 节点，不参与任何服务端渲染路径。换言之：<strong>删掉整个 <code>static/js/</code> 目录，11 条路由里没有一条会失效</strong>。</p>
+<p><code>reader.js:load</code> 用 <code>textContent</code> 写入正文（从不用 <code>innerHTML</code>），这是 XSS 面上的硬约束，在 E2E 里由「无 console error」断言间接覆盖。</p>
+<h2 id="s6">6. 社区检测</h2>
+<div class="tbl"><table><thead><tr>
+<th>簇</th>
+<th>内聚度</th>
+<th>代表成员</th>
+<th>说明</th>
+</tr></thead><tbody>
+<tr><td>15</td><td><strong>0.88</strong></td><td><code>create_app</code>, <code>live_server</code>, <code>_flag</code>, <code>Config</code></td><td>应用装配 + 配置。满内聚</td></tr>
+<tr><td>8</td><td>0.85</td><td><code>highlight_segments</code>, 分页测试</td><td>高亮与分页，与测试强绑定</td></tr>
+<tr><td>24</td><td><strong>1.00</strong></td><td><code>short_id</code>, <code>ms</code>, <code>score</code>, <code>filesize</code></td><td>格式化过滤器。满内聚，纯函数</td></tr>
+<tr><td>80</td><td>0.57</td><td><code>client</code>, <code>read</code>, <code>index</code>, <code>chunks</code>, <code>as_int</code></td><td>视图层，横跨多个 blueprint</td></tr>
+<tr><td>30</td><td>0.55</td><td><code>_request</code>, <code>shelf</code>, <code>list_sources</code>, <code>list_documents</code></td><td>client 与其调用方</td></tr>
+</tbody></table></div>
+<p>簇 24 内聚度 1.0 且全是纯函数（无 I/O、无状态）——<code>filters.py</code> 的格式化部分可以整体提取复用，也解释了它为何能被 100% 单元测试覆盖。</p>
+<h2 id="s7">7. 配置面</h2>
+<p>图抓到 9 个 <code>EnvVar</code> 节点与 <code>CONFIGURES</code> 边，全部集中在 <code>config.py</code>：</p>
+<div class="tbl"><table><thead><tr>
+<th>变量</th>
+<th>用途</th>
+<th>安全相关</th>
+</tr></thead><tbody>
+<tr><td><code>KBWEB_API_BASE</code></td><td>kbsvc 地址</td><td></td></tr>
+<tr><td><code>KBWEB_API_KEY</code></td><td>转发凭据</td><td><strong>不下发浏览器</strong></td></tr>
+<tr><td><code>KBWEB_SECRET_KEY</code></td><td>Flask session</td><td>生产必须固定</td></tr>
+<tr><td><code>KBWEB_DEBUG_UI</code></td><td>是否允许请求 debug 负载</td><td>生产可关</td></tr>
+<tr><td><code>KBWEB_TIMEOUT</code> / <code>PAGE_SIZE</code> / <code>READER_PAGE_SIZE</code> / <code>MAX_UPLOAD_BYTES</code> / <code>TEMPLATE_RELOAD</code></td><td>行为调节</td><td></td></tr>
+</tbody></table></div>
+<p><code>Config</code> 是 <code>@dataclass</code>，每个字段用 <code>field(default_factory=...)</code> 读环境变量——<strong>没有模块级的环境变量读取</strong>，因此测试可以直接构造 <code>Config(...)</code> 覆盖，不需要 monkeypatch 环境。37 个单元测试全部走这条路。</p>
+<h2 id="s8">8. 前后端边界</h2>
+<p>跨仓库匹配（<code>cross-repo-intelligence</code>）返回 <strong>0 条边</strong>。原因是 kbweb 的调用形如 <code>self._request("POST", "/v1/search")</code>——路径是方法体内的字符串字面量，静态分析无法把它与 kbsvc 的 Route 节点关联。</p>
+<p>这不影响可维护性：<strong>边界就是 <code>client.py</code> 一个文件，19 个方法一一对应后端路由</strong>，读它比读图更直接。对照表：</p>
+<div class="tbl"><table><thead><tr>
+<th>KbClient 方法</th>
+<th>kbsvc 路由</th>
+</tr></thead><tbody>
+<tr><td><code>search</code></td><td><code>POST /v1/search</code></td></tr>
+<tr><td><code>list_sources</code> / <code>create_source</code></td><td>`GET</td><td>POST /v1/sources`</td></tr>
+<tr><td><code>list_documents</code> / <code>get_document</code></td><td><code>GET /v1/documents[/{id}]</code></td></tr>
+<tr><td><code>get_chunks</code></td><td><code>GET /v1/documents/{id}/chunks</code></td></tr>
+<tr><td><code>reindex_document</code></td><td><code>POST /v1/documents/{id}/reindex</code></td></tr>
+<tr><td><code>delete_document</code></td><td><code>DELETE /v1/documents/{id}</code></td></tr>
+<tr><td><code>upload</code> / <code>ingest_path</code></td><td><code>POST /v1/ingest/upload</code> · <code>/path</code></td></tr>
+<tr><td><code>list_jobs</code> / <code>retry_job</code></td><td><code>GET /v1/jobs</code> · <code>POST /v1/jobs/{id}/retry</code></td></tr>
+<tr><td><code>stats</code> / <code>health</code></td><td><code>GET /v1/stats</code> · <code>/healthz</code></td></tr>
+</tbody></table></div>
+<p><strong>维护提示</strong>：后端路由变更时，唯一需要同步的文件就是 <code>client.py</code>。若要让这条边界机器可检，可以在 CI 里拉 kbsvc 的 OpenAPI schema 与 <code>client.py</code> 的方法表比对——目前没做。</p>
+<h2 id="s9">9. 结论与建议</h2>
+<p><strong>结构上没有需要处理的问题。</strong> 依赖三层无环、后端调用单点收口、最高认知复杂度 8、JS 与服务端渲染路径零交叉。</p>
+<div class="tbl"><table><thead><tr>
+<th>优先级</th>
+<th>事项</th>
+<th>依据</th>
+</tr></thead><tbody>
+<tr><td>低</td><td><code>app.css</code> 511 行，若继续增长可按组件拆分</td><td>目前仍在可读范围，拆分会引入 @import 或构建步骤</td></tr>
+<tr><td>低</td><td>CI 中比对 kbsvc OpenAPI 与 <code>client.py</code> 方法表</td><td>跨仓库边界目前靠人工同步</td></tr>
+</tbody></table></div>
+<p><strong>不建议动的地方：</strong> <code>views</code> 不加 service 层（领域逻辑在后端，加了就是空转发）；<code>highlight_segments</code> 的分支（每一条都对应一类退化输入，有测试守着）；<code>search.index</code> 的 <code>f=1</code> 标记位（去掉会产生真实 bug）。</p></main>
+</div>
+<footer>由代码知识图谱静态分析生成 · 与 02-code-architecture.md 同源 · 自包含单文件，无外部依赖</footer>
+<script>(function(){var r=document.documentElement;try{var t=localStorage.getItem('kbdoc-theme');
+if(t)r.setAttribute('data-theme',t)}catch(e){}
+document.querySelectorAll('[data-theme-toggle]').forEach(function(b){b.addEventListener('click',function(){
+var cur=r.getAttribute('data-theme')||(window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+var next=cur==='dark'?'light':'dark';r.setAttribute('data-theme',next);
+try{localStorage.setItem('kbdoc-theme',next)}catch(e){}})})})();</script>
+</body>
+</html>

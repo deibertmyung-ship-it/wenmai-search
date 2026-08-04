@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}{{ form.q or '检索' }}{% endblock %}
+
+{% block content %}
+<div class="search-layout">
+
+  <form class="rail" method="get" action="{{ url_for('search.index') }}">
+    {# Marks the request as "came from this form", so an unchecked box reads as
+       an explicit off rather than as an absent parameter. #}
+    <input type="hidden" name="f" value="1">
+    <div class="rail__group">
+      <label class="rail__label" for="q">检索词</label>
+      <input class="field" type="search" id="q" name="q" value="{{ form.q }}"
+             placeholder="贼克如何取用神" autofocus autocomplete="off">
+    </div>
+
+    <div class="rail__group">
+      <span class="rail__label">模式</span>
+      <div class="segmented" role="radiogroup" aria-label="检索模式">
+        {% for mode, label in [('hybrid','混合'), ('dense','语义'), ('sparse','字面')] %}
+          <input type="radio" id="mode-{{ mode }}" name="mode" value="{{ mode }}"
+                 {% if form.mode == mode %}checked{% endif %}>
+          <label for="mode-{{ mode }}">{{ label }}</label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="rail__group">
+      <label class="rail__label" for="source_id">来源</label>
+      <select class="field field--sm" id="source_id" name="source_id">
+        <option value="">全部</option>
+        {% for source in sources %}
+          <option value="{{ source.id }}" {% if form.source_id == source.id %}selected{% endif %}>
+            {{ source.name }}（{{ source.document_count }}）
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="rail__group">
+      <label class="rail__label" for="heading">限定章节</label>
+      <input class="field field--sm" type="text" id="heading" name="heading"
+             value="{{ form.heading }}" placeholder="卷二" autocomplete="off">
+    </div>
+
+    <div class="rail__group">
+      <label class="rail__label" for="top_k">返回条数</label>
+      <input class="field field--sm" type="number" id="top_k" name="top_k"
+             value="{{ form.top_k }}" min="1" max="50">
+    </div>
+
+    <div class="rail__group">
+      <label class="check"><input type="checkbox" name="rerank" value="1"
+        {% if form.rerank %}checked{% endif %}> 重排</label>
+      <label class="check"><input type="checkbox" name="rewrite" value="1"
+        {% if form.rewrite %}checked{% endif %}> 查询改写</label>
+      {% if debug_ui_enabled %}
+      <label class="check"><input type="checkbox" name="debug" value="1"
+        {% if form.debug %}checked{% endif %}> 检索调试</label>
+      {% endif %}
+    </div>
+
+    <button class="btn" type="submit">检索</button>
+  </form>
+
+  <section>
+    {% if payload is none %}
+      <div class="empty">
+        <span class="empty__mark">卷</span>
+        <h2>在典籍中查找</h2>
+        <p>混合检索同时走语义与字面两路，结果标注可核对的出处。
+           左栏可按来源、章节收窄范围。</p>
+      </div>
+
+    {% elif not payload.results %}
+      <div class="empty">
+        <span class="empty__mark">阙</span>
+        <h2>未检索到相关段落</h2>
+        <p>试试更短的关键词，或切换到「字面」模式——文言文的原词往往能直接命中。</p>
+      </div>
+
+    {% else %}
+      <div class="results__head">
+        <h1 class="results__count"><em>{{ payload.results|length }}</em> 条相关段落</h1>
+        <div class="results__timing">
+          {% if payload.debug %}
+            {{ payload.debug.timings_ms.total | ms }}
+            <button class="btn btn--ghost btn--sm" type="button" data-drawer-open>调试</button>
+          {% endif %}
+        </div>
+      </div>
+
+      <ol class="results">
+        {% for item in payload.results %}
+          {% set rank = loop.index %}
+          {% include "partials/_result.html" %}
+        {% endfor %}
+      </ol>
+
+      {% if payload.debug %}
+        {% include "partials/_debug.html" %}
+      {% endif %}
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {% if payload and payload.debug %}
+    <script src="{{ url_for('static', filename='js/drawer.js') }}" defer></script>
+  {% endif %}
+{% endblock %}

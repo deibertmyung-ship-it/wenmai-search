@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "playwright-local": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@0.0.69",
+        "--browser", "chrome",
+        "--headless",
+        "--viewport-size", "1440,1000",
+        "--output-dir", "./out/knowledge-retrieval-survey/knowledge-web/tests/e2e/mcp-output"
+      ]
+    }
+  }
+}

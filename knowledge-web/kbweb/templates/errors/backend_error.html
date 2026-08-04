@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}请求出错{% endblock %}
+{% block content %}
+<div class="empty">
+  <span class="empty__mark">误</span>
+  <h2>{{ error.message }}</h2>
+  <p class="table__mono">{{ error.code }}</p>
+  <p><a class="btn btn--ghost btn--sm" href="{{ url_for('search.index') }}">回到检索</a></p>
+</div>
+{% endblock %}

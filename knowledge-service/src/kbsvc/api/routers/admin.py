@@ -1,0 +1,109 @@
+"""Jobs and stats."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from ...db import repo
+from ...db.models import Chunk, Document, DocumentVersion, IngestJob, Source, utcnow
+from ...errors import NotFoundError, ValidationError
+from ...ingest.states import JobState
+from ...vector import get_vector_store
+from ..auth import Principal
+from ..deps import get_principal, get_session
+from ..schemas import JobOut, StatsOut
+
+router = APIRouter(tags=["admin"])
+
+
+def _job_out(job: IngestJob) -> JobOut:
+    return JobOut(
+        id=job.id,
+        document_id=job.document_id,
+        version_id=job.version_id,
+        job_type=job.job_type,
+        state=job.state,
+        attempts=job.attempts,
+        max_attempts=job.max_attempts,
+        last_error=job.last_error,
+        scheduled_at=job.scheduled_at.isoformat(),
+        created_at=job.created_at.isoformat(),
+        finished_at=job.finished_at.isoformat() if job.finished_at else None,
+    )
+
+
+@router.get("/jobs")
+def list_jobs(
+    state: str | None = None,
+    limit: int = Query(default=50, ge=1, le=500),
+    principal: Principal = Depends(get_principal),
+    session: Session = Depends(get_session),
+) -> list[JobOut]:
+    jobs = repo.list_jobs(session, tenant_id=principal.tenant_id, state=state, limit=limit)
+    return [_job_out(job) for job in jobs]
+
+
+@router.get("/jobs/{job_id}")
+def get_job(
+    job_id: str,
+    principal: Principal = Depends(get_principal),
+    session: Session = Depends(get_session),
+) -> JobOut:
+    job = session.get(IngestJob, job_id)
+    if job is None or job.tenant_id != principal.tenant_id:
+        raise NotFoundError("job not found", {"job_id": job_id})
+    return _job_out(job)
+
+
+@router.post("/jobs/{job_id}/retry")
+def retry_job(
+    job_id: str,
+    principal: Principal = Depends(get_principal),
+    session: Session = Depends(get_session),
+) -> JobOut:
+    job = session.get(IngestJob, job_id)
+    if job is None or job.tenant_id != principal.tenant_id:
+        raise NotFoundError("job not found", {"job_id": job_id})
+    if job.state not in (JobState.FAILED, JobState.CANCELLED):
+        raise ValidationError("only failed or cancelled jobs can be retried", {"state": job.state})
+    job.state = str(JobState.PENDING)
+    job.attempts = 0
+    job.last_error = None
+    job.finished_at = None
+    job.scheduled_at = utcnow()
+    session.flush()
+    return _job_out(job)
+
+
+@router.get("/stats")
+def stats(
+    principal: Principal = Depends(get_principal), session: Session = Depends(get_session)
+) -> StatsOut:
+    tenant = principal.tenant_id
+
+    def count(model, *conditions) -> int:
+        stmt = select(func.count()).select_from(model).where(*conditions)
+        return int(session.scalar(stmt) or 0)
+
+    job_rows = session.execute(
+        select(IngestJob.state, func.count(IngestJob.id))
+        .where(IngestJob.tenant_id == tenant)
+        .group_by(IngestJob.state)
+    ).all()
+
+    try:
+        vector_points = get_vector_store().count(tenant)
+    except Exception:
+        vector_points = -1
+
+    return StatsOut(
+        tenant_id=tenant,
+        sources=count(Source, Source.tenant_id == tenant),
+        documents=count(Document, Document.tenant_id == tenant, Document.deleted_at.is_(None)),
+        versions=count(DocumentVersion, DocumentVersion.tenant_id == tenant),
+        chunks=count(Chunk, Chunk.tenant_id == tenant),
+        vector_points=vector_points,
+        jobs_by_state=dict(job_rows),
+    )

@@ -1,0 +1,41 @@
+{
+  "_comment": "Ready-to-paste MCP client configurations. Pick the block that matches your setup and merge it into your client's config file (Claude Code: .mcp.json or ~/.claude.json; Claude Desktop: claude_desktop_config.json).",
+
+  "local_stdio": {
+    "mcpServers": {
+      "kbsvc": {
+        "command": "python",
+        "args": ["-m", "kbsvc.cli", "mcp", "--transport", "stdio"],
+        "env": {
+          "KB_DATA_DIR": "C:/Users/Administrator/Desktop/saibo/out/knowledge-retrieval-survey/knowledge-service/.kbdata",
+          "KB_DENSE_PROVIDER": "hash",
+          "PYTHONIOENCODING": "utf-8"
+        }
+      }
+    }
+  },
+
+  "local_stdio_venv": {
+    "_comment": "Use the project venv directly so no activation step is needed.",
+    "mcpServers": {
+      "kbsvc": {
+        "command": "C:/Users/Administrator/Desktop/saibo/out/knowledge-retrieval-survey/knowledge-service/.venv/Scripts/python.exe",
+        "args": ["-m", "kbsvc.cli", "mcp", "--transport", "stdio"],
+        "env": {
+          "KB_DATA_DIR": "C:/Users/Administrator/Desktop/saibo/out/knowledge-retrieval-survey/knowledge-service/.kbdata",
+          "PYTHONIOENCODING": "utf-8"
+        }
+      }
+    }
+  },
+
+  "remote_streamable_http": {
+    "_comment": "Server profile. The server authenticates as KB_MCP_API_KEY and derives tenant + ACL from it; clients cannot choose their own tenant.",
+    "mcpServers": {
+      "kbsvc": {
+        "type": "http",
+        "url": "https://kb.example.com/mcp"
+      }
+    }
+  }
+}

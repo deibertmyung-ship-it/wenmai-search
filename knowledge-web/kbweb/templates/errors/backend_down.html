@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}后端不可达{% endblock %}
+{% block content %}
+<div class="empty">
+  <span class="empty__mark">断</span>
+  <h2>检索服务未响应</h2>
+  <p>kbsvc 没有应答（{{ reason }}）。请确认它已启动：<br>
+     <code class="table__mono">python -m kbsvc.cli serve</code></p>
+</div>
+{% endblock %}

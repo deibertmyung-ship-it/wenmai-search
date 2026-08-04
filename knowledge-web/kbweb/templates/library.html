@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}书库{% endblock %}
+
+{% block content %}
+<h1 class="section-title">书库</h1>
+
+{% if stats %}
+<div class="stats">
+  <div class="stat"><span class="stat__value">{{ stats.documents }}</span><span class="stat__label">文档</span></div>
+  <div class="stat"><span class="stat__value">{{ stats.chunks }}</span><span class="stat__label">段落</span></div>
+  <div class="stat"><span class="stat__value">{{ stats.vector_points }}</span><span class="stat__label">向量</span></div>
+  <div class="stat"><span class="stat__value">{{ stats.sources }}</span><span class="stat__label">来源</span></div>
+</div>
+{% endif %}
+
+<form method="get" class="form-grid" style="margin-bottom: var(--space-6)">
+  <div class="form-row">
+    <label class="rail__label" for="lib-q">按书名筛选</label>
+    <input class="field field--sm" type="search" id="lib-q" name="q" value="{{ form.q }}"
+           placeholder="六壬">
+  </div>
+  <button class="btn btn--ghost btn--sm" type="submit" style="justify-self: start">筛选</button>
+</form>
+
+{% for group in groups %}
+  <section class="shelf__group">
+    <div class="shelf__source">
+      <h2>{{ group.source.name }}</h2>
+      <span>{{ group.source.kind }} · {{ group.documents | length }} 部</span>
+    </div>
+    <ul class="shelf">
+      {% for document in group.documents %}
+        <li class="book">
+          <a class="book__title" href="{{ url_for('library.read', document_id=document.id) }}">{{ document.title }}</a>
+          <span class="book__meta">{{ document.chunk_count }} 段</span>
+          <span class="book__meta">
+            <a href="{{ url_for('library.document', document_id=document.id) }}">详情</a>
+          </span>
+        </li>
+      {% else %}
+        <li class="book"><span class="book__meta">（无匹配文档）</span></li>
+      {% endfor %}
+    </ul>
+  </section>
+{% else %}
+  <div class="empty">
+    <span class="empty__mark">空</span>
+    <h2>书库尚无内容</h2>
+    <p>先到<a href="{{ url_for('ingest.index') }}">导入</a>页登记来源并加入文档。</p>
+  </div>
+{% endfor %}
+{% endblock %}

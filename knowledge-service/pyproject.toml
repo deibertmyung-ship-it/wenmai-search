@@ -1,0 +1,53 @@
+[project]
+name = "kbsvc"
+version = "0.1.0"
+description = "Self-hosted knowledge retrieval system with REST + MCP interfaces"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy>=2.0.36",
+    "qdrant-client>=1.12",
+    "httpx>=0.27",
+    "typer>=0.15",
+    "python-multipart>=0.0.12",
+    "mcp>=1.2",
+]
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.2"]
+s3 = ["boto3>=1.35"]
+fastembed = ["fastembed>=0.4"]
+docling = ["docling>=2.15"]
+unstructured = ["unstructured[all-docs]>=0.16"]
+marker = ["marker-pdf>=1.2"]
+rerank = ["sentence-transformers>=3.3"]
+dev = ["pytest>=8.3", "pytest-cov>=6.0", "ruff>=0.8"]
+
+[project.scripts]
+kbsvc = "kbsvc.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kbsvc"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]
+
+[tool.coverage.run]
+source = ["src/kbsvc"]

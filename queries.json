@@ -1,0 +1,1036 @@
+{
+  "generated_at": "2026-08-01T17:46:49",
+  "seeds": [
+    "知识检索系统",
+    "文档解析与导入",
+    "向量混合检索",
+    "知识库MCP服务"
+  ],
+  "seed_to_category": {
+    "知识检索系统": [
+      "knowledge-retrieval-platform"
+    ],
+    "文档解析与导入": [
+      "document-ingestion"
+    ],
+    "向量混合检索": [
+      "hybrid-retrieval"
+    ],
+    "知识库MCP服务": [
+      "mcp"
+    ]
+  },
+  "unmatched_seeds": [],
+  "breadth": "normal",
+  "active_since": "2025-02-07",
+  "extra_terms": [],
+  "vendor_groups": {},
+  "list_markers": [
+    "awesome",
+    "collection",
+    "curated",
+    "resources",
+    "list-of",
+    "大全",
+    "合集",
+    "导航"
+  ],
+  "categories": [
+    {
+      "id": "knowledge-retrieval-platform",
+      "zh": "知识检索系统",
+      "min_stars": 100,
+      "keywords": {
+        "literal": [
+          "knowledge retrieval system",
+          "document knowledge base",
+          "enterprise search"
+        ],
+        "jargon": [
+          "RAG platform",
+          "retrieval augmented generation",
+          "AI knowledge base",
+          "document QA",
+          "chat with documents"
+        ],
+        "tech": [
+          "retriever reranker",
+          "semantic search embeddings",
+          "BM25 vector search",
+          "RAG pipeline"
+        ],
+        "projects": [
+          "RAGFlow",
+          "Dify",
+          "Haystack",
+          "LlamaIndex",
+          "AnythingLLM",
+          "Quivr"
+        ],
+        "topics": [
+          "rag",
+          "knowledge-base",
+          "semantic-search",
+          "enterprise-search"
+        ],
+        "adjacent": [
+          "question answering",
+          "document intelligence",
+          "agent memory",
+          "citation retrieval"
+        ],
+        "zh": [
+          "知识检索系统",
+          "企业知识库",
+          "文档问答",
+          "RAG 知识库"
+        ]
+      },
+      "negative": [
+        "awesome",
+        "tutorial",
+        "course",
+        "paper list",
+        "homework",
+        "学习笔记",
+        "面试",
+        "interview",
+        "roadmap",
+        "入门教程",
+        "bootcamp",
+        "毕业设计"
+      ],
+      "queries": [
+        {
+          "q": "\"knowledge retrieval system\" in:name,description stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "literal",
+          "term": "knowledge retrieval system",
+          "tier": "core",
+          "websearch": "github knowledge retrieval system open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22knowledge+retrieval+system%22+in%3Aname%2Cdescription+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"document knowledge base\" in:name,description stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "literal",
+          "term": "document knowledge base",
+          "tier": "core",
+          "websearch": "github document knowledge base open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22document+knowledge+base%22+in%3Aname%2Cdescription+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"RAG platform\" in:name,description,readme stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "jargon",
+          "term": "RAG platform",
+          "tier": "core",
+          "websearch": "github RAG platform open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22RAG+platform%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"retrieval augmented generation\" in:name,description,readme stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "jargon",
+          "term": "retrieval augmented generation",
+          "tier": "core",
+          "websearch": "github retrieval augmented generation open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22retrieval+augmented+generation%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"AI knowledge base\" in:name,description,readme stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "jargon",
+          "term": "AI knowledge base",
+          "tier": "core",
+          "websearch": "github AI knowledge base open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22AI+knowledge+base%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"retriever reranker\" in:name,description,readme stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "tech",
+          "term": "retriever reranker",
+          "tier": "depth",
+          "websearch": "github retriever reranker open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22retriever+reranker%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"semantic search embeddings\" in:name,description,readme stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "tech",
+          "term": "semantic search embeddings",
+          "tier": "depth",
+          "websearch": "github semantic search embeddings open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22semantic+search+embeddings%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"BM25 vector search\" in:name,description,readme stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "tech",
+          "term": "BM25 vector search",
+          "tier": "depth",
+          "websearch": "github BM25 vector search open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22BM25+vector+search%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "RAGFlow in:name,description stars:>=20 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "projects",
+          "term": "RAGFlow",
+          "tier": "ecosystem",
+          "websearch": "github RAGFlow open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=RAGFlow+in%3Aname%2Cdescription+stars%3A%3E%3D20+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "Dify in:name,description stars:>=20 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "projects",
+          "term": "Dify",
+          "tier": "ecosystem",
+          "websearch": "github Dify open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=Dify+in%3Aname%2Cdescription+stars%3A%3E%3D20+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "topic:rag stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "topics",
+          "term": "rag",
+          "tier": "precision",
+          "websearch": "github rag open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=topic%3Arag+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "topic:knowledge-base stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "topics",
+          "term": "knowledge-base",
+          "tier": "precision",
+          "websearch": "github knowledge-base open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=topic%3Aknowledge-base+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"question answering\" in:name,description stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "adjacent",
+          "term": "question answering",
+          "tier": "explore",
+          "websearch": "github question answering open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22question+answering%22+in%3Aname%2Cdescription+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"document intelligence\" in:name,description stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "adjacent",
+          "term": "document intelligence",
+          "tier": "explore",
+          "websearch": "github document intelligence open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22document+intelligence%22+in%3Aname%2Cdescription+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "知识检索系统 in:name,description,readme stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "zh",
+          "term": "知识检索系统",
+          "tier": "cn",
+          "websearch": "github 知识检索系统 open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%E7%9F%A5%E8%AF%86%E6%A3%80%E7%B4%A2%E7%B3%BB%E7%BB%9F+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "企业知识库 in:name,description,readme stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "zh",
+          "term": "企业知识库",
+          "tier": "cn",
+          "websearch": "github 企业知识库 open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%E4%BC%81%E4%B8%9A%E7%9F%A5%E8%AF%86%E5%BA%93+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"knowledge retrieval system\" \"retriever reranker\" in:name,description,readme stars:>=25 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "cross",
+          "term": "knowledge retrieval system + retriever reranker",
+          "tier": "precision",
+          "websearch": "github knowledge retrieval system + retriever reranker open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22knowledge+retrieval+system%22+%22retriever+reranker%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D25+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"knowledge retrieval system\" \"semantic search embeddings\" in:name,description,readme stars:>=25 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "cross",
+          "term": "knowledge retrieval system + semantic search embeddings",
+          "tier": "precision",
+          "websearch": "github knowledge retrieval system + semantic search embeddings open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22knowledge+retrieval+system%22+%22semantic+search+embeddings%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D25+pushed%3A%3E2025-02-07+archived%3Afalse"
+        }
+      ]
+    },
+    {
+      "id": "document-ingestion",
+      "zh": "文档解析与导入",
+      "min_stars": 50,
+      "keywords": {
+        "literal": [
+          "document ingestion pipeline",
+          "document parsing",
+          "bulk document import"
+        ],
+        "jargon": [
+          "ETL for LLM",
+          "data connectors for RAG",
+          "document loaders",
+          "multimodal document extraction",
+          "chunking pipeline"
+        ],
+        "tech": [
+          "PDF DOCX PPTX HTML OCR parser",
+          "layout analysis table extraction",
+          "Apache Tika",
+          "PDFium",
+          "OCRmyPDF"
+        ],
+        "projects": [
+          "Unstructured",
+          "Docling",
+          "Apache Tika",
+          "Marker",
+          "MinerU",
+          "LlamaIndex readers"
+        ],
+        "topics": [
+          "document-parser",
+          "document-ai",
+          "pdf-parser",
+          "data-ingestion",
+          "ocr"
+        ],
+        "adjacent": [
+          "web crawler",
+          "file watcher",
+          "object storage",
+          "metadata extraction",
+          "document conversion"
+        ],
+        "zh": [
+          "文档解析",
+          "批量导入",
+          "PDF解析",
+          "多格式文档",
+          "知识库数据清洗"
+        ]
+      },
+      "negative": [
+        "awesome",
+        "tutorial",
+        "single file demo",
+        "course",
+        "homework",
+        "学习笔记",
+        "面试",
+        "interview",
+        "roadmap",
+        "入门教程",
+        "bootcamp",
+        "毕业设计"
+      ],
+      "queries": [
+        {
+          "q": "\"document ingestion pipeline\" in:name,description stars:>=50 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "literal",
+          "term": "document ingestion pipeline",
+          "tier": "core",
+          "websearch": "github document ingestion pipeline open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22document+ingestion+pipeline%22+in%3Aname%2Cdescription+stars%3A%3E%3D50+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"document parsing\" in:name,description stars:>=50 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "literal",
+          "term": "document parsing",
+          "tier": "core",
+          "websearch": "github document parsing open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22document+parsing%22+in%3Aname%2Cdescription+stars%3A%3E%3D50+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"ETL for LLM\" in:name,description,readme stars:>=50 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "jargon",
+          "term": "ETL for LLM",
+          "tier": "core",
+          "websearch": "github ETL for LLM open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22ETL+for+LLM%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D50+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"data connectors for RAG\" in:name,description,readme stars:>=50 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "jargon",
+          "term": "data connectors for RAG",
+          "tier": "core",
+          "websearch": "github data connectors for RAG open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22data+connectors+for+RAG%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D50+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"document loaders\" in:name,description,readme stars:>=50 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "jargon",
+          "term": "document loaders",
+          "tier": "core",
+          "websearch": "github document loaders open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22document+loaders%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D50+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"PDF DOCX PPTX HTML OCR parser\" in:name,description,readme stars:>=50 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "tech",
+          "term": "PDF DOCX PPTX HTML OCR parser",
+          "tier": "depth",
+          "websearch": "github PDF DOCX PPTX HTML OCR parser open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22PDF+DOCX+PPTX+HTML+OCR+parser%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D50+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"layout analysis table extraction\" in:name,description,readme stars:>=50 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "tech",
+          "term": "layout analysis table extraction",
+          "tier": "depth",
+          "websearch": "github layout analysis table extraction open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22layout+analysis+table+extraction%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D50+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"Apache Tika\" in:name,description,readme stars:>=50 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "tech",
+          "term": "Apache Tika",
+          "tier": "depth",
+          "websearch": "github Apache Tika open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22Apache+Tika%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D50+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "Unstructured in:name,description stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "projects",
+          "term": "Unstructured",
+          "tier": "ecosystem",
+          "websearch": "github Unstructured open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=Unstructured+in%3Aname%2Cdescription+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "Docling in:name,description stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "projects",
+          "term": "Docling",
+          "tier": "ecosystem",
+          "websearch": "github Docling open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=Docling+in%3Aname%2Cdescription+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "topic:document-parser stars:>=50 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "topics",
+          "term": "document-parser",
+          "tier": "precision",
+          "websearch": "github document-parser open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=topic%3Adocument-parser+stars%3A%3E%3D50+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "topic:document-ai stars:>=50 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "topics",
+          "term": "document-ai",
+          "tier": "precision",
+          "websearch": "github document-ai open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=topic%3Adocument-ai+stars%3A%3E%3D50+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"web crawler\" in:name,description stars:>=50 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "adjacent",
+          "term": "web crawler",
+          "tier": "explore",
+          "websearch": "github web crawler open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22web+crawler%22+in%3Aname%2Cdescription+stars%3A%3E%3D50+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"file watcher\" in:name,description stars:>=50 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "adjacent",
+          "term": "file watcher",
+          "tier": "explore",
+          "websearch": "github file watcher open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22file+watcher%22+in%3Aname%2Cdescription+stars%3A%3E%3D50+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "文档解析 in:name,description,readme stars:>=5 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "zh",
+          "term": "文档解析",
+          "tier": "cn",
+          "websearch": "github 文档解析 open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%E6%96%87%E6%A1%A3%E8%A7%A3%E6%9E%90+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D5+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "批量导入 in:name,description,readme stars:>=5 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "zh",
+          "term": "批量导入",
+          "tier": "cn",
+          "websearch": "github 批量导入 open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%E6%89%B9%E9%87%8F%E5%AF%BC%E5%85%A5+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D5+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"document ingestion pipeline\" \"PDF DOCX PPTX HTML OCR parser\" in:name,description,readme stars:>=12 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "cross",
+          "term": "document ingestion pipeline + PDF DOCX PPTX HTML OCR parser",
+          "tier": "precision",
+          "websearch": "github document ingestion pipeline + PDF DOCX PPTX HTML OCR parser open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22document+ingestion+pipeline%22+%22PDF+DOCX+PPTX+HTML+OCR+parser%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D12+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"document ingestion pipeline\" \"layout analysis table extraction\" in:name,description,readme stars:>=12 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "cross",
+          "term": "document ingestion pipeline + layout analysis table extraction",
+          "tier": "precision",
+          "websearch": "github document ingestion pipeline + layout analysis table extraction open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22document+ingestion+pipeline%22+%22layout+analysis+table+extraction%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D12+pushed%3A%3E2025-02-07+archived%3Afalse"
+        }
+      ]
+    },
+    {
+      "id": "hybrid-retrieval",
+      "zh": "向量混合检索",
+      "min_stars": 100,
+      "keywords": {
+        "literal": [
+          "vector similarity search",
+          "hybrid search engine",
+          "semantic document search"
+        ],
+        "jargon": [
+          "dense sparse retrieval",
+          "lexical semantic search",
+          "late interaction retrieval",
+          "neural search",
+          "multivector search"
+        ],
+        "tech": [
+          "HNSW",
+          "BM25",
+          "reciprocal rank fusion",
+          "reranker",
+          "ColBERT",
+          "sparse vectors"
+        ],
+        "projects": [
+          "Qdrant",
+          "Weaviate",
+          "Milvus",
+          "OpenSearch",
+          "Vespa",
+          "pgvector",
+          "Meilisearch"
+        ],
+        "topics": [
+          "vector-database",
+          "vector-search",
+          "semantic-search",
+          "hybrid-search",
+          "nearest-neighbor-search"
+        ],
+        "adjacent": [
+          "cross encoder reranking",
+          "embedding models",
+          "metadata filtering",
+          "full text search",
+          "retrieval evaluation"
+        ],
+        "zh": [
+          "向量检索",
+          "混合检索",
+          "相似度查询",
+          "语义搜索",
+          "全文检索"
+        ]
+      },
+      "negative": [
+        "awesome",
+        "benchmark only",
+        "tutorial",
+        "course",
+        "homework",
+        "学习笔记",
+        "面试",
+        "interview",
+        "roadmap",
+        "入门教程",
+        "bootcamp",
+        "毕业设计"
+      ],
+      "queries": [
+        {
+          "q": "\"vector similarity search\" in:name,description stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "literal",
+          "term": "vector similarity search",
+          "tier": "core",
+          "websearch": "github vector similarity search open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22vector+similarity+search%22+in%3Aname%2Cdescription+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"hybrid search engine\" in:name,description stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "literal",
+          "term": "hybrid search engine",
+          "tier": "core",
+          "websearch": "github hybrid search engine open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22hybrid+search+engine%22+in%3Aname%2Cdescription+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"dense sparse retrieval\" in:name,description,readme stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "jargon",
+          "term": "dense sparse retrieval",
+          "tier": "core",
+          "websearch": "github dense sparse retrieval open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22dense+sparse+retrieval%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"lexical semantic search\" in:name,description,readme stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "jargon",
+          "term": "lexical semantic search",
+          "tier": "core",
+          "websearch": "github lexical semantic search open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22lexical+semantic+search%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"late interaction retrieval\" in:name,description,readme stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "jargon",
+          "term": "late interaction retrieval",
+          "tier": "core",
+          "websearch": "github late interaction retrieval open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22late+interaction+retrieval%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "HNSW in:name,description,readme stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "tech",
+          "term": "HNSW",
+          "tier": "depth",
+          "websearch": "github HNSW open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=HNSW+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "BM25 in:name,description,readme stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "tech",
+          "term": "BM25",
+          "tier": "depth",
+          "websearch": "github BM25 open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=BM25+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"reciprocal rank fusion\" in:name,description,readme stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "tech",
+          "term": "reciprocal rank fusion",
+          "tier": "depth",
+          "websearch": "github reciprocal rank fusion open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22reciprocal+rank+fusion%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "Qdrant in:name,description stars:>=20 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "projects",
+          "term": "Qdrant",
+          "tier": "ecosystem",
+          "websearch": "github Qdrant open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=Qdrant+in%3Aname%2Cdescription+stars%3A%3E%3D20+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "Weaviate in:name,description stars:>=20 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "projects",
+          "term": "Weaviate",
+          "tier": "ecosystem",
+          "websearch": "github Weaviate open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=Weaviate+in%3Aname%2Cdescription+stars%3A%3E%3D20+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "topic:vector-database stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "topics",
+          "term": "vector-database",
+          "tier": "precision",
+          "websearch": "github vector-database open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=topic%3Avector-database+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "topic:vector-search stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "topics",
+          "term": "vector-search",
+          "tier": "precision",
+          "websearch": "github vector-search open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=topic%3Avector-search+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"cross encoder reranking\" in:name,description stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "adjacent",
+          "term": "cross encoder reranking",
+          "tier": "explore",
+          "websearch": "github cross encoder reranking open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22cross+encoder+reranking%22+in%3Aname%2Cdescription+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"embedding models\" in:name,description stars:>=100 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "adjacent",
+          "term": "embedding models",
+          "tier": "explore",
+          "websearch": "github embedding models open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22embedding+models%22+in%3Aname%2Cdescription+stars%3A%3E%3D100+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "向量检索 in:name,description,readme stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "zh",
+          "term": "向量检索",
+          "tier": "cn",
+          "websearch": "github 向量检索 open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%E5%90%91%E9%87%8F%E6%A3%80%E7%B4%A2+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "混合检索 in:name,description,readme stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "zh",
+          "term": "混合检索",
+          "tier": "cn",
+          "websearch": "github 混合检索 open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%E6%B7%B7%E5%90%88%E6%A3%80%E7%B4%A2+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"vector similarity search\" HNSW in:name,description,readme stars:>=25 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "cross",
+          "term": "vector similarity search + HNSW",
+          "tier": "precision",
+          "websearch": "github vector similarity search + HNSW open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22vector+similarity+search%22+HNSW+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D25+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"vector similarity search\" BM25 in:name,description,readme stars:>=25 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "cross",
+          "term": "vector similarity search + BM25",
+          "tier": "precision",
+          "websearch": "github vector similarity search + BM25 open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22vector+similarity+search%22+BM25+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D25+pushed%3A%3E2025-02-07+archived%3Afalse"
+        }
+      ]
+    },
+    {
+      "id": "mcp",
+      "zh": "知识库MCP服务",
+      "min_stars": 10,
+      "keywords": {
+        "literal": [
+          "knowledge base MCP server",
+          "document search MCP server",
+          "RAG MCP server"
+        ],
+        "jargon": [
+          "MCP retrieval tool",
+          "semantic search MCP",
+          "vector database MCP server",
+          "context provider MCP"
+        ],
+        "tech": [
+          "Model Context Protocol",
+          "FastMCP",
+          "MCP tools resources prompts",
+          "stdio SSE streamable HTTP"
+        ],
+        "projects": [
+          "modelcontextprotocol servers",
+          "Qdrant MCP",
+          "Chroma MCP",
+          "Weaviate MCP",
+          "RAGFlow MCP"
+        ],
+        "topics": [
+          "mcp-server",
+          "model-context-protocol",
+          "mcp",
+          "rag"
+        ],
+        "adjacent": [
+          "agent tools",
+          "AI assistant integration",
+          "knowledge graph MCP",
+          "filesystem MCP"
+        ],
+        "zh": [
+          "知识库MCP服务",
+          "MCP检索",
+          "MCP向量数据库",
+          "模型上下文协议"
+        ]
+      },
+      "negative": [
+        "awesome",
+        "template only",
+        "tutorial",
+        "course",
+        "homework",
+        "学习笔记",
+        "面试",
+        "interview",
+        "roadmap",
+        "入门教程",
+        "bootcamp",
+        "毕业设计"
+      ],
+      "queries": [
+        {
+          "q": "\"knowledge base MCP server\" in:name,description stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "literal",
+          "term": "knowledge base MCP server",
+          "tier": "core",
+          "websearch": "github knowledge base MCP server open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22knowledge+base+MCP+server%22+in%3Aname%2Cdescription+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"document search MCP server\" in:name,description stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "literal",
+          "term": "document search MCP server",
+          "tier": "core",
+          "websearch": "github document search MCP server open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22document+search+MCP+server%22+in%3Aname%2Cdescription+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"MCP retrieval tool\" in:name,description,readme stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "jargon",
+          "term": "MCP retrieval tool",
+          "tier": "core",
+          "websearch": "github MCP retrieval tool open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22MCP+retrieval+tool%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"semantic search MCP\" in:name,description,readme stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "jargon",
+          "term": "semantic search MCP",
+          "tier": "core",
+          "websearch": "github semantic search MCP open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22semantic+search+MCP%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"vector database MCP server\" in:name,description,readme stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "jargon",
+          "term": "vector database MCP server",
+          "tier": "core",
+          "websearch": "github vector database MCP server open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22vector+database+MCP+server%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"Model Context Protocol\" in:name,description,readme stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "tech",
+          "term": "Model Context Protocol",
+          "tier": "depth",
+          "websearch": "github Model Context Protocol open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22Model+Context+Protocol%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "FastMCP in:name,description,readme stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "tech",
+          "term": "FastMCP",
+          "tier": "depth",
+          "websearch": "github FastMCP open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=FastMCP+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"MCP tools resources prompts\" in:name,description,readme stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "tech",
+          "term": "MCP tools resources prompts",
+          "tier": "depth",
+          "websearch": "github MCP tools resources prompts open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22MCP+tools+resources+prompts%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"modelcontextprotocol servers\" in:name,description stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "projects",
+          "term": "modelcontextprotocol servers",
+          "tier": "ecosystem",
+          "websearch": "github modelcontextprotocol servers open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22modelcontextprotocol+servers%22+in%3Aname%2Cdescription+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"Qdrant MCP\" in:name,description stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "projects",
+          "term": "Qdrant MCP",
+          "tier": "ecosystem",
+          "websearch": "github Qdrant MCP open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22Qdrant+MCP%22+in%3Aname%2Cdescription+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "topic:mcp-server stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "topics",
+          "term": "mcp-server",
+          "tier": "precision",
+          "websearch": "github mcp-server open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=topic%3Amcp-server+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "topic:model-context-protocol stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "topics",
+          "term": "model-context-protocol",
+          "tier": "precision",
+          "websearch": "github model-context-protocol open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=topic%3Amodel-context-protocol+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"agent tools\" in:name,description stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "adjacent",
+          "term": "agent tools",
+          "tier": "explore",
+          "websearch": "github agent tools open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22agent+tools%22+in%3Aname%2Cdescription+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"AI assistant integration\" in:name,description stars:>=10 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "adjacent",
+          "term": "AI assistant integration",
+          "tier": "explore",
+          "websearch": "github AI assistant integration open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22AI+assistant+integration%22+in%3Aname%2Cdescription+stars%3A%3E%3D10+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "知识库MCP服务 in:name,description,readme stars:>=5 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "zh",
+          "term": "知识库MCP服务",
+          "tier": "cn",
+          "websearch": "github 知识库MCP服务 open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%E7%9F%A5%E8%AF%86%E5%BA%93MCP%E6%9C%8D%E5%8A%A1+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D5+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "MCP检索 in:name,description,readme stars:>=5 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "zh",
+          "term": "MCP检索",
+          "tier": "cn",
+          "websearch": "github MCP检索 open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=MCP%E6%A3%80%E7%B4%A2+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D5+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"knowledge base MCP server\" \"Model Context Protocol\" in:name,description,readme stars:>=5 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "cross",
+          "term": "knowledge base MCP server + Model Context Protocol",
+          "tier": "precision",
+          "websearch": "github knowledge base MCP server + Model Context Protocol open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22knowledge+base+MCP+server%22+%22Model+Context+Protocol%22+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D5+pushed%3A%3E2025-02-07+archived%3Afalse"
+        },
+        {
+          "q": "\"knowledge base MCP server\" FastMCP in:name,description,readme stars:>=5 pushed:>2025-02-07 archived:false",
+          "sort": "stars",
+          "order": "desc",
+          "axis": "cross",
+          "term": "knowledge base MCP server + FastMCP",
+          "tier": "precision",
+          "websearch": "github knowledge base MCP server + FastMCP open source repository stars",
+          "web_url": "https://github.com/search?type=repositories&s=stars&o=desc&q=%22knowledge+base+MCP+server%22+FastMCP+in%3Aname%2Cdescription%2Creadme+stars%3A%3E%3D5+pushed%3A%3E2025-02-07+archived%3Afalse"
+        }
+      ]
+    }
+  ]
+}

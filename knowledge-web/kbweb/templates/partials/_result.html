@@ -1,0 +1,29 @@
+{# One retrieval hit. Highlights come from backend character offsets, never
+   from re-matching the query in the template. #}
+<li class="result">
+  <span class="result__rank" aria-hidden="true">{{ rank }}</span>
+  <div class="result__body">
+    <p class="result__crumb">
+      <a class="result__title"
+         href="{{ url_for('library.read', document_id=item.document_id, focus=item.chunk_ordinal) }}#c{{ item.chunk_ordinal }}">{{ item.title }}</a>
+      {% for step in item.heading_path %}
+        <span class="result__sep">›</span><span>{{ step }}</span>
+      {% endfor %}
+      {% if item.page %}<span class="result__sep">·</span><span>第 {{ item.page }} 页</span>{% endif %}
+    </p>
+
+    <p class="result__snippet">{% for fragment, hit in highlight_segments(item.snippet, item.highlights) %}{% if hit %}<mark>{{ fragment }}</mark>{% else %}{{ fragment }}{% endif %}{% endfor %}</p>
+
+    <p class="result__meta">
+      <span class="result__metric">score {{ item.score | score }}</span>
+      {% if item.rerank_score is not none %}
+        <span class="result__metric">rerank {{ item.rerank_score | score }}</span>
+      {% endif %}
+      {% if item.kind != 'text' %}<span class="pill pill--info">{{ item.kind }}</span>{% endif %}
+      <a class="result__cite"
+         href="{{ url_for('library.read', document_id=item.document_id, focus=item.chunk_ordinal) }}#c{{ item.chunk_ordinal }}"
+         title="{{ item.chunk_id }}">{{ item.document_id | short_id }}#{{ item.chunk_ordinal }}</a>
+      <span>v{{ item.version }}</span>
+    </p>
+  </div>
+</li>

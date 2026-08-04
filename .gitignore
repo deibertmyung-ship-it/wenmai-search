@@ -1,0 +1,36 @@
+# Local agent and editor settings
+.claude/
+.vscode/
+.idea/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Python environments and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Runtime data and logs
+.kbdata/
+logs/
+*.log
+
+# Browser test artifacts
+**/tests/e2e/mcp-output/
+**/tests/e2e/screenshots/
+test-results/
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+Desktop.ini

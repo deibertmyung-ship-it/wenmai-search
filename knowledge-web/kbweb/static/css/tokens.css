@@ -1,0 +1,135 @@
+/* Design tokens: 古籍善本 / editorial.
+   Paper is the metaphor - warm off-white, never pure #fff. Cinnabar (朱砂) is a
+   semantic colour reserved for citations and query hits, not decoration. */
+
+:root {
+  color-scheme: light dark;
+
+  /* --- surface: aged paper ------------------------------------------ */
+  --paper:        oklch(97.5% 0.012 85);
+  --paper-raised: oklch(99%   0.008 85);
+  --paper-sunk:   oklch(94.5% 0.018 82);
+  --paper-edge:   oklch(89%   0.022 80);
+
+  /* --- ink ----------------------------------------------------------- */
+  --ink:        oklch(22% 0.012 60);
+  --ink-strong: oklch(14% 0.014 60);
+  --ink-soft:   oklch(46% 0.010 60);
+  --ink-faint:  oklch(63% 0.008 60);
+
+  /* --- semantic accents ---------------------------------------------- */
+  --seal:       oklch(48% 0.170 25);   /* 朱砂: citations + hit highlights only */
+  --seal-wash:  oklch(92% 0.045 30);
+  --indigo:     oklch(42% 0.090 250);  /* 靛青: metrics + debug only */
+  --indigo-wash:oklch(93% 0.030 250);
+  --jade:       oklch(48% 0.090 155);  /* success states */
+  --jade-wash:  oklch(93% 0.035 155);
+  --ochre:      oklch(58% 0.120 75);   /* pending / running */
+  --ochre-wash: oklch(94% 0.045 80);
+
+  /* --- type ----------------------------------------------------------
+     Two families, not two sizes: serif carries the corpus (classical
+     Chinese IS a serif context), sans carries the interface chrome. */
+  --font-serif: "Songti SC", "SimSun", "Noto Serif CJK SC", "Source Han Serif SC",
+                "Source Han Serif CN", "STSong", Georgia, serif;
+  --font-sans:  "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
+                -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-mono:  "Cascadia Mono", "SFMono-Regular", "JetBrains Mono", Consolas, monospace;
+
+  --text-xs:   0.75rem;
+  --text-sm:   0.8125rem;
+  --text-base: 1rem;
+  --text-md:   1.0625rem;
+  --text-lg:   1.25rem;
+  --text-xl:   clamp(1.5rem, 1.2rem + 1vw, 2rem);
+  --text-2xl:  clamp(2rem, 1.5rem + 2vw, 3rem);
+  /* rank numerals: 6x body size - the scale contrast that carries hierarchy */
+  --text-rank: clamp(2.75rem, 2rem + 3vw, 4rem);
+
+  --leading-tight: 1.3;
+  --leading-body:  1.75;
+  --leading-read:  1.95;   /* reader view: classical text needs air */
+
+  /* --- rhythm: deliberately uneven ------------------------------------ */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2.25rem;
+  --space-7: 3.5rem;
+  --space-8: 5.5rem;
+
+  --radius-sm: 2px;
+  --radius:    3px;
+  --radius-lg: 6px;
+
+  /* --- depth: paper stacking, not material elevation ------------------ */
+  --shadow-page:  0 1px 0 var(--paper-edge);
+  --shadow-lift:  0 1px 2px oklch(20% 0.02 60 / 0.06),
+                  0 4px 14px oklch(20% 0.02 60 / 0.05);
+  --shadow-drawer:-16px 0 40px oklch(20% 0.02 60 / 0.13);
+
+  --rule: 1px solid var(--paper-edge);
+
+  --duration-fast:   140ms;
+  --duration-normal: 260ms;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --measure: 68ch;      /* search snippets */
+  --measure-read: 42em; /* reader column */
+}
+
+/* Dark theme is a deliberate second design, not an inversion:
+   ink-on-paper becomes lamplight-on-silk. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:        oklch(19% 0.022 65);
+    --paper-raised: oklch(23% 0.024 65);
+    --paper-sunk:   oklch(16% 0.020 65);
+    --paper-edge:   oklch(34% 0.028 65);
+
+    --ink:        oklch(90% 0.010 80);
+    --ink-strong: oklch(97% 0.008 80);
+    --ink-soft:   oklch(70% 0.010 70);
+    --ink-faint:  oklch(54% 0.010 70);
+
+    --seal:        oklch(70% 0.140 30);
+    --seal-wash:   oklch(30% 0.070 28);
+    --indigo:      oklch(74% 0.090 250);
+    --indigo-wash: oklch(28% 0.050 250);
+    --jade:        oklch(72% 0.080 155);
+    --jade-wash:   oklch(27% 0.045 155);
+    --ochre:       oklch(76% 0.100 80);
+    --ochre-wash:  oklch(29% 0.050 80);
+
+    --shadow-lift: 0 1px 2px oklch(0% 0 0 / 0.4), 0 6px 18px oklch(0% 0 0 / 0.3);
+    --shadow-drawer: -16px 0 40px oklch(0% 0 0 / 0.5);
+  }
+}
+
+/* Explicit toggle must beat the media query in both directions. */
+:root[data-theme="dark"] {
+  --paper:        oklch(19% 0.022 65);
+  --paper-raised: oklch(23% 0.024 65);
+  --paper-sunk:   oklch(16% 0.020 65);
+  --paper-edge:   oklch(34% 0.028 65);
+  --ink:        oklch(90% 0.010 80);
+  --ink-strong: oklch(97% 0.008 80);
+  --ink-soft:   oklch(70% 0.010 70);
+  --ink-faint:  oklch(54% 0.010 70);
+  --seal:        oklch(70% 0.140 30);
+  --seal-wash:   oklch(30% 0.070 28);
+  --indigo:      oklch(74% 0.090 250);
+  --indigo-wash: oklch(28% 0.050 250);
+  --jade:        oklch(72% 0.080 155);
+  --jade-wash:   oklch(27% 0.045 155);
+  --ochre:       oklch(76% 0.100 80);
+  --ochre-wash:  oklch(29% 0.050 80);
+  --shadow-lift: 0 1px 2px oklch(0% 0 0 / 0.4), 0 6px 18px oklch(0% 0 0 / 0.3);
+  --shadow-drawer: -16px 0 40px oklch(0% 0 0 / 0.5);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}

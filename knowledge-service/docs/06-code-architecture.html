@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>kbsvc 代码架构分析</title>
+<style>
+:root{color-scheme:light dark;
+--paper:oklch(97.5% .012 85);--paper-raised:oklch(99% .008 85);--paper-sunk:oklch(94.5% .018 82);
+--paper-edge:oklch(89% .022 80);--ink:oklch(22% .012 60);--ink-strong:oklch(14% .014 60);
+--ink-soft:oklch(46% .010 60);--ink-faint:oklch(63% .008 60);
+--seal:oklch(48% .17 25);--seal-wash:oklch(92% .045 30);
+--indigo:oklch(42% .09 250);--indigo-wash:oklch(93% .03 250);
+--jade:oklch(48% .09 155);
+--font-serif:"Songti SC","SimSun","Noto Serif CJK SC","Source Han Serif SC",Georgia,serif;
+--font-sans:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",-apple-system,"Segoe UI",system-ui,sans-serif;
+--font-mono:"Cascadia Mono","SFMono-Regular",Consolas,monospace;
+--rule:1px solid var(--paper-edge)}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){
+--paper:oklch(19% .022 65);--paper-raised:oklch(23% .024 65);--paper-sunk:oklch(16% .02 65);
+--paper-edge:oklch(34% .028 65);--ink:oklch(90% .01 80);--ink-strong:oklch(97% .008 80);
+--ink-soft:oklch(70% .01 70);--ink-faint:oklch(54% .01 70);
+--seal:oklch(70% .14 30);--seal-wash:oklch(30% .07 28);
+--indigo:oklch(74% .09 250);--indigo-wash:oklch(28% .05 250);--jade:oklch(72% .08 155)}}
+:root[data-theme=dark]{
+--paper:oklch(19% .022 65);--paper-raised:oklch(23% .024 65);--paper-sunk:oklch(16% .02 65);
+--paper-edge:oklch(34% .028 65);--ink:oklch(90% .01 80);--ink-strong:oklch(97% .008 80);
+--ink-soft:oklch(70% .01 70);--ink-faint:oklch(54% .01 70);
+--seal:oklch(70% .14 30);--seal-wash:oklch(30% .07 28);
+--indigo:oklch(74% .09 250);--indigo-wash:oklch(28% .05 250);--jade:oklch(72% .08 155)}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font-sans);
+line-height:1.75;font-size:16px}
+.wrap{display:grid;grid-template-columns:minmax(0,1fr);max-width:1180px;margin:0 auto;padding:0 1.5rem 6rem}
+@media(min-width:1000px){.wrap{grid-template-columns:230px minmax(0,1fr);gap:3.5rem}}
+header.top{border-bottom:2px solid var(--ink-strong);padding:2.5rem 1.5rem 1.25rem;
+max-width:1180px;margin:0 auto;display:flex;align-items:baseline;gap:1.5rem;flex-wrap:wrap}
+h1{font-family:var(--font-serif);font-size:clamp(1.8rem,1.3rem+2vw,2.6rem);margin:0;
+color:var(--ink-strong);line-height:1.25}
+h1::first-letter{color:var(--seal)}
+.top .meta{font-family:var(--font-mono);font-size:.75rem;color:var(--ink-faint);margin-left:auto}
+.theme{background:none;border:var(--rule);color:var(--ink-soft);font:inherit;font-size:.72rem;
+padding:.2rem .7rem;border-radius:3px;cursor:pointer}
+.theme:hover{background:var(--paper-sunk);color:var(--ink-strong)}
+nav.toc{font-size:.82rem;align-self:start}
+@media(min-width:1000px){nav.toc{position:sticky;top:1.5rem;padding-top:2.5rem}}
+nav.toc ol{list-style:none;margin:0;padding:0}
+nav.toc li{margin:.35rem 0}
+nav.toc a{color:var(--ink-soft);text-decoration:none;border-left:2px solid transparent;padding-left:.7rem;display:block}
+nav.toc a:hover{color:var(--seal);border-left-color:var(--seal)}
+main{min-width:0;padding-top:2.5rem}
+h2{font-family:var(--font-serif);font-size:1.5rem;color:var(--ink-strong);
+margin:3rem 0 1rem;padding-bottom:.4rem;border-bottom:2px solid var(--ink-strong);scroll-margin-top:1rem}
+h2:first-child{margin-top:0}
+h3{font-family:var(--font-serif);font-size:1.15rem;color:var(--ink-strong);margin:2rem 0 .6rem}
+p{margin:0 0 1rem;max-width:72ch}
+strong{color:var(--ink-strong);font-weight:600}
+a{color:var(--seal);text-underline-offset:.2em}
+ul,ol{max-width:72ch;padding-left:1.4rem}li{margin:.35rem 0}
+code{font-family:var(--font-mono);font-size:.86em;background:var(--paper-sunk);
+padding:.12em .35em;border-radius:2px;color:var(--ink-strong);
+/* long identifiers must wrap; a single unbreakable token otherwise sets the
+   min-content width of its table cell and pushes the whole page wide */
+overflow-wrap:anywhere;word-break:break-word}
+pre{background:var(--paper-sunk);border:var(--rule);border-radius:4px;padding:1rem 1.1rem;
+overflow-x:auto;margin:1.2rem 0;line-height:1.55}
+pre code{background:none;padding:0;font-size:.8rem;color:var(--ink-soft);
+white-space:pre;overflow-wrap:normal;word-break:normal}
+blockquote{margin:0 0 1.6rem;padding:.8rem 1.1rem;border-left:3px solid var(--indigo);
+background:var(--indigo-wash);color:var(--indigo);font-size:.88rem;border-radius:0 4px 4px 0}
+blockquote p{margin:0;max-width:none}
+blockquote p+p{margin-top:.3rem}
+.tbl{overflow-x:auto;max-width:100%;margin:1.2rem 0}
+table{border-collapse:collapse;width:100%;font-size:.86rem}
+th{text-align:left;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;
+color:var(--ink-faint);font-weight:500;padding:.5rem .7rem;border-bottom:2px solid var(--ink-strong);
+white-space:nowrap}
+td{padding:.55rem .7rem;border-bottom:var(--rule);vertical-align:top}
+tbody tr:hover{background:var(--paper-sunk)}
+td code{font-size:.82em}
+hr{border:none;border-top:var(--rule);margin:2.5rem 0}
+footer{max-width:1180px;margin:0 auto;padding:2rem 1.5rem 3rem;border-top:var(--rule);
+font-size:.76rem;color:var(--ink-faint);font-family:var(--font-mono)}
+@media print{nav.toc,.theme{display:none}.wrap{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>kbsvc 代码架构分析</h1>
+  <div class="meta">kbsvc · 879 节点 / 4208 边 · 2026-08-02
+    <button class="theme" type="button" data-theme-toggle>明/暗</button>
+  </div>
+</header>
+<div class="wrap">
+  <nav class="toc" aria-label="目录"><ol><li><a href="#s1">1. 规模</a></li><li><a href="#s2">2. 包依赖：无环 DAG</a></li><li><a href="#s3">3. 社区检测：真实的模块边界</a></li><li><a href="#s4">4. 复杂度热点</a></li><li><a href="#s5">5. 调用链：导入路径</a></li><li><a href="#s6">6. 高扇入符号</a></li><li><a href="#s7">7. 分层判定</a></li><li><a href="#s8">8. 结论与建议</a></li></ol></nav>
+  <main><blockquote><p>本文的结论来自代码知识图谱的静态分析（879 节点 / 4208 边），不是对设计意图的复述。</p><p>复杂度、循环深度、依赖方向、环检测均为实测值。</p><p>索引名 <code>kbsvc</code>，索引时间 2026-08-02。</p></blockquote>
+<h2 id="s1">1. 规模</h2>
+<div class="tbl"><table><thead><tr>
+<th>维度</th>
+<th>数值</th>
+</tr></thead><tbody>
+<tr><td>生产代码</td><td>68 个 Python 文件，5323 行</td></tr>
+<tr><td>测试代码</td><td>111 个用例，覆盖率 85%</td></tr>
+<tr><td>图节点</td><td>879（Function 253 / Method 148 / Class 95 / Route 25）</td></tr>
+<tr><td>图边</td><td>4208（DEFINES 1552 / USAGE 1085 / CALLS 605 / IMPORTS 256）</td></tr>
+<tr><td>HTTP 路由</td><td>25 条</td></tr>
+</tbody></table></div>
+<p>最大的五个文件：</p>
+<div class="tbl"><table><thead><tr>
+<th>文件</th>
+<th>行数</th>
+<th>职责</th>
+</tr></thead><tbody>
+<tr><td><code>db/repo.py</code></td><td>429</td><td>全部多行读写，含 BM25 词表的批量 upsert</td></tr>
+<tr><td><code>ingest/worker.py</code></td><td>355</td><td>状态机执行器</td></tr>
+<tr><td><code>cli.py</code></td><td>314</td><td>运维入口（9 个子命令）</td></tr>
+<tr><td><code>vector/qdrant_store.py</code></td><td>269</td><td>向量库适配，含嵌入式模式的特殊处理</td></tr>
+<tr><td><code>retrieval/pipeline.py</code></td><td>266</td><td>检索管线编排</td></tr>
+</tbody></table></div>
+<p>没有文件超过 800 行的内部约定线。<code>repo.py</code> 429 行是最接近的，它的体量来自 BM25 词表维护那一段——那部分本可拆到 <code>db/term_stats.py</code>，目前留在原处是因为它与 chunk 增删强耦合，拆开会制造一个只有一个调用方的模块。</p>
+<h2 id="s2">2. 包依赖：无环 DAG</h2>
+<p>对 <code>src/kbsvc/</code> 下所有相对导入做 AST 提取后做环检测，<strong>结果是 NONE</strong>——依赖图是严格的有向无环图。</p>
+<pre><code>                        ┌──────────────────────────────┐
+   出度 10（最宽）        │  ingest                      │  编排层
+                        │  uploader / worker / reembed │
+                        │  states                      │
+                        └──┬────┬────┬────┬────┬───┬───┘
+                           │    │    │    │    │   │
+        ┌──────────────────┘    │    │    │    │   └──────────┐
+        ▼                       ▼    ▼    ▼    ▼              ▼
+   ┌─────────┐          ┌──────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+   │ parsing │          │ chunking │ │embedding│ │ vector │ │storage │  能力层
+   └────┬────┘          └────┬─────┘ └───┬────┘ └───┬────┘ └───┬────┘
+        │                    │           │          │          │
+        └────────┬───────────┴─────┬─────┴──────────┴──────────┘
+                 ▼                 ▼
+           ┌──────────┐      ┌──────────┐
+           │  models  │      │    db    │                              基础层
+           │  ids     │      └────┬─────┘
+           └──────────┘           │
+                 ┌────────────────┴────────────────┐
+                 ▼                                 ▼
+           ┌──────────┐                      ┌──────────┐
+           │  config  │  入度 11              │  errors  │  入度 6      叶子
+           └──────────┘                      └──────────┘</code></pre>
+<p>实测的出入度（<code>out</code> = 依赖了几个包，<code>in</code> = 被几个包依赖）：</p>
+<div class="tbl"><table><thead><tr>
+<th>包</th>
+<th>out</th>
+<th>in</th>
+<th>依赖</th>
+</tr></thead><tbody>
+<tr><td><code>ingest</code></td><td><strong>10</strong></td><td>2</td><td>chunking, config, db, embedding, errors, models, parsing, storage, vector</td></tr>
+<tr><td><code>api</code></td><td>7</td><td>2</td><td>config, db, errors, ingest, retrieval, vector</td></tr>
+<tr><td><code>retrieval</code></td><td>4</td><td>3</td><td>config, db, embedding, vector</td></tr>
+<tr><td><code>mcp</code></td><td>4</td><td>1</td><td><strong>api</strong>, config, db, retrieval</td></tr>
+<tr><td><code>parsing</code></td><td>3</td><td>1</td><td>config, errors, models</td></tr>
+<tr><td><code>chunking</code></td><td>3</td><td>1</td><td>config, ids, models</td></tr>
+<tr><td><code>embedding</code></td><td>3</td><td>2</td><td>config, db, errors</td></tr>
+<tr><td><code>db</code></td><td>3</td><td>6</td><td>config, models</td></tr>
+<tr><td><code>vector</code></td><td>2</td><td>4</td><td>config, errors</td></tr>
+<tr><td><code>storage</code></td><td>2</td><td>1</td><td>config, errors</td></tr>
+<tr><td><code>config</code></td><td>0</td><td><strong>11</strong></td><td>—</td></tr>
+<tr><td><code>errors</code></td><td>0</td><td>6</td><td>—</td></tr>
+<tr><td><code>models</code></td><td>0</td><td>4</td><td>—</td></tr>
+<tr><td><code>ids</code></td><td>0</td><td>1</td><td>—</td></tr>
+</tbody></table></div>
+<p><strong>三条可以从数字直接读出的事实：</strong></p>
+<ol>
+<li><strong><code>ingest</code> 是唯一的编排者</strong>（out=10, in=2）。它是把解析、切分、嵌入、向量写入、元数据事务缝在一起的地方，也是唯一同时触碰全部能力层的包。这不是耦合失控——状态机本来就需要看到全景。反过来说，任何"新增一种导入方式"的改动都会落在这一个包里。</li>
+</ol>
+<ol>
+<li><strong><code>config</code> / <code>errors</code> / <code>models</code> / <code>ids</code> 是纯叶子</strong>（out=0）。它们不依赖任何内部包，因此可以被任意模块安全引入而不产生环。<code>config</code> 入度 11 意味着几乎每个包都读配置——这是设计选择（配置驱动的可插拔），代价是改配置结构会波及面很广。</li>
+</ol>
+<ol>
+<li><strong><code>mcp</code> 依赖 <code>api</code></strong>——这是全图里唯一一条"暴露层依赖暴露层"的边。原因是 <code>mcp/server.py</code> 复用了 <code>api/auth.py:resolve_principal</code> 来从 API Key 推导租户与 ACL。这是刻意的：如果 MCP 自己实现一套凭据解析，两条暴露路径的权限语义就会漂移。代价是 MCP 不能脱离 API 模块单独打包。</li>
+</ol>
+<h2 id="s3">3. 社区检测：真实的模块边界</h2>
+<p>Leiden 社区检测在调用图上跑出的簇，与目录结构<strong>并不完全重合</strong>——这才是实际的架构接缝：</p>
+<div class="tbl"><table><thead><tr>
+<th>簇</th>
+<th>内聚度</th>
+<th>代表成员</th>
+<th>说明</th>
+</tr></thead><tbody>
+<tr><td>40</td><td>0.53</td><td><code>_run_ingest</code>, <code>_run_delete</code>, <code>_apply_stats_delta</code>, <code>_supersede_older</code>, <code>_build_points</code></td><td>状态机执行路径。<strong>完全落在 worker.py 内部</strong>，无外部成员——这个类是自洽的</td></tr>
+<tr><td>15</td><td>0.69</td><td><code>encode_query</code>, <code>encode_document</code>, <code>term_frequencies</code></td><td>BM25 稀疏编码</td></tr>
+<tr><td>28</td><td><strong>1.00</strong></td><td><code>_path</code>, <code>put</code>, <code>exists</code>, <code>get</code></td><td>对象存储。满内聚，接口极窄</td></tr>
+<tr><td>7</td><td>0.76</td><td><code>search</code>, <code>get_settings</code>, <code>get_dense_embedder</code>, <code>search_command</code></td><td>检索入口横跨 pipeline / config / embedding / cli</td></tr>
+<tr><td>22</td><td>0.61</td><td><code>ingest_path</code>, <code>_purge_local_collection</code>, <code>exists</code>, <code>close</code></td><td>资源生命周期管理，横跨 vector 与 api</td></tr>
+</tbody></table></div>
+<p>簇 28（对象存储）内聚度 1.0，说明 <code>ObjectStore</code> 协议的抽象是干净的：4 个方法自成闭环，换 S3 实现不会牵动别处。这与 <code>storage</code> 包 out=2 / in=1 的极低耦合互相印证。</p>
+<h2 id="s4">4. 复杂度热点</h2>
+<p>对 <code>src/</code> 下所有函数做圈复杂度、认知复杂度、循环深度与跨过程传递循环深度的度量，超阈值的如下（按认知复杂度排序）：</p>
+<div class="tbl"><table><thead><tr>
+<th>函数</th>
+<th>文件</th>
+<th>圈复杂度</th>
+<th>认知</th>
+<th>循环深度</th>
+<th>传递循环深度</th>
+<th>行数</th>
+</tr></thead><tbody>
+<tr><td><code>_run_retrievers</code></td><td>retrieval/pipeline.py</td><td>9</td><td><strong>22</strong></td><td>2</td><td>2</td><td>38</td></tr>
+<tr><td><code>decode_bytes</code></td><td>parsing/text_parser.py</td><td>9</td><td>18</td><td>1</td><td>1</td><td>22</td></tr>
+<tr><td><code>ingest_command</code></td><td>cli.py</td><td>9</td><td>17</td><td>1</td><td><strong>9</strong></td><td>65</td></tr>
+<tr><td><code>parse</code></td><td>parsing/unstructured_parser.py</td><td>10</td><td>15</td><td>1</td><td>1</td><td>45</td></tr>
+<tr><td><code>bump_term_stats</code></td><td>db/repo.py</td><td>7</td><td>14</td><td>2</td><td>5</td><td>46</td></tr>
+<tr><td><code>reembed_tenant</code></td><td>ingest/reembed.py</td><td>9</td><td>14</td><td>1</td><td>1</td><td>85</td></tr>
+<tr><td><code>build_from_markdown</code></td><td>parsing/base.py</td><td>6</td><td>13</td><td>2</td><td>2</td><td>86</td></tr>
+<tr><td><code>reciprocal_rank_fusion</code></td><td>retrieval/fusion.py</td><td>5</td><td>12</td><td>2</td><td>2</td><td>26</td></tr>
+<tr><td><code>_attach_page_anchors</code></td><td>parsing/docling_parser.py</td><td>7</td><td>12</td><td>2</td><td>2</td><td>36</td></tr>
+<tr><td><code>run_once</code></td><td>ingest/worker.py</td><td>6</td><td>11</td><td>0</td><td><strong>7</strong></td><td>21</td></tr>
+<tr><td><code>_apply_stats_delta</code></td><td>ingest/worker.py</td><td>3</td><td>4</td><td>2</td><td><strong>7</strong></td><td>20</td></tr>
+</tbody></table></div>
+<p><strong>值得注意的三处：</strong></p>
+<p><strong><code>_run_retrievers</code> 认知复杂度 22，是全项目最高。</strong> 它要处理 3 种检索模式 × N 个改写变体 × 两路去重合并，每一路还要各自计时。这是真实的组合复杂度，不是写法问题。若要降，唯一有效的手段是把"单路检索 + 计时"抽成一个 retriever 对象，让这里只做循环——但那会引入一层间接，在只有两路的情况下未必划算。<strong>建议：暂不重构，但增加第三路检索时必须先抽。</strong></p>
+<p><strong><code>_apply_stats_delta</code> 自身认知复杂度只有 4，传递循环深度却是 7。</strong> 意思是它自己很简单，但它调用的东西（<code>bump_term_stats</code> → <code>_batched</code> → 逐批 upsert）在跨过程展开后有 7 层嵌套循环的最坏情况。这与 <a href="05-performance.md">05-performance.md</a> 记录的实测吻合：一部书数万个 n-gram，词表维护是索引阶段的主要成本之一。<strong>这是真实的性能热点，不是度量噪声。</strong></p>
+<p><strong><code>ingest_command</code> 传递循环深度 9，是全项目最深。</strong> 它是 CLI 的批量导入：遍历文件 → 每个文件走完整 ingest 链路。深度合理，但它把"文件发现 + 登记 + 排空队列"三件事写在一个 65 行函数里，与 <code>api/routers/ingest.py:ingest_path</code> 有明显重复。<strong>建议：把文件发现逻辑提到 <code>ingest/discovery.py</code>，两个调用方共用。</strong></p>
+<p><strong><code>citation.py</code> 的两个函数带 <code>linear_scan_in_loop</code></strong>（<code>_find_spans</code>=2, <code>_best_window_start</code>=1），即循环里套了 find/contains 式扫描——隐藏的 O(n²)。但它们只作用于单个 snippet（默认 320 字符），实际耗时在实测中不到 0.5ms，<strong>不构成问题，无需处理</strong>。</p>
+<h2 id="s5">5. 调用链：导入路径</h2>
+<p><code>_run_ingest</code> 的出向调用图（3 跳，已剔除测试）：</p>
+<pre><code>_run_ingest
+├─ _advance ─────────────────────► 状态跃迁 + 续租
+├─ ObjectStore.get ──────────────► 取原始字节
+├─ Parser.parse ─────────────────► 解析（经 registry 选链）
+├─ StructuralChunker.chunk
+│  ├─ _chunk_block ─► _pack ─────► 句子打包 + 偏移追踪
+│  ├─ _table_chunk
+│  ├─ _absorb_runts
+│  └─ ParsedDocument.section_by_id
+├─ _retract_version_stats ──┐
+├─ _apply_stats_delta ──────┼────► bump_term_stats ─► _batched ─► 批量 upsert
+│                           │      bump_corpus_stat
+├─ _persist_chunks ─────────┴────► ids.chunk_id ─► ids._join
+│                                  repo.replace_chunks
+├─ _build_points ────────────────► DenseEmbedder.embed_documents
+│                                  SparseEmbedder.encode_document
+├─ VectorStore.ensure_collection
+├─ VectorStore.upsert
+├─ _supersede_older ─────────────► repo.superseded_version_ids
+│                                  repo.delete_chunks_for_versions
+│                                  VectorStore.delete_by_versions
+│                                  repo.mark_versions_superseded
+└─ repo.record_event</code></pre>
+<p>这条链印证了一个设计约束：<strong><code>_run_ingest</code> 只与协议交互，不与实现交互</strong>——它调用的是 <code>ObjectStore.get</code>、<code>Parser.parse</code>、<code>VectorStore.upsert</code>、<code>DenseEmbedder.embed_documents</code>，全部是 Protocol 上的方法，没有一处指向具体的 <code>LocalObjectStore</code> / <code>TextParser</code> / <code>QdrantVectorStore</code>。可插拔性在调用图上是可验证的，不只是文档承诺。</p>
+<h2 id="s6">6. 高扇入符号</h2>
+<div class="tbl"><table><thead><tr>
+<th>符号</th>
+<th>扇入</th>
+<th>说明</th>
+</tr></thead><tbody>
+<tr><td><code>ObjectStore.get</code></td><td>33</td><td>协议方法，被大量测试与生产路径调用</td></tr>
+<tr><td><code>IngestWorker.drain</code></td><td>17</td><td>测试排空队列的标准手段</td></tr>
+<tr><td><code>VectorStore.count</code></td><td>12</td><td>统计与断言</td></tr>
+<tr><td><code>db.session.session_scope</code></td><td>10</td><td>事务边界，唯一的会话获取方式</td></tr>
+<tr><td><code>db.session.init_db</code></td><td>9</td><td>每个入口都要先建表</td></tr>
+<tr><td><code>ingest.reembed.reembed_tenant</code></td><td>7</td><td>重建入口</td></tr>
+<tr><td><code>chunking.structural.StructuralChunker.chunk</code></td><td>7</td><td>切分入口</td></tr>
+</tbody></table></div>
+<p><code>session_scope</code> 扇入 10 且没有旁路——全项目没有直接 <code>sessionmaker()</code> 的调用点。事务边界是单一的，这是数据一致性的前提。</p>
+<h2 id="s7">7. 分层判定</h2>
+<p>图分析给出的层次判定：</p>
+<div class="tbl"><table><thead><tr>
+<th>包</th>
+<th>判定层</th>
+<th>依据</th>
+</tr></thead><tbody>
+<tr><td><code>api</code></td><td>api</td><td>含 HTTP 路由定义</td></tr>
+<tr><td><code>kbsvc</code>(整体)</td><td>internal</td><td>fan-in=82, fan-out=124</td></tr>
+<tr><td><code>config</code> / <code>errors</code> / <code>models</code> / <code>ids</code></td><td>core</td><td>高扇入零扇出</td></tr>
+</tbody></table></div>
+<p>25 条路由分布在 5 个 router 模块，<code>app.py</code> 只做装配（依赖 5 个 router，被 0 个依赖）——是干净的组合根（composition root）。</p>
+<h2 id="s8">8. 结论与建议</h2>
+<p><strong>结构上没有需要立即处理的问题。</strong> 依赖无环、协议边界在调用图上可验证、事务边界单一、组合根干净。</p>
+<p>按优先级排列的改进项：</p>
+<div class="tbl"><table><thead><tr>
+<th>优先级</th>
+<th>事项</th>
+<th>依据</th>
+</tr></thead><tbody>
+<tr><td>中</td><td>抽出 <code>ingest/discovery.py</code>，消除 CLI 与 API 的文件发现重复</td><td><code>ingest_command</code> 传递循环深度 9，与 <code>ingest_path</code> 逻辑重复</td></tr>
+<tr><td>中</td><td>BM25 词表维护若成为瓶颈，将 <code>_SQL_VAR_BATCH</code> 从 500 提到 5000</td><td><code>_apply_stats_delta</code> 传递循环深度 7，实测为索引主要成本</td></tr>
+<tr><td>低</td><td>增加第三路检索前，先把"单路检索+计时"抽成 retriever 对象</td><td><code>_run_retrievers</code> 认知复杂度 22，已是全项目最高</td></tr>
+<tr><td>低</td><td><code>repo.py</code> 429 行，若继续增长可拆出 <code>db/term_stats.py</code></td><td>接近 800 行约定线的一半，暂不紧迫</td></tr>
+</tbody></table></div>
+<p><strong>不建议动的地方：</strong> <code>citation.py</code> 的 O(n²) 扫描（作用域是单个 320 字符 snippet，实测 &lt;0.5ms）；<code>mcp</code> → <code>api</code> 的依赖（刻意为之，避免权限语义漂移）；<code>config</code> 的高扇入（配置驱动架构的必然代价）。</p></main>
+</div>
+<footer>由代码知识图谱静态分析生成 · 与 06-code-architecture.md 同源 · 自包含单文件，无外部依赖</footer>
+<script>(function(){var r=document.documentElement;try{var t=localStorage.getItem('kbdoc-theme');
+if(t)r.setAttribute('data-theme',t)}catch(e){}
+document.querySelectorAll('[data-theme-toggle]').forEach(function(b){b.addEventListener('click',function(){
+var cur=r.getAttribute('data-theme')||(window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+var next=cur==='dark'?'light':'dark';r.setAttribute('data-theme',next);
+try{localStorage.setItem('kbdoc-theme',next)}catch(e){}})})})();</script>
+</body>
+</html>

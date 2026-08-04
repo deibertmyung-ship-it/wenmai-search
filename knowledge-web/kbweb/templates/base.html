@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}典藏检索{% endblock %} · kbweb</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📜</text></svg>">
+<script>
+  // Apply the stored theme before first paint so the page never flashes.
+  (function () {
+    try {
+      var t = localStorage.getItem('kbweb-theme');
+      if (t) document.documentElement.setAttribute('data-theme', t);
+    } catch (e) { /* private mode: fall back to the media query */ }
+  })();
+</script>
+</head>
+<body>
+<header class="masthead">
+  <a class="masthead__mark" href="{{ url_for('search.index') }}">典藏检索</a>
+  <nav class="masthead__nav" aria-label="主导航">
+    <a class="masthead__link" href="{{ url_for('search.index') }}"
+       {% if request.endpoint == 'search.index' %}aria-current="page"{% endif %}>检索</a>
+    <a class="masthead__link" href="{{ url_for('library.shelf') }}"
+       {% if request.endpoint and request.endpoint.startswith('library.') %}aria-current="page"{% endif %}>书库</a>
+    <a class="masthead__link" href="{{ url_for('ingest.index') }}"
+       {% if request.endpoint and request.endpoint.startswith('ingest.') %}aria-current="page"{% endif %}>导入</a>
+    <a class="masthead__link" href="{{ url_for('jobs.index') }}"
+       {% if request.endpoint and request.endpoint.startswith('jobs.') %}aria-current="page"{% endif %}>任务</a>
+  </nav>
+  <div class="masthead__meta">
+    <span>v{{ kbweb_version }}</span>
+    <button class="theme-toggle" type="button" data-theme-toggle aria-label="切换明暗主题">明/暗</button>
+  </div>
+</header>
+
+<main class="page">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <p class="flash{% if category %} flash--{{ category }}{% endif %}">{{ message }}</p>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</main>
+
+<script src="{{ url_for('static', filename='js/theme.js') }}" defer></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

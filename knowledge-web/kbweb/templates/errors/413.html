@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}文件过大{% endblock %}
+{% block content %}
+<div class="empty">
+  <span class="empty__mark">巨</span>
+  <h2>文件超出上传上限</h2>
+  <p>当前限制为 {{ limit | filesize }}。大批量语料请改用「按路径批量导入」。</p>
+  <p><a class="btn btn--ghost btn--sm" href="{{ url_for('ingest.index') }}">回到导入</a></p>
+</div>
+{% endblock %}
