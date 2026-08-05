@@ -44,6 +44,7 @@ def _isolated_environment() -> None:
     from kbsvc.config import reset_settings_cache
     from kbsvc.db.session import init_db, reset_engine_cache
     from kbsvc.embedding import reset_embedder_cache
+    from kbsvc.lexical import reset_lexical_store
     from kbsvc.storage import reset_object_store_cache
     from kbsvc.vector import reset_vector_store
 
@@ -52,11 +53,13 @@ def _isolated_environment() -> None:
     reset_object_store_cache()
     reset_embedder_cache()
     reset_vector_store()
+    reset_lexical_store()
     init_db()
 
     yield
 
     reset_vector_store()
+    reset_lexical_store()
 
 
 @pytest.fixture

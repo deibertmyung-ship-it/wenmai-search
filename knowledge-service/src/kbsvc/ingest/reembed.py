@@ -20,7 +20,8 @@ from sqlalchemy.orm import Session
 
 from ..db.models import Chunk, Document, DocumentVersion
 from ..db.session import session_scope
-from ..embedding import get_dense_embedder, get_sparse_embedder
+from ..embedding import get_dense_embedder
+from ..lexical import LexicalDocument, get_lexical_store
 from ..models.events import IndexEventType
 from ..vector import VectorPoint, get_vector_store
 
@@ -57,14 +58,19 @@ def reembed_tenant(
     """
     dense = get_dense_embedder()
     store = get_vector_store()
+    lexical = get_lexical_store()
 
     if recreate and not resume_after:
         # Dimension and vector space are fixed at creation time, so a model
-        # switch cannot reuse the existing collection.
+        # switch cannot reuse the existing collection. The lexical index has no
+        # such constraint, but rebuilding both together is what keeps the two
+        # halves of retrieval describing the same corpus.
         logger.info("recreating collection with dim=%d", dense.dim)
         store.recreate_collection(dense.dim)
+        lexical.recreate()
     else:
         store.ensure_collection(dense.dim)
+        lexical.ensure_ready()
 
     with session_scope() as session:
         total = int(
@@ -89,19 +95,32 @@ def reembed_tenant(
     documents: set[str] = set()
     last_id = resume_after or ""
 
-    while True:
-        with session_scope() as session:
-            rows = _next_batch(session, tenant_id, last_id, batch_size)
-            if not rows:
-                break
-            points = _build_points(session, tenant_id, rows, dense)
-            last_id = rows[-1][0].id
+    # The lexical index commits once at the end, not per batch: committing on
+    # every batch makes tantivy merge segments while later batches are still
+    # writing, which on Windows races with an on-access scanner and kills the
+    # writer. If reembed is interrupted, the dense side resumes from
+    # `last_chunk_id` and the lexical side is rebuilt with `rebuild_lexical` -
+    # 20 seconds on a 22k-chunk corpus, so there is nothing to protect here.
+    with lexical.bulk():
+        while True:
+            with session_scope() as session:
+                rows = _next_batch(session, tenant_id, last_id, batch_size)
+                if not rows:
+                    break
+                points = _build_points(tenant_id, rows, dense)
+                last_id = rows[-1][0].id
 
-        store.upsert(points)
-        done += len(points)
-        documents.update(point.payload["document_id"] for point in points)
-        if progress:
-            progress(already_done + done, total)
+            store.upsert(points)
+            lexical.upsert(
+                [
+                    LexicalDocument(id=point.id, text=point.payload["text"], payload=point.payload)
+                    for point in points
+                ]
+            )
+            done += len(points)
+            documents.update(point.payload["document_id"] for point in points)
+            if progress:
+                progress(already_done + done, total)
 
     with session_scope() as session:
         from ..db import repo
@@ -125,6 +144,55 @@ def reembed_tenant(
     )
 
 
+def rebuild_lexical(
+    tenant_id: str,
+    *,
+    batch_size: int = 512,
+    progress: ProgressHook | None = None,
+) -> int:
+    """Rebuild only the lexical index from the persisted chunk rows.
+
+    The migration path onto tantivy, and the repair path if the two indexes ever
+    drift. Deliberately separate from `reembed_tenant`: the dense vectors are
+    unaffected by a lexical rebuild, and re-running the embedding model over the
+    whole corpus to fix an inverted index would be minutes of wasted GPU/CPU.
+    """
+    lexical = get_lexical_store()
+    lexical.recreate()
+
+    with session_scope() as session:
+        total = int(
+            session.scalar(select(func.count(Chunk.id)).where(Chunk.tenant_id == tenant_id)) or 0
+        )
+    if total == 0:
+        return 0
+
+    done = 0
+    last_id = ""
+    with lexical.bulk():
+        while True:
+            with session_scope() as session:
+                rows = _next_batch(session, tenant_id, last_id, batch_size)
+                if not rows:
+                    break
+                documents = [
+                    LexicalDocument(
+                        id=chunk.id,
+                        text=chunk.text,
+                        payload=_payload(tenant_id, chunk, document, version),
+                    )
+                    for chunk, document, version in rows
+                ]
+                last_id = rows[-1][0].id
+
+            lexical.upsert(documents)
+            done += len(documents)
+            if progress:
+                progress(done, total)
+
+    return done
+
+
 def _next_batch(
     session: Session, tenant_id: str, last_id: str, batch_size: int
 ) -> list[tuple[Chunk, Document, DocumentVersion]]:
@@ -141,41 +209,45 @@ def _next_batch(
 
 
 def _build_points(
-    session: Session,
     tenant_id: str,
     rows: list[tuple[Chunk, Document, DocumentVersion]],
     dense,
 ) -> list[VectorPoint]:
-    sparse = get_sparse_embedder(tenant_id, session)
     texts = [chunk.text for chunk, _, _ in rows]
     vectors = dense.embed_documents(texts)
     return [
         VectorPoint(
             id=chunk.id,
             dense=vector,
-            sparse=sparse.encode_document(chunk.text),
-            payload={
-                "tenant_id": tenant_id,
-                "document_id": document.id,
-                "version_id": version.id,
-                "version": version.version,
-                "chunk_ordinal": chunk.ordinal,
-                "kind": chunk.kind,
-                "source_id": document.source_id,
-                "source_uri": version.source_uri,
-                "title": document.title,
-                "heading_path": chunk.heading_path or [],
-                "heading": (chunk.heading_path or [""])[-1] if chunk.heading_path else "",
-                "page_from": chunk.page_from,
-                "page_to": chunk.page_to,
-                "acl": document.acl or ["public"],
-                "is_current": document.current_version_id == version.id,
-                "parser": version.parser,
-                "parser_version": version.parser_version,
-                "lang": document.meta.get("lang", "zh") if document.meta else "zh",
-                "content_hash": chunk.content_hash,
-                "text": chunk.text,
-            },
+            payload=_payload(tenant_id, chunk, document, version),
         )
         for (chunk, document, version), vector in zip(rows, vectors, strict=True)
     ]
+
+
+def _payload(
+    tenant_id: str, chunk: Chunk, document: Document, version: DocumentVersion
+) -> dict:
+    """The denormalized view both indexes carry, so a hit renders without a join."""
+    return {
+        "tenant_id": tenant_id,
+        "document_id": document.id,
+        "version_id": version.id,
+        "version": version.version,
+        "chunk_ordinal": chunk.ordinal,
+        "kind": chunk.kind,
+        "source_id": document.source_id,
+        "source_uri": version.source_uri,
+        "title": document.title,
+        "heading_path": chunk.heading_path or [],
+        "heading": (chunk.heading_path or [""])[-1] if chunk.heading_path else "",
+        "page_from": chunk.page_from,
+        "page_to": chunk.page_to,
+        "acl": document.acl or ["public"],
+        "is_current": document.current_version_id == version.id,
+        "parser": version.parser,
+        "parser_version": version.parser_version,
+        "lang": document.meta.get("lang", "zh") if document.meta else "zh",
+        "content_hash": chunk.content_hash,
+        "text": chunk.text,
+    }

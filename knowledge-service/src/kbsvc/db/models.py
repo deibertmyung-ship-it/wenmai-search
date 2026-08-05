@@ -8,7 +8,6 @@ from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
-    Float,
     ForeignKey,
     Index,
     Integer,
@@ -166,25 +165,6 @@ class IndexEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
-class TermStat(Base):
-    """Document frequency per sparse term, shared by indexing and querying."""
-
-    __tablename__ = "term_stat"
-
-    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    term: Mapped[str] = mapped_column(String(32), primary_key=True)
-    doc_freq: Mapped[int] = mapped_column(Integer, default=0)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
-
-
-class CorpusStat(Base):
-    __tablename__ = "corpus_stat"
-
-    tenant_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
-    total_length: Mapped[float] = mapped_column(Float, default=0.0)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
-
-    @property
-    def avg_length(self) -> float:
-        return (self.total_length / self.chunk_count) if self.chunk_count else 1.0
+# `term_stat` and `corpus_stat` used to live here: document frequency and corpus
+# length for a hand-rolled BM25. The lexical index keeps those statistics itself
+# now, so the tables are gone rather than left to drift out of step.

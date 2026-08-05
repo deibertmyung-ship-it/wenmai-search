@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 import zlib
 
-from .sparse_bm25 import tokenize
+from ..lexical.tokenizer import tokenize
 
 
 class HashDenseEmbedder:

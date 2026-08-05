@@ -10,6 +10,7 @@ from ...db import repo
 from ...db.models import Chunk, Document, DocumentVersion, IngestJob, Source, utcnow
 from ...errors import NotFoundError, ValidationError
 from ...ingest.states import JobState
+from ...lexical import get_lexical_store
 from ...vector import get_vector_store
 from ..auth import Principal
 from ..deps import get_principal, get_session
@@ -98,6 +99,11 @@ def stats(
     except Exception:
         vector_points = -1
 
+    try:
+        lexical_docs = get_lexical_store().count(tenant)
+    except Exception:
+        lexical_docs = -1
+
     return StatsOut(
         tenant_id=tenant,
         sources=count(Source, Source.tenant_id == tenant),
@@ -105,5 +111,6 @@ def stats(
         versions=count(DocumentVersion, DocumentVersion.tenant_id == tenant),
         chunks=count(Chunk, Chunk.tenant_id == tenant),
         vector_points=vector_points,
+        lexical_docs=lexical_docs,
         jobs_by_state=dict(job_rows),
     )

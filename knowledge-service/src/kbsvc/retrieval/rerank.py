@@ -11,7 +11,7 @@ import logging
 from typing import Protocol
 
 from ..config import get_settings
-from ..embedding.sparse_bm25 import tokenize
+from ..lexical.tokenizer import tokenize
 
 logger = logging.getLogger(__name__)
 

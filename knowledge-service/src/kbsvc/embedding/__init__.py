@@ -1,56 +1,50 @@
-"""Embedder factories and the DB-backed BM25 statistics provider."""
+"""Dense embedder factory.
+
+The sparse half of retrieval no longer lives here: it is a real inverted index
+under `kbsvc.lexical`, which keeps its own corpus statistics. What used to be a
+hand-rolled BM25 plus two statistics tables is now the index's own business.
+"""
 
 from __future__ import annotations
 
 from functools import lru_cache
-
-from sqlalchemy.orm import Session
+from typing import Any
 
 from ..config import get_settings
-from ..db import repo
-from ..db.session import session_scope
-from .base import DenseEmbedder, SparseEmbedder, SparseVector
+from ..normalize import normalize
+from .base import DenseEmbedder
 from .dense_hash import HashDenseEmbedder
-from .sparse_bm25 import Bm25SparseEmbedder, StaticTermStats
 
 
-class DbTermStats:
-    """Reads BM25 corpus statistics from the metadata store.
+class FoldingDenseEmbedder:
+    """Applies the same orthographic folding the lexical index uses.
 
-    Query-time stats are cached per instance so a single search does one round
-    trip; indexing constructs a fresh instance per batch.
+    A wrapper rather than a `normalize()` at each call site: indexing and
+    querying must agree, and there are three call sites (worker, reembed,
+    pipeline). Folding here makes forgetting one of them impossible - the same
+    reason `tokenize` folds internally instead of asking its callers to.
     """
 
-    def __init__(self, tenant_id: str, session: Session | None = None) -> None:
-        self.tenant_id = tenant_id
-        self._session = session
-        self._corpus: tuple[int, float] | None = None
+    def __init__(self, inner: DenseEmbedder) -> None:
+        self._inner = inner
 
-    def _load_corpus(self) -> tuple[int, float]:
-        if self._corpus is None:
-            if self._session is not None:
-                stat = repo.get_corpus_stat(self._session, self.tenant_id)
-            else:
-                with session_scope() as session:
-                    stat = repo.get_corpus_stat(session, self.tenant_id)
-            self._corpus = (stat.chunk_count, stat.avg_length)
-        return self._corpus
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self._inner.embed_documents([normalize(text) for text in texts])
 
-    def doc_freq(self, terms: list[str]) -> dict[str, int]:
-        if self._session is not None:
-            return repo.load_term_stats(self._session, self.tenant_id, terms)
-        with session_scope() as session:
-            return repo.load_term_stats(session, self.tenant_id, terms)
+    def embed_query(self, text: str) -> list[float]:
+        return self._inner.embed_query(normalize(text))
 
-    def chunk_count(self) -> int:
-        return self._load_corpus()[0]
-
-    def avg_length(self) -> float:
-        return self._load_corpus()[1]
+    def __getattr__(self, item: str) -> Any:
+        # name, dim, model_name, ... belong to the wrapped embedder.
+        return getattr(self._inner, item)
 
 
 @lru_cache(maxsize=1)
 def get_dense_embedder() -> DenseEmbedder:
+    return FoldingDenseEmbedder(_build_dense_embedder())
+
+
+def _build_dense_embedder() -> DenseEmbedder:
     settings = get_settings()
     if settings.dense_provider == "fastembed":
         from .dense_fastembed import FastEmbedDenseEmbedder
@@ -76,22 +70,13 @@ def get_dense_embedder() -> DenseEmbedder:
     return HashDenseEmbedder(settings.dense_dim)
 
 
-def get_sparse_embedder(tenant_id: str, session: Session | None = None) -> SparseEmbedder:
-    return Bm25SparseEmbedder(DbTermStats(tenant_id, session))
-
-
 def reset_embedder_cache() -> None:
     get_dense_embedder.cache_clear()
 
 
 __all__ = [
-    "Bm25SparseEmbedder",
-    "DbTermStats",
     "DenseEmbedder",
-    "SparseEmbedder",
-    "SparseVector",
-    "StaticTermStats",
+    "FoldingDenseEmbedder",
     "get_dense_embedder",
-    "get_sparse_embedder",
     "reset_embedder_cache",
 ]

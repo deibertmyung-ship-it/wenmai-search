@@ -1,9 +1,13 @@
 """Qdrant-backed vector store.
 
 Runs identically in embedded mode (KB_QDRANT_URL empty -> on-disk local client)
-and against a Qdrant server. Fusion is deliberately NOT delegated to Qdrant:
-doing dense and sparse as two queries and fusing in kbsvc keeps both profiles
-behaviourally identical and keeps per-retriever debug output available.
+and against a Qdrant server.
+
+This store owns the dense half of retrieval only. The lexical half moved to
+`kbsvc.lexical`, a tantivy inverted index: the embedded Qdrant client has no
+sparse index and scored every chunk in Python. Fusion still happens in kbsvc,
+which keeps both profiles behaviourally identical and keeps per-retriever debug
+output available.
 """
 
 from __future__ import annotations
@@ -25,7 +29,6 @@ from .base import SearchFilter, SearchHit, VectorPoint
 logger = logging.getLogger(__name__)
 
 DENSE_VECTOR = "dense"
-SPARSE_VECTOR = "sparse"
 
 _PURGE_ATTEMPTS = 5
 _PURGE_BACKOFF = 0.4
@@ -76,7 +79,6 @@ class QdrantVectorStore:
                             size=dim, distance=models.Distance.COSINE
                         )
                     },
-                    sparse_vectors_config={SPARSE_VECTOR: models.SparseVectorParams()},
                 )
                 # Embedded Qdrant scans payloads directly; indexes matter on a server.
                 if not self.settings.use_embedded_qdrant:
@@ -169,12 +171,7 @@ class QdrantVectorStore:
                 points=[
                     models.PointStruct(
                         id=point.id,
-                        vector={
-                            DENSE_VECTOR: point.dense,
-                            SPARSE_VECTOR: models.SparseVector(
-                                indices=list(point.sparse), values=list(point.sparse.values())
-                            ),
-                        },
+                        vector={DENSE_VECTOR: point.dense},
                         payload=point.payload,
                     )
                     for point in points
@@ -269,14 +266,6 @@ class QdrantVectorStore:
         self, vector: list[float], *, limit: int, flt: SearchFilter
     ) -> list[SearchHit]:
         return self._query(vector, DENSE_VECTOR, limit, flt)
-
-    def search_sparse(
-        self, vector: dict[int, float], *, limit: int, flt: SearchFilter
-    ) -> list[SearchHit]:
-        if not vector:
-            return []
-        query = models.SparseVector(indices=list(vector), values=list(vector.values()))
-        return self._query(query, SPARSE_VECTOR, limit, flt)
 
     def count(self, tenant_id: str | None = None) -> int:
         with self._client_access():

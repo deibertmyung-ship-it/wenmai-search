@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from kbsvc.db import repo
 from kbsvc.db.models import Chunk, Document, DocumentVersion, IndexEvent, IngestJob
 from kbsvc.ingest.states import JobState, backoff_seconds, can_transition
 from kbsvc.ingest.uploader import register_bytes
@@ -256,8 +255,11 @@ def test_registration_requires_an_external_id(session, tenant, source):
         )
 
 
-def test_corpus_statistics_track_the_chunk_table(session, tenant, source, worker):
-    before = repo.get_corpus_stat(session, tenant).chunk_count
+def test_lexical_index_tracks_the_chunk_table(session, tenant, source, worker):
+    """Corpus statistics used to be two hand-maintained tables; the index owns them now."""
+    from kbsvc.lexical import get_lexical_store
+
+    before = get_lexical_store().count(tenant)
     register_bytes(
         session,
         tenant_id=tenant,
@@ -269,10 +271,7 @@ def test_corpus_statistics_track_the_chunk_table(session, tenant, source, worker
     session.commit()
     worker.drain()
 
-    session.expire_all()
-    after = repo.get_corpus_stat(session, tenant)
-    assert after.chunk_count > before
-    assert after.avg_length > 0
+    assert get_lexical_store().count(tenant) > before
 
 
 def test_two_workers_never_claim_the_same_job(session, tenant, source):

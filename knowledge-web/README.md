@@ -3,13 +3,13 @@
 [kbsvc](../knowledge-service/) 的 Flask 前端。服务端渲染、无构建步骤、无 CDN。
 
 ```
-浏览器 ──▶ Flask (kbweb) ──HTTP──▶ kbsvc REST ──▶ Qdrant / PG / S3
+浏览器 ──▶ Flask (kbweb) ──HTTP──▶ kbsvc REST ──▶ Qdrant / Tantivy / PG / S3
 ```
 
 ## 为什么走 HTTP 而不是直接 import kbsvc
 
-当前 `local` profile 把嵌入式 Qdrant 和常驻 worker 放在同一个 API 进程中，Web 仍是独立
-表现层。Web 只走 HTTP，可以避免复制检索、任务和存储逻辑，也能无缝指向远程 kbsvc，
+当前 `local` profile 把嵌入式 Qdrant、Tantivy 索引和常驻 worker 放在同一个 API 进程中，
+Web 仍是独立表现层。两个索引都持目录锁，Web 更不该成为第二个持有者。Web 只走 HTTP，可以避免复制检索、任务和存储逻辑，也能无缝指向远程 kbsvc，
 使 `local` 与 `server` 两种 profile 保持相同前后端边界。
 
 顺带的好处：API Key 只存在 Flask 服务端，浏览器永远拿不到。

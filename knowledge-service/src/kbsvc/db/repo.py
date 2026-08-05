@@ -4,27 +4,20 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from sqlalchemy import case, delete, func, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from .. import ids
 from ..models.events import IndexEventType
 from .models import (
     Chunk,
-    CorpusStat,
     Document,
     DocumentVersion,
     IndexEvent,
     IngestJob,
     Source,
-    TermStat,
     utcnow,
 )
-
-# SQLite caps bound parameters at 32766 (999 on older builds); stay well under.
-_SQL_VAR_BATCH = 500
 
 # --- sources ------------------------------------------------------------
 
@@ -317,113 +310,3 @@ def record_event(
     session.add(event)
     session.flush()
     return event
-
-
-# --- sparse term statistics --------------------------------------------
-
-
-def _batched(items: list, size: int = _SQL_VAR_BATCH):
-    for start in range(0, len(items), size):
-        yield items[start : start + size]
-
-
-def bump_term_stats(session: Session, tenant_id: str, doc_freq_delta: dict[str, int]) -> None:
-    """Apply signed doc-frequency deltas.
-
-    A single classical text yields tens of thousands of distinct char n-grams,
-    so this batches to stay under SQLite's bound-parameter ceiling and uses a
-    native upsert (supported identically by SQLite and PostgreSQL).
-    """
-    if not doc_freq_delta:
-        return
-
-    dialect = session.get_bind().dialect.name
-    if dialect in ("sqlite", "postgresql"):
-        insert = sqlite_insert if dialect == "sqlite" else pg_insert
-        for batch in _batched(list(doc_freq_delta.items()), _SQL_VAR_BATCH // 3):
-            stmt = insert(TermStat).values(
-                [
-                    {"tenant_id": tenant_id, "term": term, "doc_freq": max(delta, 0)}
-                    for term, delta in batch
-                ]
-            )
-            session.execute(
-                stmt.on_conflict_do_update(
-                    index_elements=[TermStat.tenant_id, TermStat.term],
-                    set_={"doc_freq": TermStat.doc_freq + stmt.excluded.doc_freq},
-                )
-            )
-        # Deltas were clamped at 0 on insert; apply negatives as explicit decrements.
-        # Group by delta so each distinct decrement is one statement, not one per term.
-        negatives: dict[int, list[str]] = {}
-        for term, delta in doc_freq_delta.items():
-            if delta < 0:
-                negatives.setdefault(delta, []).append(term)
-        for delta, terms in negatives.items():
-            floored = case(
-                (TermStat.doc_freq + delta < 0, 0), else_=TermStat.doc_freq + delta
-            )
-            for batch in _batched(terms):
-                session.execute(
-                    update(TermStat)
-                    .where(TermStat.tenant_id == tenant_id, TermStat.term.in_(batch))
-                    .values(doc_freq=floored)
-                )
-        session.flush()
-        return
-
-    _bump_term_stats_generic(session, tenant_id, doc_freq_delta)
-
-
-def _bump_term_stats_generic(
-    session: Session, tenant_id: str, doc_freq_delta: dict[str, int]
-) -> None:
-    """Portable read-modify-write path for dialects without ON CONFLICT."""
-    for batch in _batched(list(doc_freq_delta)):
-        existing = {
-            row.term: row
-            for row in session.scalars(
-                select(TermStat).where(
-                    TermStat.tenant_id == tenant_id, TermStat.term.in_(batch)
-                )
-            )
-        }
-        for term in batch:
-            delta = doc_freq_delta[term]
-            row = existing.get(term)
-            if row is None:
-                session.add(TermStat(tenant_id=tenant_id, term=term, doc_freq=max(delta, 0)))
-            else:
-                row.doc_freq = max(row.doc_freq + delta, 0)
-    session.flush()
-
-
-def load_term_stats(session: Session, tenant_id: str, terms: list[str]) -> dict[str, int]:
-    if not terms:
-        return {}
-    found: dict[str, int] = {}
-    for batch in _batched(terms):
-        stmt = select(TermStat.term, TermStat.doc_freq).where(
-            TermStat.tenant_id == tenant_id, TermStat.term.in_(batch)
-        )
-        found.update(dict(session.execute(stmt).all()))
-    return found
-
-
-def bump_corpus_stat(
-    session: Session, tenant_id: str, *, chunk_delta: int, length_delta: float
-) -> CorpusStat:
-    stat = session.get(CorpusStat, tenant_id)
-    if stat is None:
-        stat = CorpusStat(tenant_id=tenant_id, chunk_count=0, total_length=0.0)
-        session.add(stat)
-    stat.chunk_count = max(stat.chunk_count + chunk_delta, 0)
-    stat.total_length = max(stat.total_length + length_delta, 0.0)
-    session.flush()
-    return stat
-
-
-def get_corpus_stat(session: Session, tenant_id: str) -> CorpusStat:
-    return session.get(CorpusStat, tenant_id) or CorpusStat(
-        tenant_id=tenant_id, chunk_count=0, total_length=0.0
-    )

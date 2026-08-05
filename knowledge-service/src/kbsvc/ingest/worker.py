@@ -10,12 +10,10 @@ from __future__ import annotations
 
 import logging
 import socket
-from collections import Counter
 from dataclasses import dataclass
 from datetime import timedelta
 from threading import Event
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import ids
@@ -24,8 +22,8 @@ from ..db import repo
 from ..db.models import Chunk as ChunkRow
 from ..db.models import Document, DocumentVersion, IngestJob, utcnow
 from ..db.session import session_scope
-from ..embedding import get_dense_embedder, get_sparse_embedder
-from ..embedding.sparse_bm25 import tokenize
+from ..embedding import get_dense_embedder
+from ..lexical import LexicalDocument, get_lexical_store
 from ..models.events import IndexEventType
 from ..models.ir import Chunk as ChunkIR
 from ..parsing.registry import get_registry
@@ -126,19 +124,29 @@ class IngestWorker:
         if not chunks:
             raise ValueError(f"parser produced no chunks for {version.object_key}")
 
-        self._retract_version_stats(session, document.tenant_id, [version.id])
         rows = self._persist_chunks(session, document, version, chunks)
-        self._apply_stats_delta(session, document.tenant_id, [row.text for row in rows], sign=1)
 
         # -- embed
         self._advance(session, job, JobState.EMBEDDING)
-        points = self._build_points(session, document, version, parsed.meta.lang, rows)
+        points = self._build_points(document, version, parsed.meta.lang, rows)
 
         # -- index
         self._advance(session, job, JobState.INDEXING)
         store = get_vector_store()
         store.ensure_collection(get_dense_embedder().dim)
         store.upsert(points)
+
+        lexical = get_lexical_store()
+        # The SQL side replaces a version's chunks wholesale; the lexical index
+        # must do the same, or a re-index that chunks differently leaves the
+        # previous attempt's chunks searchable under their old ids.
+        lexical.delete_by_versions(document.tenant_id, [version.id])
+        lexical.upsert(
+            [
+                LexicalDocument(id=point.id, text=point.payload["text"], payload=point.payload)
+                for point in points
+            ]
+        )
 
         version.status = "indexed"
         version.chunk_count = len(rows)
@@ -161,15 +169,9 @@ class IngestWorker:
             return {"deleted": 0, "note": "document already gone"}
 
         version_ids = [version.id for version in repo.list_versions(session, document.id)]
-        texts = [
-            row.text
-            for row in session.scalars(
-                select(ChunkRow).where(ChunkRow.document_id == document.id)
-            )
-        ]
-        self._apply_stats_delta(session, document.tenant_id, texts, sign=-1)
         removed = repo.delete_chunks_for_versions(session, version_ids)
         get_vector_store().delete_by_document(document.tenant_id, document.id)
+        get_lexical_store().delete_by_document(document.tenant_id, document.id)
 
         document.deleted_at = utcnow()
         document.current_version_id = None
@@ -214,21 +216,18 @@ class IngestWorker:
 
     def _build_points(
         self,
-        session: Session,
         document: Document,
         version: DocumentVersion,
         lang: str,
         rows: list[ChunkRow],
     ) -> list[VectorPoint]:
         dense = get_dense_embedder()
-        sparse = get_sparse_embedder(document.tenant_id, session)
         texts = [row.text for row in rows]
         vectors = dense.embed_documents(texts)
         return [
             VectorPoint(
                 id=row.id,
                 dense=vector,
-                sparse=sparse.encode_document(row.text),
                 payload={
                     "tenant_id": document.tenant_id,
                     "document_id": document.id,
@@ -261,13 +260,9 @@ class IngestWorker:
         stale = repo.superseded_version_ids(session, document.id, current.id)
         if not stale:
             return []
-        texts = [
-            row.text
-            for row in session.scalars(select(ChunkRow).where(ChunkRow.version_id.in_(stale)))
-        ]
-        self._apply_stats_delta(session, document.tenant_id, texts, sign=-1)
         repo.delete_chunks_for_versions(session, stale)
         get_vector_store().delete_by_versions(document.tenant_id, stale)
+        get_lexical_store().delete_by_versions(document.tenant_id, stale)
         repo.mark_versions_superseded(session, stale)
         repo.record_event(
             session,
@@ -278,38 +273,6 @@ class IngestWorker:
             payload={"superseded_version_ids": stale},
         )
         return stale
-
-    def _retract_version_stats(
-        self, session: Session, tenant_id: str, version_ids: list[str]
-    ) -> None:
-        """Undo statistics from a previous indexing attempt of the same version."""
-        texts = [
-            row.text
-            for row in session.scalars(select(ChunkRow).where(ChunkRow.version_id.in_(version_ids)))
-        ]
-        if texts:
-            self._apply_stats_delta(session, tenant_id, texts, sign=-1)
-
-    def _apply_stats_delta(
-        self, session: Session, tenant_id: str, texts: list[str], *, sign: int
-    ) -> None:
-        """Keep BM25 doc-freq and corpus length in step with the chunk table."""
-        if not texts:
-            return
-        delta: Counter[str] = Counter()
-        total_length = 0
-        for text in texts:
-            tokens = tokenize(text)
-            total_length += len(tokens)
-            for term in set(tokens):
-                delta[term] += sign
-        repo.bump_term_stats(session, tenant_id, dict(delta))
-        repo.bump_corpus_stat(
-            session,
-            tenant_id,
-            chunk_delta=sign * len(texts),
-            length_delta=float(sign * total_length),
-        )
 
     # --- state transitions ----------------------------------------------
 

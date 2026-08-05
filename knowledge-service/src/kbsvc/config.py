@@ -45,6 +45,17 @@ class Settings(BaseSettings):
     qdrant_collection: str = "kb_chunks"
     qdrant_timeout: float = 30.0
 
+    # --- lexical store (tantivy inverted index) --------------------------
+    # Empty -> data_dir/lexical. Writers need a heap; tantivy's floor is 15 MB.
+    lexical_dir: Path | None = None
+    lexical_writer_heap_mb: int = 64
+    # 0 lets tantivy pick. Multiple indexing threads create and replace segment
+    # files concurrently, which on Windows can collide with an on-access virus
+    # scanner and kill the writer with PermissionDenied on a .pos/.fieldnorm
+    # file. Serialising costs ~2x on a full rebuild and nothing on incremental
+    # ingest, so it is the safe default; raise it on Linux or with an exclusion.
+    lexical_writer_threads: int = 1
+
     # --- embedding ------------------------------------------------------
     dense_provider: DenseProvider = "hash"
     dense_dim: int = 384
@@ -55,6 +66,12 @@ class Settings(BaseSettings):
     model_cache_dir: Path | None = None
     openai_base_url: str = "https://api.openai.com/v1"
     openai_api_key: str = ""
+
+    # --- text normalization ---------------------------------------------
+    # Fold traditional and old glyph forms before indexing and before
+    # embedding, so 陰陽 and 阴阳 retrieve the same passages. Applied to the
+    # retrieval representation only - stored text is never rewritten.
+    normalize_cjk: bool = True
 
     # --- chunking -------------------------------------------------------
     chunk_target_tokens: int = 512
@@ -117,6 +134,10 @@ class Settings(BaseSettings):
     @property
     def qdrant_local_path(self) -> Path:
         return self.data_dir / "qdrant"
+
+    @property
+    def resolved_lexical_dir(self) -> Path:
+        return self.lexical_dir or (self.data_dir / "lexical")
 
     @property
     def use_embedded_qdrant(self) -> bool:

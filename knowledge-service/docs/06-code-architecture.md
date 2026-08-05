@@ -3,28 +3,37 @@
 > 本文的结论来自代码知识图谱的静态分析（879 节点 / 4208 边），不是对设计意图的复述。
 > 复杂度、循环深度、依赖方向、环检测均为实测值。
 > 索引名 `kbsvc`，索引时间 2026-08-02。
+>
+> **⚠ 图谱数据早于「自研 BM25 → Tantivy」的重构。** 规模一节的行数与文件数已按当前代码
+> 重测；复杂度、社区检测、图节点/边数尚未重跑，涉及已删除代码的条目已就地标注。重跑
+> 索引后请更新本文。
 
 ## 1. 规模
 
-| 维度 | 数值 |
-|---|---|
-| 生产代码 | 68 个 Python 文件，5323 行 |
-| 测试代码 | 111 个用例，覆盖率 85% |
-| 图节点 | 879（Function 253 / Method 148 / Class 95 / Route 25） |
-| 图边 | 4208（DEFINES 1552 / USAGE 1085 / CALLS 605 / IMPORTS 256） |
-| HTTP 路由 | 25 条 |
+| 维度 | 数值 | 时点 |
+|---|---|---|
+| 生产代码 | 63 个 Python 文件，4625 行 | 重构后重测 |
+| 测试代码 | 119 个用例 | 重构后重测 |
+| 图节点 | 879（Function 253 / Method 148 / Class 95 / Route 25） | 重构前 |
+| 图边 | 4208（DEFINES 1552 / USAGE 1085 / CALLS 605 / IMPORTS 256） | 重构前 |
+| HTTP 路由 | 25 条 | 重构前 |
 
-最大的五个文件：
+重构净减约 700 行：删掉自研 BM25（`embedding/sparse_bm25.py` 117 行）、`repo.py` 的词表
+统计维护（110 行）、`worker.py` 的统计增量方法，新增 `lexical/` 包 4 个文件。
+
+最大的五个文件（重构后重测）：
 
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `db/repo.py` | 429 | 全部多行读写，含 BM25 词表的批量 upsert |
-| `ingest/worker.py` | 355 | 状态机执行器 |
-| `cli.py` | 314 | 运维入口（9 个子命令） |
-| `vector/qdrant_store.py` | 269 | 向量库适配，含嵌入式模式的特殊处理 |
-| `retrieval/pipeline.py` | 266 | 检索管线编排 |
+| `cli.py` | 290 | 运维入口（10 个子命令） |
+| `ingest/worker.py` | 283 | 状态机执行器 |
+| `lexical/tantivy_store.py` | 269 | 词法索引适配，含 Windows 句柄与批量装载的特殊处理 |
+| `db/repo.py` | 264 | 全部多行读写 |
+| `vector/qdrant_store.py` | 247 | 向量库适配，含嵌入式模式的特殊处理 |
 
-没有文件超过 800 行的内部约定线。`repo.py` 429 行是最接近的，它的体量来自 BM25 词表维护那一段——那部分本可拆到 `db/term_stats.py`，目前留在原处是因为它与 chunk 增删强耦合，拆开会制造一个只有一个调用方的模块。
+没有文件超过 800 行的内部约定线。原先 `repo.py` 以 429 行居首，体量主要来自 BM25 词表
+维护；那段代码已随自研 BM25 一并删除，`repo.py` 降到 264 行，**曾建议的 `db/term_stats.py`
+拆分因此作废**。现在最大的是 `cli.py`，属于命令罗列型增长，不构成结构问题。
 
 ## 2. 包依赖：无环 DAG
 
@@ -89,8 +98,8 @@ Leiden 社区检测在调用图上跑出的簇，与目录结构**并不完全�
 
 | 簇 | 内聚度 | 代表成员 | 说明 |
 |---|---|---|---|
-| 40 | 0.53 | `_run_ingest`, `_run_delete`, `_apply_stats_delta`, `_supersede_older`, `_build_points` | 状态机执行路径。**完全落在 worker.py 内部**，无外部成员——这个类是自洽的 |
-| 15 | 0.69 | `encode_query`, `encode_document`, `term_frequencies` | BM25 稀疏编码 |
+| 40 | 0.53 | `_run_ingest`, `_run_delete`, ~~`_apply_stats_delta`~~, `_supersede_older`, `_build_points` | 状态机执行路径。**完全落在 worker.py 内部**，无外部成员——这个类是自洽的。（`_apply_stats_delta` 已随自研 BM25 删除） |
+| 15 | 0.69 | ~~`encode_query`, `encode_document`, `term_frequencies`~~ | ~~BM25 稀疏编码~~ — **整簇已消失**：打分交给 Tantivy，只剩 `lexical/tokenizer.py` 的 `tokenize`/`analyze` 两个纯函数 |
 | 28 | **1.00** | `_path`, `put`, `exists`, `get` | 对象存储。满内聚，接口极窄 |
 | 7 | 0.76 | `search`, `get_settings`, `get_dense_embedder`, `search_command` | 检索入口横跨 pipeline / config / embedding / cli |
 | 22 | 0.61 | `ingest_path`, `_purge_local_collection`, `exists`, `close` | 资源生命周期管理，横跨 vector 与 api |
@@ -107,19 +116,25 @@ Leiden 社区检测在调用图上跑出的簇，与目录结构**并不完全�
 | `decode_bytes` | parsing/text_parser.py | 9 | 18 | 1 | 1 | 22 |
 | `ingest_command` | cli.py | 9 | 17 | 1 | **9** | 65 |
 | `parse` | parsing/unstructured_parser.py | 10 | 15 | 1 | 1 | 45 |
-| `bump_term_stats` | db/repo.py | 7 | 14 | 2 | 5 | 46 |
+| ~~`bump_term_stats`~~ | ~~db/repo.py~~ | 7 | 14 | 2 | 5 | 46 | ← **已删除** |
 | `reembed_tenant` | ingest/reembed.py | 9 | 14 | 1 | 1 | 85 |
 | `build_from_markdown` | parsing/base.py | 6 | 13 | 2 | 2 | 86 |
 | `reciprocal_rank_fusion` | retrieval/fusion.py | 5 | 12 | 2 | 2 | 26 |
 | `_attach_page_anchors` | parsing/docling_parser.py | 7 | 12 | 2 | 2 | 36 |
 | `run_once` | ingest/worker.py | 6 | 11 | 0 | **7** | 21 |
-| `_apply_stats_delta` | ingest/worker.py | 3 | 4 | 2 | **7** | 20 |
+| ~~`_apply_stats_delta`~~ | ~~ingest/worker.py~~ | 3 | 4 | 2 | **7** | 20 | ← **已删除** |
 
 **值得注意的三处：**
 
 **`_run_retrievers` 认知复杂度 22，是全项目最高。** 它要处理 3 种检索模式 × N 个改写变体 × 两路去重合并，每一路还要各自计时。这是真实的组合复杂度，不是写法问题。若要降，唯一有效的手段是把"单路检索 + 计时"抽成一个 retriever 对象，让这里只做循环——但那会引入一层间接，在只有两路的情况下未必划算。**建议：暂不重构，但增加第三路检索时必须先抽。**
 
-**`_apply_stats_delta` 自身认知复杂度只有 4，传递循环深度却是 7。** 意思是它自己很简单，但它调用的东西（`bump_term_stats` → `_batched` → 逐批 upsert）在跨过程展开后有 7 层嵌套循环的最坏情况。这与 [05-performance.md](05-performance.md) 记录的实测吻合：一部书数万个 n-gram，词表维护是索引阶段的主要成本之一。**这是真实的性能热点，不是度量噪声。**
+> 重构后这个函数已明显变简单：词法一路不再逐变体检索、不再手工合并去重，只发一次查询。
+> 复杂度未重测，但方向是下降的。
+
+**~~`_apply_stats_delta` 自身认知复杂度只有 4，传递循环深度却是 7。~~** 已随自研 BM25 删除。
+当时的结论是对的——它自己简单，但跨过程展开后（`bump_term_stats` → `_batched` → 逐批
+upsert）有 7 层嵌套循环，与 [05-performance.md](05-performance.md) 实测的「词表维护是索引
+阶段主要成本之一」吻合。**这条热点现在通过删除代码消除，而不是优化代码。**
 
 **`ingest_command` 传递循环深度 9，是全项目最深。** 它是 CLI 的批量导入：遍历文件 → 每个文件走完整 ingest 链路。深度合理，但它把"文件发现 + 登记 + 排空队列"三件事写在一个 65 行函数里，与 `api/routers/ingest.py:ingest_path` 有明显重复。**建议：把文件发现逻辑提到 `ingest/discovery.py`，两个调用方共用。**
 
@@ -139,15 +154,13 @@ _run_ingest
 │  ├─ _table_chunk
 │  ├─ _absorb_runts
 │  └─ ParsedDocument.section_by_id
-├─ _retract_version_stats ──┐
-├─ _apply_stats_delta ──────┼────► bump_term_stats ─► _batched ─► 批量 upsert
-│                           │      bump_corpus_stat
-├─ _persist_chunks ─────────┴────► ids.chunk_id ─► ids._join
+├─ _persist_chunks ──────────────► ids.chunk_id ─► ids._join
 │                                  repo.replace_chunks
 ├─ _build_points ────────────────► DenseEmbedder.embed_documents
-│                                  SparseEmbedder.encode_document
 ├─ VectorStore.ensure_collection
 ├─ VectorStore.upsert
+├─ LexicalStore.delete_by_versions ──► 与 replace_chunks 同语义：整版本替换
+├─ LexicalStore.upsert ──────────► tokenizer.analyze ─► tantivy add_document
 ├─ _supersede_older ─────────────► repo.superseded_version_ids
 │                                  repo.delete_chunks_for_versions
 │                                  VectorStore.delete_by_versions
@@ -191,9 +204,10 @@ _run_ingest
 
 | 优先级 | 事项 | 依据 |
 |---|---|---|
+| 高 | 重跑代码图谱索引 | 本文的复杂度与社区检测数据早于 Tantivy 重构 |
 | 中 | 抽出 `ingest/discovery.py`，消除 CLI 与 API 的文件发现重复 | `ingest_command` 传递循环深度 9，与 `ingest_path` 逻辑重复 |
-| 中 | BM25 词表维护若成为瓶颈，将 `_SQL_VAR_BATCH` 从 500 提到 5000 | `_apply_stats_delta` 传递循环深度 7，实测为索引主要成本 |
 | 低 | 增加第三路检索前，先把"单路检索+计时"抽成 retriever 对象 | `_run_retrievers` 认知复杂度 22，已是全项目最高 |
-| 低 | `repo.py` 429 行，若继续增长可拆出 `db/term_stats.py` | 接近 800 行约定线的一半，暂不紧迫 |
+| ~~中~~ | ~~BM25 词表维护若成为瓶颈，将 `_SQL_VAR_BATCH` 从 500 提到 5000~~ | **已作废**：词表维护与 `_SQL_VAR_BATCH` 均已删除 |
+| ~~低~~ | ~~`repo.py` 429 行，若继续增长可拆出 `db/term_stats.py`~~ | **已作废**：`repo.py` 已降到 264 行 |
 
 **不建议动的地方：** `citation.py` 的 O(n²) 扫描（作用域是单个 320 字符 snippet，实测 <0.5ms）；`mcp` → `api` 的依赖（刻意为之，避免权限语义漂移）；`config` 的高扇入（配置驱动架构的必然代价）。

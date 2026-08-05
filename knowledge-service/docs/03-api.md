@@ -23,6 +23,10 @@ Base: `/v1`。认证：`Authorization: Bearer <api_key>`（`KB_AUTH_REQUIRED=fal
 ```
 `mode`: `hybrid` | `dense` | `sparse`
 
+三种模式对应三条真实路径：`dense` 只查 Qdrant 稠密向量，`sparse` 只查 Tantivy 词法索引，
+`hybrid` 两路都跑再用 RRF 融合。非法值返回 422，不会静默回退。`debug.timings_ms` 里的
+`dense_search` / `sparse_search` 只在对应路跑过时出现。
+
 响应：
 ```json
 {
@@ -40,7 +44,8 @@ Base: `/v1`。认证：`Authorization: Bearer <api_key>`（`KB_AUTH_REQUIRED=fal
     "retrievers": {"dense": [{"id":"…","score":0.83,"rank":1}], "sparse": [...]},
     "fusion": {"method": "rrf", "k": 60, "weights": {"dense":1.0,"sparse":1.0}},
     "filter": {...},
-    "timings_ms": {"rewrite":0.2,"embed":3.1,"search":12.0,"fuse":0.4,"rerank":5.5,"total":21.2}
+    "timings_ms": {"rewrite":0.03,"store_init":0.0,"dense_search":396.4,
+                   "sparse_search":2.5,"search":399.1,"fuse":0.09,"rerank":14.6,"total":411.4}
   }
 }
 ```
@@ -79,7 +84,10 @@ Base: `/v1`。认证：`Authorization: Bearer <api_key>`（`KB_AUTH_REQUIRED=fal
 ## 运维
 
 ### GET /healthz  /readyz
-### GET /v1/stats → 文档/版本/chunk/job 计数、向量库点数
+### GET /v1/stats → 文档/版本/chunk/job 计数、稠密向量点数（`vector_points`）、词法索引文档数（`lexical_docs`）
+
+`chunks`、`vector_points`、`lexical_docs` 三者应相等；不等说明某一路索引漂移了。
+词法一路可用 `kbsvc rebuild-lexical` 修复。
 
 ## MCP 工具
 
