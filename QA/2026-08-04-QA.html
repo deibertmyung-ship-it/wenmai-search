@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="文脉检索项目 2026-08-04 问答整理">
-  <title>文脉检索项目 QA · 2026-08-04</title>
+  <meta name="description" content="文脉检索项目问答整理：2026-08-04 发布与部署，2026-08-05 检索链路核查与 Tantivy 改造">
+  <title>文脉检索项目 QA · 2026-08-04 ~ 08-05</title>
   <style>
     :root {
       color-scheme: light;
@@ -290,12 +290,14 @@
       <p class="eyebrow">Wenmai Search · Daily Q&amp;A</p>
       <h1>文脉检索项目<br>问答整理</h1>
       <p class="lead">
-        汇总今天关于 GitHub 发布、文档解析、后台任务、Qdrant 与嵌入模型的提问和结论。
-        内容以当前项目代码及本地运行状态为准。
+        <strong>08-04：</strong>GitHub 发布、文档解析、后台任务、Qdrant 与嵌入模型。
+        <strong>08-05：</strong>检索链路逐项核查、5.6 秒瓶颈的根因定位、用 Tantivy 替换自研 BM25、繁简归一化。
+        所有结论均以对运行中系统的实测为准，推翻的判断也一并保留。
       </p>
       <div class="meta">
-        <span class="pill">日期：2026-08-04</span>
+        <span class="pill">日期：2026-08-04 ~ 08-05</span>
         <span class="pill">项目：wenmai-search</span>
+        <span class="pill">语料：204 部 / 22,659 段</span>
         <span class="pill">格式：HTML</span>
       </div>
     </div>
@@ -303,13 +305,21 @@
 
   <div class="shell layout">
     <aside aria-label="目录">
-      <strong>内容导航</strong>
+      <strong>08-04 发布与部署</strong>
       <a href="#publish">项目发布</a>
       <a href="#formats">文档格式与解析器</a>
       <a href="#word-job">Word 任务问题</a>
       <a href="#qdrant">Qdrant 基础</a>
       <a href="#embedding">嵌入模型</a>
       <a href="#actions">后续建议</a>
+      <strong style="margin-top:18px">08-05 检索链路改造</strong>
+      <a href="#frontend">前端重做与回退</a>
+      <a href="#modes">三种检索模式核查</a>
+      <a href="#toggles">三个复选框核查</a>
+      <a href="#rootcause">5.6 秒的根因</a>
+      <a href="#tantivy">Tantivy 选型与实施</a>
+      <a href="#normalize">繁简与拼音</a>
+      <a href="#delivery">交付与遗留</a>
     </aside>
 
     <main>
@@ -603,12 +613,439 @@
           </div>
         </article>
       </section>
+
+      <hr style="margin:56px 0 40px;border:0;border-top:2px solid var(--line)">
+
+      <p class="eyebrow" style="margin-bottom:8px">2026-08-05</p>
+      <h2 style="margin-top:0">检索链路核查与 Tantivy 改造</h2>
+      <p style="color:var(--muted);max-width:760px">
+        这一天的主线是：先逐项验证检索功能是不是真的，再定位一个 5.6 秒的瓶颈，
+        最后把自研 BM25 换成真正的倒排索引。下面保留了推翻自己判断的两处。
+      </p>
+
+      <div class="summary" aria-label="08-05 核心结果">
+        <article>
+          <span>2,800×</span>
+          <p>词法检索加速：5,600ms → 2.5ms</p>
+        </article>
+        <article>
+          <span>0→10</span>
+          <p>繁简查询 top-10 重合度（满分 10）</p>
+        </article>
+        <article>
+          <span>−700</span>
+          <p>净删除代码行数</p>
+        </article>
+      </div>
+
+      <section id="frontend">
+        <h2>七、前端重做与回退</h2>
+
+        <article class="qa">
+          <h3 class="question">安装 hallmark 并用它重做 knowledge-web 前端，结果如何？</h3>
+          <div class="answer">
+            <p>
+              安装了 <a href="https://github.com/Nutlope/hallmark">Nutlope/hallmark</a>（一个反「AI 模板感」的设计 skill，
+              不是可运行应用），装到 <code>~/.claude/skills/hallmark/</code>。随后对 7 个页面做了结构层重做：
+              导航从 N1a 改为左倾报头、补上牌记页脚、把「一条 2px 线打五处」拆成三种职责不同的线、
+              左栏建立主次层级、黑色实心按钮改为描边片、序号做衰减。类名契约完整保留，87 项测试全通过。
+            </p>
+            <p><strong>但你看过之后判断不好，要求回退。</strong>已用 <code>git checkout</code> 完整还原 13 个文件，
+              删除新建的 2 个文件，<code>git status</code> 干净，并重跑 e2e 让截图按原设计重新生成。</p>
+            <div class="note">
+              截图是 gitignore 的测试产物（根 <code>.gitignore:30</code>），git 还原不了，必须重跑 e2e 才会回到原样。
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="modes">
+        <h2>八、三种检索模式是否真的对应三条后端路径</h2>
+
+        <article class="qa">
+          <h3 class="question">混合 / 语义 / 字面，切换时后端真的走不同逻辑吗？</h3>
+          <div class="answer">
+            <p><strong>是，三条路径都是真的。</strong>但项目原有的测试证明不了这一点——
+              <code>test_every_retrieval_mode_returns_results</code> 只断言「三种模式都有结果」，
+              <em>即使 mode 被完全丢弃，这个断言照样通过</em>。所以我写了能证伪的探针，对运行中的系统实测：</p>
+            <table>
+              <thead><tr><th>检查</th><th>hybrid</th><th>dense</th><th>sparse</th></tr></thead>
+              <tbody>
+                <tr><td>实际跑了哪些召回器</td><td><code>[dense, sparse]</code></td><td><code>[dense]</code></td><td><code>[sparse]</code></td></tr>
+                <tr><td>融合权重</td><td>1.0 / 1.0</td><td>1.0 / <strong>0.0</strong></td><td><strong>0.0</strong> / 1.0</td></tr>
+                <tr><td>计时字段</td><td>两个都在</td><td>只有 dense_search</td><td>只有 sparse_search</td></tr>
+                <tr><td>候选数</td><td>20 / 20</td><td>20 / <strong>0</strong></td><td><strong>0</strong> / 20</td></tr>
+              </tbody>
+            </table>
+            <p><strong>最硬的证据：</strong>hybrid 融合前，dense 与 sparse 的 top-8 <strong>重合度 0/8</strong>——
+              两路返回完全不同的候选，不可能是同一条代码路径。另外 <code>mode=magic</code> 返回 422，不是静默回退。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">既然模式是真的，为什么界面上「混合」和「字面」经常看起来一样？</h3>
+          <div class="answer">
+            <p>因为 <strong>lexical reranker 把混合模式拉回了字面模式</strong>。召回层确实是混合的，但默认的
+              <code>KB_RERANKER=lexical</code> 按字面重合度重排，系统性地把 sparse 候选顶上来：</p>
+            <table>
+              <thead><tr><th>查询</th><th>rerank ON ∩sparse</th><th>rerank ON ∩dense</th><th>rerank OFF ∩sparse</th></tr></thead>
+              <tbody>
+                <tr><td>贼克如何取用神</td><td>0.67</td><td>0.18</td><td>0.11</td></tr>
+                <tr><td>涉害深者为用</td><td><strong>1.00</strong>（完全一致）</td><td>0.11</td><td>0.33</td></tr>
+                <tr><td>昴星课如何取用</td><td>0.67</td><td>0.33</td><td>0.11</td></tr>
+              </tbody>
+            </table>
+            <p>关掉 rerank 后 hybrid 与 sparse 只重合 0.11–0.33，说明融合是真的。<strong>不是模式没接通，是重排器把 dense 的贡献洗掉了。</strong></p>
+          </div>
+        </article>
+      </section>
+
+      <section id="toggles">
+        <h2>九、检索调试 / 查询改写 / 重排 三个复选框</h2>
+
+        <article class="qa">
+          <h3 class="question">这三个开关分别做什么？功能正常吗？</h3>
+          <div class="answer">
+            <p><strong>三个都正常，没有装饰性开关。</strong>前端未勾选回传（靠隐藏字段 <code>f=1</code> 区分「没提交过」与「用户关掉了」）也验证正确。</p>
+            <table>
+              <thead><tr><th>开关</th><th>作用</th><th>关键实现</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td><strong>检索调试</strong></td>
+                  <td>只读开关，<em>不参与检索</em>——勾选前后结果完全一致</td>
+                  <td>双重门禁：<code>KBWEB_DEBUG_UI</code> 控制复选框是否出现，服务端再校验一次，手工构造 <code>?debug=1</code> 也拿不到</td>
+                </tr>
+                <tr>
+                  <td><strong>查询改写</strong></td>
+                  <td>规则式去噪，<strong>不调 LLM</strong>：去句尾标点、剥<em>开头</em>框架词、按标点切分多意图</td>
+                  <td>原查询永远排第一，最多 3 个变体，每个变体独立跑一遍检索</td>
+                </tr>
+                <tr>
+                  <td><strong>重排</strong></td>
+                  <td>对<em>超额召回</em>的候选池二次排序：实测重排 40 个候选再取前 10，能把原本第 11–40 位的段落提到首屏</td>
+                  <td><code>0.7×覆盖率 + 0.2×密度 + 0.1×靠前度</code>，离线、亚毫秒</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">查询改写实际改了什么？</h3>
+          <div class="answer">
+            <pre><code>[空转] 贼克如何取用神        -&gt; ['贼克如何取用神']
+[展开] 如何取用神           -&gt; ['如何取用神', '取用神']
+[展开] 什么是涉害           -&gt; ['什么是涉害', '涉害']
+[展开] 涉害，遥克，昴星       -&gt; ['涉害，遥克，昴星', '涉害', '遥克']</code></pre>
+            <p><strong>框架词只在开头才剥</strong>（用的是 <code>startswith</code>）。所以界面默认示例「贼克如何取用神」——
+              「如何」在中间——<em>改写是空转的</em>。这不是 bug，是规则的设计边界，但意味着很多自然提问它帮不上忙。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">调试抽屉是不是把所有调试信息都展示了？</h3>
+          <div class="answer">
+            <p><strong>没有。</strong>kbsvc 返回 7 节数据，抽屉只渲染 5 节。
+              <strong>没展示的恰恰是 <code>debug.rerank</code></strong>（重排器名字 + 40 个候选的分数）和 <code>overfetch_limit</code>——
+              而重排正是最不透明、最需要看分数的一环。结果卡片上只有最终的 rerank 数值，看不到它把哪些候选从后面拉了上来。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="rootcause">
+        <h2>十、5.6 秒瓶颈的根因</h2>
+
+        <article class="qa">
+          <h3 class="question">为什么每次检索要 6 秒以上？</h3>
+          <div class="answer">
+            <p>实测拆解：</p>
+            <pre><code>              sparse_search    dense_search
+贼克如何取用神      5632 ms         391 ms
+涉害深者为用        5638 ms         399 ms
+昴星课如何取用      5392 ms         383 ms</code></pre>
+            <p>字面检索比语义慢 <strong>14 倍</strong>，占 hybrid 总耗时的 93%。按查询长度扫描后发现
+              <strong>约 4.9 秒是固定成本</strong>，只有 ~20ms/词是可变的。</p>
+            <p>根因不在 BM25、不在字符 n-gram、也不在 Qdrant 引擎，而在
+              <strong>嵌入式 <code>qdrant-client</code> 的 local 模式根本没有稀疏倒排索引</strong>：</p>
+            <pre><code># qdrant_client/local/sparse_distances.py:109-121
+for vector in vectors:                        # 22,659 次纯 Python 循环
+    score = sparse_dot_product(query, vector) # 内部还有 2 次 assert is_sorted 全扫</code></pre>
+            <p>同一模式下 dense 只要 390ms，因为它走 numpy（C 实现）。<code>qdrant_store.py:81</code> 的注释其实早就承认了：
+              <em>「Embedded Qdrant scans payloads directly」</em>。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">在换引擎之前，有哪些免费的优化？</h3>
+          <div class="answer">
+            <p>我提出了两个，<strong>其中一个经实测是无效的，没有做。</strong></p>
+            <p><strong>① 多变体合并为单次扫描 —— 做了。</strong>改写的每个变体原本各跑一遍全库扫描：</p>
+            <table>
+              <thead><tr><th>查询</th><th>变体数</th><th>改前</th><th>改后</th><th>结果重合</th></tr></thead>
+              <tbody>
+                <tr><td>贼克如何取用神</td><td>1</td><td>5,587ms</td><td>5,599ms</td><td>1.00</td></tr>
+                <tr><td>什么是涉害</td><td>2</td><td>10,571ms</td><td>5,317ms</td><td>1.00</td></tr>
+                <tr><td>解释一下昴星课以及遥克课</td><td>3</td><td>16,356ms</td><td>5,654ms</td><td>1.00</td></tr>
+              </tbody>
+            </table>
+            <p>延迟从「随变体数线性增长」变成常数，<strong>而且结果重合度全部 1.00</strong>——连融合前的原始召回排序都逐位一致。
+              原因可以证明：<code>rewrite</code> 只做减法，所以每个变体都是原查询的<strong>连续子串</strong>，
+              字符 n-gram 必然是原查询的子集，取并集就等于原查询自己。<em>也就是说改写变体对稀疏检索本来毫无贡献，纯粹白烧 5 秒一次。</em></p>
+            <p><strong>② 调低 overfetch —— 我判断错了，没有做。</strong>我原本说「local 下调到 2 能省掉一半」。实测：</p>
+            <pre><code>top_k   limit   sparse_search_ms   rerank_ms
+    1       4           5633.9         1.7
+   10      40           5608.3        13.3
+   25     100           5598.9        33.7</code></pre>
+            <p>limit 变化 25 倍，扫描时间纹丝不动——因为 <code>calculate_distance_sparse</code> 对<strong>全部</strong>向量算完分才截断，
+              <code>limit</code> 根本不进入扫描成本。调低它只会白白损失召回深度，换来 30ms。
+              <strong>做一个已知无效还有副作用的改动，比不做更糟。</strong></p>
+          </div>
+        </article>
+      </section>
+
+      <section id="tantivy">
+        <h2>十一、Tantivy 选型评估与实施</h2>
+
+        <article class="qa">
+          <h3 class="question">该引入 Tantivy 还是 Whoosh？</h3>
+          <div class="answer">
+            <table>
+              <thead><tr><th>方案</th><th>预期延迟</th><th>代价</th></tr></thead>
+              <tbody>
+                <tr><td>A. 跑 Qdrant server</td><td>~10–50ms</td><td>零代码改动，但<strong>需要 Docker，直接违背 <code>run.bat</code> 反复强调的核心设计目标</strong></td></tr>
+                <tr><td>B. SQLite FTS5</td><td>~5–20ms</td><td>破坏双 profile 一致性：local 是 SQLite、server 是 Postgres，得写两套</td></tr>
+                <tr><td><strong>C. Tantivy</strong></td><td><strong>~1–5ms</strong></td><td>多一个需同步的存储；多一个编译依赖</td></tr>
+                <tr><td>D. Whoosh</td><td>~50–200ms</td><td><strong>2016 年后停止维护</strong>；纯 Python</td></tr>
+              </tbody>
+            </table>
+            <p><strong>Whoosh 直接排除</strong>——等于为了「把 Python 全扫换成 Python 倒排」引入一个无人维护的依赖，
+              拿到 Tantivy 一个零头的收益。<strong>选 Tantivy</strong>：它是唯一同时满足「真索引 + 无 Docker + 双 profile 一致」的选项，
+              而且接缝已存在（融合、重排、引文、调试全部与召回器无关），并且它让我们<em>删代码而不是加代码</em>。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">「支持模糊搜索」能作为立项理由吗？</h3>
+          <div class="answer">
+            <p><strong>不能。</strong>Tantivy 的 <code>fuzzy_term_query</code> 是编辑距离匹配。原型实测：</p>
+            <pre><code>fuzzy('涉宝', distance=1) -&gt; 返回「三井 / 壬子癸 / 天河」等完全无关内容</code></pre>
+            <p>汉字的编辑距离没有语义含义——「涉害」和「涉宝」距离是 1 但毫无关系。而且
+              <strong>现有的字符 n-gram BM25 本身已经是一种模糊匹配</strong>，错一个字仍能命中大部分词项。</p>
+            <p>结论：<strong>上 Tantivy 是为了速度和删掉自研 BM25，不是为了模糊搜索。</strong></p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">动手前做了什么验证？</h3>
+          <div class="answer">
+            <p>我把「tantivy-py 的中文分词能力」标为<strong>单点否决项</strong>，先用<em>真实的 22,659 段语料</em>做原型：</p>
+            <pre><code>延迟（warm median）    0.23 – 1.24 ms     ← 原为 5,600 ms
+建索引                13.3s / 22,659 段
+删除文档              106ms</code></pre>
+            <p>并对比排序质量（top-10 含关键词数），确认<strong>持平或略好</strong>：5/10 vs 4/10、8/10 vs 7/10、10/10 vs 10/10。
+              其中一条看似很差的结果（「什么是涉害」top-1 是一段现代对话），查证后发现<strong>现有系统也排在第一</strong>，
+              是查询里「什么」这个高频词的问题，不是 tantivy 的问题。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">最终删掉了哪些代码？</h3>
+          <div class="answer">
+            <ul>
+              <li><code>embedding/sparse_bm25.py</code> 整个自研 BM25（117 行）</li>
+              <li><code>db/repo.py</code> 的词表统计维护（110 行，含方言分支 upsert 与可移植回退路径）</li>
+              <li><code>term_stat</code> / <code>corpus_stat</code> 两张表 —— 统计改由索引自持，<strong>不再有漂移的可能</strong></li>
+              <li><code>term_index()</code> 的 <code>crc32 % 2^31</code> 词项哈希 —— 顺带消除静默碰撞风险</li>
+              <li><code>VectorPoint.sparse</code>、<code>VectorStore.search_sparse</code>、Qdrant 稀疏向量配置</li>
+            </ul>
+            <p><strong>保留了 <code>tokenize()</code></strong>（移至 <code>lexical/tokenizer.py</code>）：中英分治的字符 n-gram
+              切分是领域知识，Tantivy 自带的 ngram 分词器会把 <code>hybrid</code> 也切成字符。<em>语料学归我们，索引与打分归引擎。</em></p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">实施中卡了什么？</h3>
+          <div class="answer">
+            <p>Windows 上批量重建必然失败（<code>PermissionDenied</code> on <code>.pos</code> / <code>.fieldnorm</code>）。
+              做了区分实验：<strong>同样的代码在 <code>%TEMP%</code> 下跑通，在项目目录树下三个位置全部失败</strong>——
+              不是 <code>.kbdata</code> 特有。Defender 服务是关的，大概率有第三方安全软件在扫用户目录，
+              多个索引线程并发建/换段文件时与扫描器抢句柄。</p>
+            <p><strong>没有去动安全软件。</strong>改为 <code>KB_LEXICAL_WRITER_THREADS=1</code>，并让批量重建走单次提交。
+              代价是全量重建慢约 2 倍（21 秒），增量写入零影响。</p>
+            <div class="note">
+              过程中还有一个我自己引入的偶发缺陷：<code>rebuild_lexical</code> 用了单次提交，但
+              <code>reembed_tenant</code> 里忘了包 —— 复现率约 40%。修复后连跑 8 轮零失败，
+              测试套件本身也从 13–23 秒降到 10 秒。
+            </div>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">最终效果？</h3>
+          <div class="answer">
+            <table>
+              <thead><tr><th>指标</th><th>改前</th><th>改后</th></tr></thead>
+              <tbody>
+                <tr><td>词法检索（中位数）</td><td>5,600 ms</td><td><strong>2.5 ms</strong></td></tr>
+                <tr><td>三变体查询</td><td>16,400 ms</td><td>2.5 ms</td></tr>
+                <tr><td>hybrid 总耗时</td><td>~12,500 ms</td><td><strong>413 ms</strong></td></tr>
+                <tr><td>Qdrant 体积</td><td>339.6 MB</td><td>179.0 MB</td></tr>
+              </tbody>
+            </table>
+            <p>Qdrant 瘦身是因为删掉稀疏向量后集合<strong>不会自动回收</strong>，必须跑一次 <code>reembed</code> 才兑现。
+              新增 <code>kbsvc rebuild-lexical</code>：只重建词法索引（21 秒），不重跑嵌入模型。</p>
+            <p><strong>瓶颈已经转移到稠密一路</strong>（396ms，嵌入式 Qdrant 全量扫描无 HNSW）。语料继续增长时切 Qdrant Server 是主要手段。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="normalize">
+        <h2>十二、繁简/异体字与拼音搜索</h2>
+
+        <article class="qa">
+          <h3 class="question">项目支持繁简归一化和拼音搜索吗？</h3>
+          <div class="answer">
+            <p><strong>原本两个都不支持</strong>，而且繁简这条不是理论问题——<strong>语料本身就是混排的</strong>：</p>
+            <pre><code>简 阴 × 44,548    繁 陰 ×   524
+简 发 × 15,707    繁 發 ×   512
+简 阳 × 41,610    繁 陽 ×   402</code></pre>
+            <p>不归一化时，词法一路查 <code>阴阳</code> 与查 <code>陰陽</code> <strong>重合 0/10</strong>，完全不相交。
+              dense 靠模型部分容忍，但只有 2–5/10，不能算「支持」。</p>
+            <div class="note">
+              拼音方面：sparse 返回 0 条（正确）；dense 对 <code>zeike</code> 返回 5 条，但那<strong>不是命中</strong>——
+              ANN 检索对任何输入都会返回 top-k 最近邻。别把它当作「支持拼音」。
+            </div>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">为什么不用「同时索引简繁两种形式」？</h3>
+          <div class="answer">
+            <p>试过，<strong>被数据否决</strong>：双写结果 100% 偏向繁体。</p>
+            <pre><code>对         简  繁  双写   双写∩简   双写∩繁
+阴阳/陰陽   10  10   10    0/10     10/10
+发用/發用   10  10   10    0/10     10/10</code></pre>
+            <p>原因是 BM25 的 IDF：<code>陰</code> 只出现 524 次、<code>阴</code> 出现 44,548 次，
+              稀有形式 IDF 高得多，直接主导打分，<strong>把常见形式挤出结果</strong>。
+              正确做法是折叠到单一形式——它把两边的 doc frequency <em>合并</em>，而不是让它们竞争。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">实现时最关键的三个约束是什么？</h3>
+          <div class="answer">
+            <ol>
+              <li>
+                <strong>只作用于检索表示，绝不改写存储文本。</strong>
+                <code>payload.text</code> 是渲染 snippet 与引文的依据，改写古籍原文等于篡改。实测验证：
+                <pre><code>用【简体】「阴阳」检索 → 召回纯繁体的《天無陰陽篇》
+snippet: 天無陰陽篇第一 經曰：天圓地方，本乎陰陽。陰陽旣形，逆之則敗…
+高亮[2:4] = '陰陽'    ← 偏移精确落在繁体形上</code></pre>
+              </li>
+              <li>
+                <strong>必须长度守恒。</strong><code>citation.build_snippet</code> 用 <code>str.find</code> 定位高亮并返回偏移量，
+                归一化若改变长度会让偏移<em>静默漂移</em>。因此自建<strong>严格 1:1 字符映射表</strong>
+                （4,300 条，从 zhconv 逐字提取并校验零条非 1:1），而不是整串调 <code>convert()</code>。
+                用 <code>zh-hans</code> 而非 <code>zh-cn</code>——后者会做大陆词汇替换（軟體 → 软件），改写古籍用词不是我们该做的事。
+              </li>
+              <li>
+                <strong>领域保护名单。</strong>zhconv 把 <code>乾</code> 折叠成 <code>干</code>（取「干燥」义），
+                但查过语料上下文后发现本语料中 <code>乾</code> <strong>全是卦名</strong>：
+                <pre><code>乾为 × 2,806    乾坤 × 2,749    乾之 × 1,089    乾卦 × 293
+…仲月辰巽及乾坤。季月乙丁与辛癸…
+…没四维乾坤艮巽，大吉，百事无碍…</code></pre>
+                与巽/艮/坤同现，<strong>零个干燥义</strong>。折叠会把「乾坤」和「干支」（25,748 次）合并——两个核心且无关的概念。
+                已验证两者检索重合 0/10。<em>这是查过语料才定的，不是想当然。</em>
+              </li>
+            </ol>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">最终效果？</h3>
+          <div class="answer">
+            <table>
+              <thead><tr><th>查询对</th><th>词法·前</th><th>词法·后</th><th>稠密·前</th><th>稠密·后</th></tr></thead>
+              <tbody>
+                <tr><td>阴阳 / 陰陽</td><td><strong>0/10</strong></td><td>10/10</td><td>4/10</td><td>10/10</td></tr>
+                <tr><td>遥克 / 遙克</td><td><strong>0/10</strong></td><td>10/10</td><td>4/10</td><td>10/10</td></tr>
+                <tr><td>万 / 萬</td><td><strong>0/10</strong></td><td>10/10</td><td>2/10</td><td>10/10</td></tr>
+              </tbody>
+            </table>
+            <p>两路都做且都在单一入口：词法侧在 <code>tokenize()</code> 内部折叠（索引与查询共用同一函数）；
+              稠密侧用 <code>FoldingDenseEmbedder</code> 包装嵌入器——那里有 worker / reembed / pipeline
+              三个调用点，<strong>包装比在每处写一遍更难漏</strong>。成本可忽略：<code>str.translate</code> 走 C 实现，120 万字 65ms。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">拼音搜索为什么建议不做？</h3>
+          <div class="answer">
+            <p>技术上可行（<code>pypinyin</code> + Tantivy 加一个 <code>body_pinyin</code> 字段），但三个理由不划算：</p>
+            <ol>
+              <li><strong>同音字爆炸。</strong><code>liuren</code> 会同时匹配「六壬」「流人」「留任」「柳仁」。</li>
+              <li><strong>文言文多音字消歧不准。</strong><code>壬</code>、<code>行</code>、<code>重</code>、<code>度</code>——
+                pypinyin 的消歧模型按现代汉语训练，对文言文经常判错，而错的读音会<em>静默污染索引</em>。</li>
+              <li><strong>与产品定位冲突。</strong>这套系统的价值主张是「给出可核对的出处」，
+                拼音检索天然模糊，降低的正是它最想保证的东西。</li>
+            </ol>
+            <p>真正的中文「模糊」需求是繁简、异体字、OCR 错字——前两类用归一化表解决更对路，也便宜得多。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="delivery">
+        <h2>十三、交付与遗留</h2>
+
+        <article class="qa">
+          <h3 class="question">改动如何提交？</h3>
+          <div class="answer">
+            <p>分支 <code>refactor/tantivy-lexical-index</code>，三个 commit，
+              PR <a href="https://github.com/deibertmyung-ship-it/wenmai-search/pull/4">#4</a>：</p>
+            <pre><code>e3de713  docs: 更新架构描述               10 个文件
+a1104c6  feat: 繁简与旧字形归一化          8 个文件
+e751920  refactor: 用 Tantivy 替换自研 BM25  27 个文件</code></pre>
+            <p>有 7 个文件同时含两部分改动，而 <code>git add -p</code> 在这个环境不可用。
+              做法是：备份最终版 → 把这些文件回退到「只含 Tantivy 改动」的状态 → 验证通过后提交 → 还原最终版再提交。
+              <strong>这样每个 commit 都是能跑通的完整状态，而不是切一半的快照。</strong></p>
+            <p>在<strong>独立 git worktree</strong> 里逐个验证：commit 1 → 119 passed，commit 2 → 128 passed。</p>
+            <div class="note">
+              第一次 worktree 验证失败过，是 Windows 260 字符路径上限导致的，换短路径后正常，不是提交内容的问题。
+            </div>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">还有什么没做？</h3>
+          <div class="answer">
+            <p>PR 的测试计划里明确标了三项<strong>未验证</strong>：</p>
+            <ul>
+              <li><strong>Linux / macOS 上验证</strong> —— 全部实测都在 Windows 上做的</li>
+              <li><strong>server profile 验证</strong> —— 本次只测了 local profile</li>
+              <li><strong>多 worker 场景</strong> —— Tantivy 持目录锁，server profile 下需让词法写入集中在单一写入者后面，<em>本 PR 未处理</em></li>
+            </ul>
+            <p>已知遗留三条：</p>
+            <ul>
+              <li><code>docs/06-code-architecture.md</code> 的复杂度与社区检测数据来自代码图谱工具，
+                <strong>早于本次重构且无法凭空重算</strong>。已加时效警告、重测行数、把失效条目用删除线标注，
+                并把「重跑图谱索引」列为最高优先级改进项。</li>
+              <li><code>reembed</code> 中途被打断时词法索引会停在上次提交状态（单次提交的代价）。
+                稠密侧 <code>--resume-after</code> 续跑，词法侧 <code>rebuild-lexical</code> 重建即可。</li>
+              <li>稠密检索成为新瓶颈（396ms）。</li>
+            </ul>
+            <p>另有两处<strong>已发现但未修</strong>的小问题：调试抽屉缺少重排那一节；
+              查询改写的 <code>startswith</code> 边界导致中间出现的框架词剥不掉。</p>
+          </div>
+        </article>
+      </section>
     </main>
   </div>
 
   <footer>
     <div class="shell">
-      本文档根据 2026-08-04 的项目问答整理生成。运行状态、依赖版本和部署方式以后续代码变更为准。
+      本文档根据 2026-08-04 与 2026-08-05 的项目问答整理生成。
+      文中所有性能数字与对照表均来自对运行中系统的实测，推翻的判断（overfetch 优化无效、双写方案被 IDF 否决）一并保留。
+      运行状态、依赖版本和部署方式以后续代码变更为准。
     </div>
   </footer>
 </body>
