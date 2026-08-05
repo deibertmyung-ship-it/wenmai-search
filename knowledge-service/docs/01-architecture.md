@@ -27,14 +27,17 @@
 │ 状态机+重试    │        │ rerank→citation  │       │                  │
 └───────┬───────┘        └────────┬─────────┘       └──────────────────┘
         │                         │
-   ┌────▼─────┬──────────────┐    │
-   ▼          ▼              ▼    ▼
-┌────────┐ ┌──────────┐ ┌─────────────┐
-│ 元数据  │ │ 对象存储  │ │ 向量库       │
-│ PG/SQLite│ │ S3/MinIO │ │ Qdrant      │
-│         │ │ /LocalFS │ │ Server      │
-└────────┘ └──────────┘ └─────────────┘
+   ┌────▼─────┬──────────────┬──────────────┐
+   ▼          ▼              ▼              ▼
+┌────────┐ ┌──────────┐ ┌─────────────┐ ┌─────────────┐
+│ 元数据  │ │ 对象存储  │ │ 向量库       │ │ 词法索引     │
+│PG/SQLite│ │ S3/MinIO │ │ Qdrant      │ │ Tantivy     │
+│         │ │ /LocalFS │ │ (dense)     │ │ (BM25)      │
+└────────┘ └──────────┘ └─────────────┘ └─────────────┘
 ```
+
+检索的两路各有其存储：稠密向量在 Qdrant，词法倒排在 Tantivy。两者都是嵌入式的，
+`local` profile 因此仍然不需要 Docker。
 
 ## 2. 两套 Profile（同一份代码）
 
@@ -43,15 +46,20 @@
 | 元数据库 | SQLite | PostgreSQL 16 |
 | 对象存储 | 本地文件系统 | S3 / MinIO |
 | 向量库 | API 进程内嵌 Qdrant（本地目录） | Qdrant Server（HTTP） |
+| 词法索引 | 嵌入式 Tantivy（本地目录） | 嵌入式 Tantivy（本地目录） |
 | 队列 | SQLite `ingest_job` + API 内置 worker 线程 | PostgreSQL `ingest_job` + 可水平扩 worker |
 
-`local` 不依赖 Docker。SQLite、原始文件和 Qdrant 数据均在 `KB_DATA_DIR`；根目录
-`run.bat` 只需编排 API 与 Web：
+词法索引两种 profile 相同——Tantivy 是进程内的 Rust 库，没有服务端形态。代价是
+`server` profile 下多个 worker 进程不能共写同一个索引目录（Tantivy 持有目录锁）。
+
+`local` 不依赖 Docker。SQLite、原始文件、Qdrant 与 Tantivy 数据均在 `KB_DATA_DIR`；
+根目录 `run.bat` 只需编排 API 与 Web：
 
 ```text
 Web ──HTTP──▶ API 进程
               ├── SQLite / LocalFS
               ├── embedded Qdrant（进程级单例）
+              ├── Tantivy 索引（进程级单例，持目录锁）
               └── 常驻 worker 线程 ◀── ingest_job
 ```
 
@@ -123,19 +131,69 @@ fallback 链可配置 `KB_PARSER_CHAIN=docling,unstructured,marker`，逐个尝�
 
 ## 7. 向量与检索
 
-**Qdrant collection**（命名向量）：
+检索是两个独立的索引，各自回答同一个问题，再在应用层融合。
+
+**Qdrant collection**（稠密）：
 - `dense`: 可配维度，Cosine
-- `sparse`: 稀疏向量（BM25 权重）
 - payload 索引：`tenant_id` / `document_id` / `version` / `source_id` / `acl` / `is_current`
 
-**稀疏编码器**（自研，专为中文古籍）：字符 1-gram + 2-gram，IDF 从语料统计持久化到元数据库，查询侧复用同一词表 → 对文言文召回显著优于分词器方案，且**完全离线、无模型下载**。
+**Tantivy 索引**（词法）：Rust 倒排索引，BM25 打分。字段：`chunk_id`（raw，删除按 term）、
+`body`（打分字段，`freq` 而非 `position`——不做短语查询，省索引体积）、`payload`（stored，
+命中直接带回渲染所需数据，稀疏单路检索无需二次查询）、以及 `tenant_id` / `document_id` /
+`version_id` / `source_id` / `kind` / `acl` / `is_current` 这些过滤字段。
+
+**分词器**（自研，专为中文古籍，`lexical/tokenizer.py`）：字符 1-gram + 2-gram，拉丁文整词
+小写。对文言文召回显著优于分词器方案，且完全离线、无模型下载。语料在进入 Tantivy 前先经
+这个函数切好并以空格连接，Tantivy 自身的分析器只需按空格切分——**语料学交给我们，索引与
+打分交给引擎**。
+
+**字形归一化**（`normalize.py`，`KB_NORMALIZE_CJK`，默认开）：语料是混排的——14.3M 字里
+简体为主，但繁体与旧字形贯穿全篇（陰 524 次、發 512 次、陽 402 次）。
+
+实测（同一语料、同一批查询，top-10 重合度）：
+
+| 查询对 | 词法 · 归一化前 | 词法 · 后 | 稠密 · 前 | 稠密 · 后 |
+|---|---|---|---|---|
+| 阴阳 / 陰陽 | **0/10** | 10/10 | 4/10 | 10/10 |
+| 遥克 / 遙克 | **0/10** | 10/10 | 4/10 | 10/10 |
+| 万 / 萬 | **0/10** | 10/10 | 2/10 | 10/10 |
+
+不归一化时两种字形的检索结果**完全不相交**。
+
+三个设计约束：
+
+1. **只作用于检索表示，绝不改写存储文本。** payload 里的 `text` 是渲染 snippet 与引文
+   的依据，改写古籍原文等于篡改。
+2. **必须长度守恒。** `citation.build_snippet` 用 `str.find` 定位高亮并返回偏移量；若归一化
+   会改变长度，偏移会静默漂移。因此表是自建的**严格 1:1 字符映射**（4,300 条，从 zhconv 的
+   `zh-hans` 逐字提取并校验），而不是整串调用 `zhconv.convert`。用 `zh-hans` 而非 `zh-cn`，
+   因为后者会做大陆词汇替换（軟體 → 软件）——改写古籍的用词不是我们该做的事。
+3. **有领域保护名单。** zhconv 把 `乾` 折叠成 `干`（取「干燥」义），但本语料里 `乾` 全是卦名
+   （乾坤 2,749 次、乾卦、乾元、乾道，与巽/艮/坤同现），折叠会把**乾坤与干支合并**——两个
+   核心且无关的概念。`乾` 因此进入 `_PROTECTED`。这是查过语料才定的，不是想当然。
+
+两路都做：词法侧在 `tokenize()` 内部折叠（索引与查询共用同一入口，天然一致）；稠密侧用
+`FoldingDenseEmbedder` 包装嵌入器，`embed_documents` 与 `embed_query` 一起折叠——那里有
+三个调用点（worker / reembed / pipeline），包装比在每处写一遍更难出错。
+
+> 早期版本把 BM25 自己实现了：文档端存长度归一化 TF、查询端存 IDF，编码成 Qdrant 稀疏
+> 向量，语料统计维护在 `term_stat` / `corpus_stat` 两张表里。它是对的，但嵌入式 Qdrant
+> 客户端没有稀疏索引，检索时用纯 Python 逐个 chunk 算分——22,659 段的语料上单次查询
+> 5.6 秒。改用 Tantivy 后是 2–4 毫秒，同时删掉了自研 BM25、两张统计表，以及把词项哈希
+> 到 31 位空间的 `crc32`（那里有静默的碰撞风险）。
 
 **稠密编码器**（可插拔 `KB_DENSE_PROVIDER`）：
 - `hash`：确定性哈希嵌入，零依赖，默认值，保证开箱即跑与可测试
 - `fastembed`：ONNX 本地模型（如 `BAAI/bge-small-zh-v1.5`）
 - `openai`：任意 OpenAI 兼容 `/v1/embeddings` 端点
 
-**融合**在应用层做（不依赖 Qdrant 版本特性，local/server 行为一致）：dense 与 sparse 各取 `top_k * overfetch`，RRF（默认 k=60，可加权）合并。
+**融合**在应用层做（两个索引本就不在一处，local/server 行为一致）：dense 与 sparse 各取
+`top_k * overfetch`，RRF（默认 k=60，可加权）合并。
+
+**查询改写与两路的关系**：`rewrite` 只做减法（去句尾标点、剥开头框架词、按标点切分），
+所以每个变体都是原查询的连续子串，字符 n-gram 必是原查询的子集。词法一路因此把所有变体
+合并成一次查询即可，不损失任何召回；稠密一路保留逐变体检索，因为那里变体嵌入到不同的点，
+改写真正有价值。
 
 **重排**：`KB_RERANKER` = `none` | `lexical`（默认，字符 n-gram 覆盖率 + 位置加权，离线）| `cross-encoder`（可选 extra）。
 
@@ -143,7 +201,10 @@ fallback 链可配置 `KB_PARSER_CHAIN=docling,unstructured,marker`，逐个尝�
 
 ## 8. 检索调试信息
 
-`debug=true` 时返回：`rewritten_queries`、每路检索的原始 hits（id+score+rank）、融合前后的排名变化、rerank 前后分数、各阶段耗时 ms、实际下发给 Qdrant 的 filter。这是这套系统能被调优的前提，属于一等公民而非日志。
+`debug=true` 时返回：`rewritten_queries`、每路检索的原始 hits（id+score+rank）、融合前后的排名变化、rerank 前后分数、各阶段耗时 ms、下发的 filter。这是这套系统能被调优的前提，属于一等公民而非日志。
+
+注意 `dense_search` 与 `sparse_search` 两个耗时字段只在对应路真正跑过时出现——这也是
+`mode` 是否生效的最直接证据。
 
 ## 9. MCP 暴露面（首版最小权限）
 
@@ -158,7 +219,7 @@ fallback 链可配置 `KB_PARSER_CHAIN=docling,unstructured,marker`，逐个尝�
 ## 10. 安全
 
 - API Key → tenant + acl 标签集合（`api_key` 表，存 sha256）。
-- 所有检索强制 tenant filter，ACL 在向量库侧过滤。
+- 所有检索强制 tenant filter，ACL 在两个索引侧各自过滤（Qdrant payload filter / Tantivy term query），不在应用层后过滤。
 - 上传限制 mime 白名单 + 大小上限；对象 key 用 hash 派生，杜绝路径穿越。
 - 错误响应统一信封，不回显内部路径/堆栈。
 
@@ -172,9 +233,11 @@ src/kbsvc/
   storage/    base.py  local.py  s3.py
   parsing/    base.py  registry.py  text_parser.py  docling_parser.py
               unstructured_parser.py  marker_parser.py
+  normalize.py                       # 繁简/旧字形折叠，两路共用
   chunking/   base.py  tokenizer.py  structural.py
-  embedding/  base.py  dense_hash.py  dense_fastembed.py  dense_openai.py  sparse_bm25.py
-  vector/     base.py  qdrant_store.py
+  embedding/  base.py  dense_hash.py  dense_fastembed.py  dense_openai.py
+  vector/     base.py  qdrant_store.py          # 稠密
+  lexical/    base.py  tantivy_store.py  tokenizer.py   # 词法
   retrieval/  rewrite.py  fusion.py  rerank.py  citation.py  pipeline.py
   ingest/     states.py  uploader.py  worker.py
   api/        app.py  deps.py  auth.py  schemas.py  routers/*.py

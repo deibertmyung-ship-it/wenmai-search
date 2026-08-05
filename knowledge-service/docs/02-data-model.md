@@ -113,17 +113,35 @@
 
 更新与删除**必定**产生事件，供下游审计/同步。
 
-## term_stat（稀疏检索词表）
-| 列 | 类型 | 说明 |
-|---|---|---|
-| tenant_id | PK part | |
-| term | str(32) PK part | 字符 1/2-gram |
-| doc_freq | int | 含该 term 的 chunk 数 |
-| updated_at | datetime | |
+## 已移除：term_stat / corpus_stat
 
-另有 `corpus_stat(tenant_id, chunk_count, total_len)` 用于 BM25 的 avgdl。查询侧与索引侧共用同一词表，保证 IDF 一致。
+这两张表曾承载自研 BM25 的语料统计（词项 doc_freq、chunk 数与总长度用于算 avgdl），
+由 worker 在每次索引/删除时以有符号增量维护。词法检索改用 Tantivy 后，这些统计由索引
+自己持有，表随之删除——**统计与索引同源，就不会漂移**。
+
+从旧版本升级：跑一次 `kbsvc rebuild-lexical` 建立词法索引。两张旧表留着无害，但已无人
+读写，可自行 DROP。
+
+## Tantivy 文档
+
+词法索引里每个 chunk 一条文档，与 `chunk` 表一一对应：
+
+| 字段 | 用途 |
+|---|---|
+| `chunk_id` | raw，`delete_documents_by_term` 的锚点，也是回传的 id |
+| `body` | 打分字段。索引前先经 `lexical/tokenizer.py` 切成字符 1/2-gram 并以空格连接；`index_option="freq"` 而非 `position`（不做短语查询，省体积） |
+| `payload` | stored，内容与下方 Qdrant payload 一致，命中直接带回 |
+| `tenant_id` / `document_id` / `version_id` / `source_id` / `kind` / `acl` / `is_current` | 过滤字段，raw term |
+
+计数可通过 `/v1/stats` 的 `lexical_docs` 查看；它应与 `chunks`、`vector_points` 三者相等，
+不等即说明某一路漂移了，`kbsvc rebuild-lexical` 可修复词法一路。
 
 ## Qdrant payload
+
+Tantivy 的 `payload` 字段存的是同一份结构，所以单走「字面」模式也能渲染完整结果。
+
+`text` 字段是**未经改写的原文**。字形归一化（繁简/旧字形折叠）只作用于送进倒排索引和送去
+嵌入的文本，不落到这里——snippet、引文与阅读器展示的必须是古籍本来的字形。
 
 ```json
 {

@@ -4,16 +4,17 @@
 
 kbweb 是 kbsvc 的**表现层**，不是第二个后端。它：
 
-- 通过 HTTP 调用 kbsvc REST API，**不直接连数据库、不直接连 Qdrant**
+- 通过 HTTP 调用 kbsvc REST API，**不直接连数据库、不直接连 Qdrant 或 Tantivy**
 - 不持有任何检索逻辑（rewrite/fusion/rerank 全在 kbsvc）
 - 只负责：会话、表单、渲染、渐进增强
 
-**为什么必须走 HTTP 而不是直接 import kbsvc**：当前 `local` profile 将嵌入式 Qdrant 与
-常驻 worker 放在 API 进程中，Web 不应成为第二个 Qdrant 持有者。HTTP 边界让 Web 不复制
-检索、队列和存储逻辑，也能直接指向远程 kbsvc，使两种 profile 行为一致。
+**为什么必须走 HTTP 而不是直接 import kbsvc**：当前 `local` profile 将嵌入式 Qdrant、
+Tantivy 词法索引与常驻 worker 都放在 API 进程中，两者都持目录锁，Web 不应成为第二个
+持有者。HTTP 边界让 Web 不复制检索、队列和存储逻辑，也能直接指向远程 kbsvc，使两种
+profile 行为一致。
 
 ```
-浏览器 ──▶ Flask (kbweb) ──HTTP──▶ kbsvc REST ──▶ Qdrant / PG / S3
+浏览器 ──▶ Flask (kbweb) ──HTTP──▶ kbsvc REST ──▶ Qdrant / Tantivy / PG / S3
              │
              └─ Jinja SSR + 少量原生 JS（无构建步骤、无 CDN）
 ```

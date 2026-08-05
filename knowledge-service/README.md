@@ -3,8 +3,8 @@
 自托管知识检索系统 —— 多格式文档批量导入、可追溯切分、混合检索，通过 **REST** 与 **MCP** 暴露统一查询能力。
 
 ```
-文件 ──▶ 导入控制面 ──▶ 解析(Docling/可插拔) ──▶ 结构化切分 ──▶ 稠密+稀疏向量 ──▶ Qdrant
-                │                                                                    │
+文件 ──▶ 导入控制面 ──▶ 解析(Docling/可插拔) ──▶ 结构化切分 ──┬─▶ 稠密向量 ──▶ Qdrant
+                │                                          └─▶ 词法倒排 ──▶ Tantivy
                 └── source/document/version/job 状态机、重试、索引事件                 │
                                                                                      ▼
                                           REST /v1/search  ◀── 检索管线 ──▶  MCP search_knowledge
@@ -19,11 +19,16 @@
 |---|---|---|
 | 元数据 | SQLite | PostgreSQL |
 | 对象存储 | 本地文件系统 | S3 / MinIO |
-| 向量库 | API 进程内嵌 Qdrant | Qdrant Server |
+| 向量库（稠密） | API 进程内嵌 Qdrant | Qdrant Server |
+| 词法索引 | 嵌入式 Tantivy | 嵌入式 Tantivy |
 | 队列 | SQLite + 租约 + API 内置 worker 线程 | PostgreSQL + 租约，可水平扩 worker |
 
 根目录 `run.bat` 启动 API 与 Web；API 生命周期负责启动和停止内置 worker，并与请求线程
-共享同一个嵌入式 Qdrant 客户端。完整 server profile 仍使用 `deploy/docker-compose.yml`。
+共享同一个嵌入式 Qdrant 客户端与同一个 Tantivy 索引。完整 server profile 仍使用
+`deploy/docker-compose.yml`。
+
+> Tantivy 是进程内的 Rust 库，没有服务端形态，两种 profile 相同。它持有目录锁，所以多个
+> worker 进程不能共写同一个词法索引目录。
 
 ## 60 秒上手
 
@@ -37,7 +42,7 @@ run.bat
 
 `run.bat` 会自动初始化数据库并在 API 内启动常驻 worker，随后可通过 Web 上传文档。若要在
 `knowledge-service` 目录运行 `python -m kbsvc.cli ingest ...`，请先停止 API，避免第二个进程
-争用嵌入式 Qdrant 目录。
+争用嵌入式 Qdrant 与 Tantivy 目录（两者都持目录锁）。
 
 ```
 [1] 六壬存验-清-吴师青 › 一、断例
@@ -67,11 +72,22 @@ Qdrant point，不产生脏数据。文件 sha256 未变则整个跳过。
 `heading_path`、`page_from/page_to`、`bbox`、`source_uri`、`parser_version`。
 切分不跨标题边界，表格整块保留。
 
-**混合检索在应用层融合。** dense 与 sparse 各自查询后用 RRF 合并，而非交给 Qdrant——
-这样 local 与 server 行为完全一致，并且每一路的原始命中都能在 `debug` 里看到。
+**混合检索在应用层融合。** dense 与 sparse 各自查询后用 RRF 合并——两个索引本就不在一处，
+local 与 server 行为因此完全一致，并且每一路的原始命中都能在 `debug` 里看到。
 
-**稀疏检索为文言文而写。** 字符 1-gram + 2-gram + BM25，IDF 存在元数据库里、索引侧与
-查询侧共用。不依赖分词器（现代分词器切文言文很不准），不下载模型，离线可用。
+**词法检索为文言文而写。** 分词是自己的（字符 1-gram + 2-gram，拉丁文整词小写），打分和
+倒排交给 Tantivy。不依赖分词器（现代分词器切文言文很不准），不下载模型，离线可用。
+
+**繁简与旧字形折叠，但不改写原文。** 语料是混排的，不折叠时查 `阴阳` 与查 `陰陽` 结果完全
+不相交（实测重合 0/10，折叠后 10/10）。折叠只作用于送进索引和送去嵌入的文本；payload 里的
+原文一个字不动，snippet 与引文保留古籍本来的字形——用简体查询能召回《天無陰陽篇》，而返回
+的正文仍是繁体。映射表是严格 1:1 的，因为高亮偏移依赖长度守恒。`乾` 在保护名单里——本语料
+中它是卦名（乾坤 2,749 次），折叠成 `干` 会把它和干支合并。
+
+> 早期版本连 BM25 也是自己实现的，编码成 Qdrant 稀疏向量。但嵌入式 Qdrant 客户端没有稀疏
+> 索引，检索时用纯 Python 逐段算分——22,659 段的语料上单次查询 5.6 秒。换成 Tantivy 后是
+> 2.5 毫秒，同时删掉了自研 BM25、两张语料统计表和一处有碰撞风险的词项哈希。分词器留下了：
+> 那是领域知识，Tantivy 自带的 ngram 分词器会把 `hybrid` 也切成字符。
 
 **MCP 只读且最小权限。** 只有 `search_knowledge` / `fetch_document_chunks` /
 `list_sources`。租户与 ACL 由服务端凭据推导，客户端参数无法覆盖——被提示注入的 agent
@@ -92,10 +108,12 @@ Docling、Unstructured 与 Marker 随后端默认安装；它们在当前本地�
 部分 PDF/OCR 首次解析会下载本地模型权重，因此生产环境应允许首次下载或预热模型缓存。
 
 > `hash` 稠密嵌入不是语义模型，是字符 n-gram 的确定性随机投影。它保证零配置可跑通、
-> 可测试；语义召回由 `fastembed`/`openai` 提供。稀疏侧无论如何都是真实 BM25。
+> 可测试；语义召回由 `fastembed`/`openai` 提供。词法侧无论如何都是真实 BM25（Tantivy）。
 
 切换模型后用 `kbsvc reembed` 重建向量——chunk_id、字符偏移、heading_path 都与模型无关，
-所以**不重新解析原文件**。详见 [runbook 第 8 节](docs/04-runbook.md)。
+所以**不重新解析原文件**。词法索引与嵌入模型无关，若只需重建它（例如从旧版本升级，或
+`/v1/stats` 显示 `lexical_docs` 与 `chunks` 不一致），用 `kbsvc rebuild-lexical`，几十秒
+而不是几分钟。详见 [runbook 第 8 节](docs/04-runbook.md)。
 
 ## 接口
 
@@ -108,12 +126,15 @@ Docling、Unstructured 与 Marker 随后端默认安装；它们在当前本地�
 | `GET /v1/stats` · `/healthz` · `/readyz` | 运维 |
 
 `"debug": true` 会返回改写后的查询、每一路检索的原始命中与排名、融合前后次序、
-rerank 分数、下发给 Qdrant 的 filter、各阶段耗时。调不动的检索系统等于没有。
+rerank 分数、下发的 filter、各阶段耗时。调不动的检索系统等于没有。
+
+`dense_search` 与 `sparse_search` 两个耗时字段只在对应路真正跑过时出现，所以它也是
+`mode=hybrid|dense|sparse` 是否生效的最直接证据。
 
 ## 文档
 
 - [docs/01-architecture.md](docs/01-architecture.md) — 分层、profile、状态机、检索链路
-- [docs/02-data-model.md](docs/02-data-model.md) — 全部表结构与 Qdrant payload
+- [docs/02-data-model.md](docs/02-data-model.md) — 全部表结构、Qdrant payload 与 Tantivy 文档
 - [docs/03-api.md](docs/03-api.md) — REST 与 MCP 契约
 - [docs/04-runbook.md](docs/04-runbook.md) — 部署、排障、备份、MCP 客户端接入
 - [docs/05-performance.md](docs/05-performance.md) — 实测吞吐、瓶颈定位、扩容时机
