@@ -15,14 +15,21 @@ from __future__ import annotations
 
 import re
 
+from ..normalize import normalize
+
 _TOKEN_SPLIT = re.compile(r"[^\w㐀-䶿一-鿿豈-﫿]+", re.UNICODE)
 _CJK_CHAR = re.compile(r"[㐀-䶿一-鿿豈-﫿]")
 
 
 def tokenize(text: str) -> list[str]:
-    """CJK -> unigrams + bigrams; Latin/digits -> lowercased words."""
+    """CJK -> unigrams + bigrams; Latin/digits -> lowercased words.
+
+    Traditional and old glyph forms are folded first, so indexing and querying
+    agree without either side having to remember to do it - this function is the
+    single entry point for both.
+    """
     tokens: list[str] = []
-    for segment in _TOKEN_SPLIT.split(text.lower()):
+    for segment in _TOKEN_SPLIT.split(normalize(text).lower()):
         if not segment:
             continue
         if _CJK_CHAR.search(segment):

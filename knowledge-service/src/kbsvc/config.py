@@ -67,6 +67,12 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.openai.com/v1"
     openai_api_key: str = ""
 
+    # --- text normalization ---------------------------------------------
+    # Fold traditional and old glyph forms before indexing and before
+    # embedding, so 陰陽 and 阴阳 retrieve the same passages. Applied to the
+    # retrieval representation only - stored text is never rewritten.
+    normalize_cjk: bool = True
+
     # --- chunking -------------------------------------------------------
     chunk_target_tokens: int = 512
     chunk_overlap_tokens: int = 64

@@ -5,13 +5,66 @@ from __future__ import annotations
 from kbsvc.embedding.dense_fastembed import _local_model_path
 from kbsvc.embedding.dense_hash import HashDenseEmbedder
 from kbsvc.lexical.tokenizer import analyze, tokenize
+from kbsvc.normalize import normalize
 from kbsvc.retrieval.citation import build_snippet, source_anchor
 from kbsvc.retrieval.fusion import reciprocal_rank_fusion
 from kbsvc.retrieval.rerank import LexicalReranker, NoopReranker
 from kbsvc.retrieval.rewrite import rewrite
 from kbsvc.vector.base import SearchFilter, SearchHit
 
+# --- orthographic normalization -----------------------------------------
+
+
+def test_traditional_forms_fold_to_simplified():
+    assert normalize("陰陽") == "阴阳"
+    assert normalize("發用") == "发用"
+    assert normalize("遙克") == "遥克"
+
+
+def test_old_glyph_forms_fold_too():
+    """Variants zhconv misses, seeded from the corpus."""
+    assert normalize("巻") == "卷"
+    assert normalize("歳") == "岁"
+
+
+def test_folding_is_length_preserving():
+    """citation.build_snippet locates highlights by offset; a length change would drift them."""
+    for text in ("陰陽發用遙克巻歳", "贼克如何取用神", "Hybrid 检索 42"):
+        assert len(normalize(text)) == len(text)
+
+
+def test_folding_is_idempotent():
+    once = normalize("陰陽發用")
+    assert normalize(once) == once
+
+
+def test_hexagram_qian_is_protected_from_folding():
+    """乾 is the trigram here (乾坤 2,749x), not the 'dry' reading zhconv assumes.
+
+    Folding it would merge 乾坤 with 干支 - two core, unrelated concepts.
+    """
+    assert normalize("乾坤") == "乾坤"
+    assert normalize("乾卦") == "乾卦"
+
+
+def test_fold_table_is_substantial():
+    """Guards against an upstream change silently emptying the mapping."""
+    from kbsvc.normalize import fold_table_size
+
+    assert fold_table_size() > 3000
+
+
+def test_simplified_text_passes_through_untouched():
+    for text in ("贼克者取用之首法也", "六壬", "涉害"):
+        assert normalize(text) == text
+
+
 # --- lexical tokenizer --------------------------------------------------
+
+
+def test_tokenizer_folds_so_both_scripts_share_terms():
+    assert tokenize("遙克") == tokenize("遥克")
+    assert set(tokenize("陰陽")) == set(tokenize("阴阳"))
 
 
 def test_tokenize_emits_cjk_unigrams_and_bigrams():
@@ -138,6 +191,16 @@ def test_snippet_marks_truncation_with_ellipses():
 def test_snippet_of_short_text_is_returned_whole():
     snippet, _ = build_snippet("贼克", "贼克", width=100)
     assert snippet == "贼克"
+
+
+def test_a_simplified_query_highlights_a_traditional_passage():
+    """The reader sees the untouched original; the offsets come from a folded copy."""
+    text = "前言" * 50 + "陰陽者，天地之道也" + "后记" * 50
+    snippet, highlights = build_snippet(text, "阴阳", width=80)
+
+    assert highlights, "a simplified query must still find the traditional form"
+    start, end = highlights[0]
+    assert snippet[start:end] == "陰陽", "the snippet must keep the source's own script"
 
 
 def test_source_anchor_appends_a_page_fragment():

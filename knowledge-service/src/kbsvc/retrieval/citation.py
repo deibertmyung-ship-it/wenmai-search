@@ -3,24 +3,32 @@
 from __future__ import annotations
 
 from ..lexical.tokenizer import tokenize
+from ..normalize import normalize
 
 
 def build_snippet(text: str, query: str, *, width: int) -> tuple[str, list[list[int]]]:
-    """Window the chunk around the densest match, returning offsets into the snippet."""
+    """Window the chunk around the densest match, returning offsets into the snippet.
+
+    Matching runs against a folded copy of the text so a simplified query still
+    highlights a traditional passage, while the snippet returned to the reader
+    is the untouched original. `normalize` is length-preserving by construction,
+    so offsets found in the folded copy are valid in the raw one.
+    """
     if not text:
         return "", []
     terms = {term for term in tokenize(query) if len(term) > 1} or set(tokenize(query))
     if not terms:
         return text[:width], []
 
-    center = _best_window_start(text, terms, width)
+    folded = normalize(text)
+    center = _best_window_start(folded, terms, width)
     start = max(center, 0)
     end = min(start + width, len(text))
     snippet = text[start:end]
     prefix = "…" if start > 0 else ""
     suffix = "…" if end < len(text) else ""
 
-    highlights = _find_spans(snippet, terms, offset=len(prefix))
+    highlights = _find_spans(folded[start:end], terms, offset=len(prefix))
     return f"{prefix}{snippet}{suffix}", highlights
 
 
