@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..embedding.sparse_bm25 import tokenize
+from ..lexical.tokenizer import tokenize
 
 
 def build_snippet(text: str, query: str, *, width: int) -> tuple[str, list[list[int]]]:

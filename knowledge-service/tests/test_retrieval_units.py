@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from kbsvc.embedding.dense_fastembed import _local_model_path
 from kbsvc.embedding.dense_hash import HashDenseEmbedder
-from kbsvc.embedding.sparse_bm25 import Bm25SparseEmbedder, StaticTermStats, term_index, tokenize
+from kbsvc.lexical.tokenizer import analyze, tokenize
 from kbsvc.retrieval.citation import build_snippet, source_anchor
 from kbsvc.retrieval.fusion import reciprocal_rank_fusion
 from kbsvc.retrieval.rerank import LexicalReranker, NoopReranker
 from kbsvc.retrieval.rewrite import rewrite
-from kbsvc.vector.base import SearchHit
+from kbsvc.vector.base import SearchFilter, SearchHit
 
-# --- sparse -------------------------------------------------------------
+# --- lexical tokenizer --------------------------------------------------
 
 
 def test_tokenize_emits_cjk_unigrams_and_bigrams():
@@ -23,27 +23,18 @@ def test_tokenize_lowercases_latin_words():
     assert "hybrid" in tokenize("Hybrid Search")
 
 
-def test_term_index_is_stable_and_in_range():
-    assert term_index("贼克") == term_index("贼克")
-    assert 0 <= term_index("贼克") < 2**31
+def test_tokenize_does_not_bridge_a_whitespace_boundary():
+    """The pipeline joins rewrite variants with a space and relies on this."""
+    assert "克涉" not in tokenize("贼克 涉害")
 
 
-def test_document_and_query_vectors_share_an_index_space():
-    stats = StaticTermStats({"贼克": 2}, count=10, avg_len=20.0)
-    embedder = Bm25SparseEmbedder(stats)
-    document = embedder.encode_document("贼克者取用之首法也")
-    query = embedder.encode_query("贼克")
-    assert set(query) & set(document), "query terms must hit document indices"
+def test_empty_text_tokenizes_to_nothing():
+    assert tokenize("") == []
+    assert analyze("") == ""
 
 
-def test_rarer_terms_get_higher_query_weight():
-    stats = StaticTermStats({"的": 900, "贼克": 2}, count=1000, avg_len=20.0)
-    query = Bm25SparseEmbedder(stats).encode_query("的 贼克")
-    assert query[term_index("贼克")] > query[term_index("的")]
-
-
-def test_empty_query_encodes_to_empty_vector():
-    assert Bm25SparseEmbedder(StaticTermStats()).encode_query("") == {}
+def test_analyze_is_the_whitespace_joined_token_stream():
+    assert analyze("贼克") == " ".join(tokenize("贼克"))
 
 
 # --- dense --------------------------------------------------------------
@@ -153,3 +144,63 @@ def test_source_anchor_appends_a_page_fragment():
     assert source_anchor("file:///a.pdf", 7) == "file:///a.pdf#page=7"
     assert source_anchor("file:///a.pdf", None) == "file:///a.pdf"
     assert source_anchor("", 3) == ""
+
+
+# --- pipeline: retriever dispatch ---------------------------------------
+
+_EXPANDING_QUERY = "请问什么是贼克，以及涉害？"
+
+
+class _CountingVectorStore:
+    def __init__(self) -> None:
+        self.dense_calls: int = 0
+
+    def search_dense(self, vector, *, limit, flt) -> list[SearchHit]:
+        self.dense_calls += 1
+        return []
+
+
+class _CountingLexicalStore:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def search(self, query, *, limit, flt) -> list[SearchHit]:
+        self.queries.append(query)
+        return []
+
+
+def _run(monkeypatch, tenant: str, mode: str, queries: list[str]):
+    from kbsvc.retrieval import pipeline
+
+    vector = _CountingVectorStore()
+    lexical = _CountingLexicalStore()
+    monkeypatch.setattr(pipeline, "get_vector_store", lambda: vector)
+    monkeypatch.setattr(pipeline, "get_lexical_store", lambda: lexical)
+    pipeline.RetrievalService()._run_retrievers(queries, mode, 40, SearchFilter(tenant_id=tenant))
+    return vector, lexical
+
+
+def test_rewrite_variants_cost_one_lexical_query_not_one_each(monkeypatch, tenant):
+    queries = rewrite(_EXPANDING_QUERY)
+    assert len(queries) > 1, "this query must actually expand or the test proves nothing"
+
+    _vector, lexical = _run(monkeypatch, tenant, "sparse", queries)
+
+    assert len(lexical.queries) == 1
+
+
+def test_merged_lexical_query_adds_no_term_the_original_lacked(monkeypatch, tenant):
+    """Variants are substrings of the original, so the union is the original's term set."""
+    queries = rewrite(_EXPANDING_QUERY)
+    _vector, lexical = _run(monkeypatch, tenant, "sparse", queries)
+
+    assert set(tokenize(lexical.queries[0])) == set(tokenize(queries[0]))
+
+
+def test_dense_still_searches_once_per_variant(monkeypatch, tenant):
+    """Rewriting earns its keep on the dense side, where variants embed differently."""
+    queries = rewrite(_EXPANDING_QUERY)
+    vector, lexical = _run(monkeypatch, tenant, "dense", queries)
+
+    assert vector.dense_calls == len(queries)
+    assert lexical.queries == []

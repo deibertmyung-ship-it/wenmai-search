@@ -205,6 +205,38 @@ def reembed_command(
     typer.echo(f"last_chunk_id={result.last_chunk_id}")
 
 
+@app.command("rebuild-lexical")
+def rebuild_lexical_command(
+    batch_size: int = typer.Option(512, help="chunks per index batch"),
+    verbose: bool = False,
+) -> None:
+    """Rebuild the lexical (tantivy) index from the stored chunks.
+
+    Run this once when upgrading from the old sparse-vector retrieval, or any
+    time `stats` shows lexical_docs disagreeing with chunks. Dense vectors are
+    untouched, so this is minutes cheaper than a full `reembed`.
+    """
+    from .db.session import init_db
+    from .ingest.reembed import rebuild_lexical
+
+    _setup_logging(verbose)
+    init_db()
+    settings = get_settings()
+
+    state = {"last": -1}
+
+    def on_progress(done: int, total: int) -> None:
+        percent = int(done * 100 / total) if total else 100
+        if percent != state["last"]:
+            state["last"] = percent
+            typer.echo(f"  {done}/{total} chunks ({percent}%)")
+
+    count = rebuild_lexical(
+        settings.default_tenant, batch_size=batch_size, progress=on_progress
+    )
+    typer.echo(f"indexed {count} chunks into {settings.resolved_lexical_dir}")
+
+
 @app.command("search")
 def search_command(
     query: str,
@@ -277,6 +309,7 @@ def stats_command() -> None:
 
     from .db.models import Chunk, Document, DocumentVersion, IngestJob
     from .db.session import init_db, session_scope
+    from .lexical import get_lexical_store
     from .vector import get_vector_store
 
     init_db()
@@ -307,6 +340,10 @@ def stats_command() -> None:
         payload["vector_points"] = get_vector_store().count(tenant)
     except Exception as exc:
         payload["vector_points"] = f"error: {exc}"
+    try:
+        payload["lexical_docs"] = get_lexical_store().count(tenant)
+    except Exception as exc:
+        payload["lexical_docs"] = f"error: {exc}"
     typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
 
 

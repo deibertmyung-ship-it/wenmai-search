@@ -116,4 +116,6 @@ class StatsOut(BaseModel):
     versions: int
     chunks: int
     vector_points: int
+    # Retrieval has two indexes; showing only one hides a drift between them.
+    lexical_docs: int
     jobs_by_state: dict[str, int]

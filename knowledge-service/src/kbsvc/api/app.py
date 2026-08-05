@@ -15,6 +15,7 @@ from ..db.session import init_db
 from ..embedding import get_dense_embedder
 from ..errors import KbError
 from ..ingest.worker import IngestWorker
+from ..lexical import get_lexical_store, reset_lexical_store
 from ..vector import get_vector_store, reset_vector_store
 from .routers import admin, documents, ingest, search, sources
 
@@ -31,9 +32,11 @@ async def lifespan(app: FastAPI):
     app.state.ingest_worker_thread = None
     if settings.run_api_worker:
         # Initialize expensive process-wide singletons before request and worker
-        # threads can race to create separate embedded Qdrant/model instances.
+        # threads can race to create separate embedded Qdrant/model/index
+        # instances. Tantivy also takes a directory lock, so exactly one owner.
         embedder = get_dense_embedder()
         get_vector_store().ensure_collection(embedder.dim)
+        get_lexical_store().ensure_ready()
 
         stop_event = Event()
         worker = IngestWorker(settings=settings, owner="api-embedded-worker")
@@ -67,6 +70,7 @@ async def lifespan(app: FastAPI):
             else:
                 logger.info("stopped API-embedded ingest worker")
                 reset_vector_store()
+                reset_lexical_store()
 
 
 def create_app() -> FastAPI:

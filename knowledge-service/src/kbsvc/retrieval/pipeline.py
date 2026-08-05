@@ -12,8 +12,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Literal
 
 from ..config import Settings, get_settings
-from ..db.session import session_scope
-from ..embedding import get_dense_embedder, get_sparse_embedder
+from ..embedding import get_dense_embedder
+from ..lexical import get_lexical_store
 from ..vector import SearchFilter, get_vector_store
 from ..vector.base import SearchHit
 from .citation import build_snippet, source_anchor
@@ -111,7 +111,7 @@ class RetrievalService:
         )
         limit = max(request.top_k * self.settings.retrieval_overfetch, request.top_k)
 
-        runs, timings = self._run_retrievers(queries, request.mode, limit, flt, request.tenant_id)
+        runs, timings = self._run_retrievers(queries, request.mode, limit, flt)
         timer.mark("search")  # close the search span before folding in per-retriever detail
         timer.marks.update(timings)
 
@@ -162,7 +162,7 @@ class RetrievalService:
     # --- stages ---------------------------------------------------------
 
     def _run_retrievers(
-        self, queries: list[str], mode: Mode, limit: int, flt: SearchFilter, tenant_id: str
+        self, queries: list[str], mode: Mode, limit: int, flt: SearchFilter
     ) -> tuple[dict[str, list[SearchHit]], dict[str, float]]:
         # Timed separately: opening the default embedded collection is lazy and can
         # dominate the first query. Keep it visible in timing reconciliation.
@@ -186,15 +186,20 @@ class RetrievalService:
 
         if mode in ("hybrid", "sparse"):
             started = time.perf_counter()
-            with session_scope() as session:
-                sparse = get_sparse_embedder(tenant_id, session)
-                vectors = [sparse.encode_query(query) for query in queries]
-            hits = {}
-            for vector in vectors:
-                for hit in store.search_sparse(vector, limit=limit, flt=flt):
-                    if hit.id not in hits or hit.score > hits[hit.id].score:
-                        hits[hit.id] = hit
-            runs["sparse"] = sorted(hits.values(), key=lambda h: -h.score)[:limit]
+            # One lexical query for all rewrite variants, not one per variant.
+            # `rewrite` only ever *removes* text - it strips a question tail, a
+            # leading framing phrase, or splits on punctuation - so every variant
+            # is a contiguous substring of the original and contributes no term
+            # the original lacked. Joining them with a space (which the tokenizer
+            # treats as a hard boundary, so no bigram spans two variants) yields
+            # exactly the original query's term set.
+            #
+            # Dense deliberately keeps its per-variant searches: there the
+            # variants embed to genuinely different points, which is where
+            # rewriting earns its keep.
+            runs["sparse"] = get_lexical_store().search(
+                " ".join(queries), limit=limit, flt=flt
+            )
             timings["sparse_search"] = round((time.perf_counter() - started) * 1000, 3)
 
         return runs, timings

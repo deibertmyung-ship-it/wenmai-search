@@ -10,7 +10,6 @@ from typing import Protocol
 class VectorPoint:
     id: str
     dense: list[float]
-    sparse: dict[int, float]
     payload: dict
 
 
@@ -58,10 +57,6 @@ class VectorStore(Protocol):
 
     def search_dense(
         self, vector: list[float], *, limit: int, flt: SearchFilter
-    ) -> list[SearchHit]: ...
-
-    def search_sparse(
-        self, vector: dict[int, float], *, limit: int, flt: SearchFilter
     ) -> list[SearchHit]: ...
 
     def count(self, tenant_id: str | None = None) -> int: ...
