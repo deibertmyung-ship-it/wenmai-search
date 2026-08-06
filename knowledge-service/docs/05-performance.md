@@ -1,8 +1,10 @@
 # 性能特征与调优
 
-当前 `local` profile 使用 SQLite + 本地 FS + 嵌入式 Qdrant（稠密）+ 嵌入式 Tantivy（词法）
-+ API 内置 worker。下列基线环境为 Windows 10、Python 3.11、204 部中文古籍 / 22,659 段
+本文前半部分描述 `local` profile：SQLite + 本地 FS + 嵌入式 Qdrant（稠密）+ 嵌入式 Tantivy
+（词法）+ API 内置 worker。基线环境为 Windows 10、Python 3.11、204 部中文古籍 / 22,659 段
 （26 MB，主要为 UTF-16 txt）；它反映嵌入式模式的容量边界，不应直接外推到 server profile。
+
+server profile 的实测见文末「server profile 实测」一节。
 
 ## 实测吞吐
 
@@ -86,11 +88,23 @@ total              411.4ms   391.5ms  1201.6ms  1226.3ms
 1. **瓶颈已经从词法转移到稠密。** 词法一路 2.5ms（Tantivy 倒排索引），稠密一路 396ms。
    `mode=sparse` 端到端只要 16ms。
 
-2. **稠密的 396ms 是嵌入式 Qdrant 的全量扫描**：local 模式的 `qdrant-client` 用 numpy
-   对全部 22,659 个向量算距离，没有 HNSW。它之所以还能接受，只是因为 numpy 是 C 实现。
-   语料继续增长时这一路是下一个瓶颈，**切 Qdrant Server（有真正的 HNSW 索引）是主要手段**。
+2. **稠密的 396ms 几乎全是 Python 逐点处理的开销，不是数学运算。** 拆开测：
 
-3. **p90 的 1.2 秒毛刺出现在稠密一路**，是 ONNX 推理与 CPU 争用，不是索引问题。词法一路
+   | 环节 | 耗时 |
+   |---|---|
+   | 查询嵌入（ONNX bge-small-zh） | 2.3 ms |
+   | 22,659×512 全量点积 + argsort（纯 numpy） | 1.23 ms |
+   | **实测 `dense_search`** | **385 ms** |
+
+   numpy 部分只占 0.3%。剩下的 380ms 在 `qdrant_client/local/local_collection.py`
+   的逐点 Python 处理里。**「因为 numpy 是 C 实现所以还能接受」是错的**——这条曾经写在
+   本文档里，已订正。
+
+3. **`np.argsort` 是全量排序而非 top-k。** `local_collection.py:668` 用
+   `np.argsort(scores)[::-1]`，O(N log N)；只取前 40 条用 `argpartition` 就够，
+   实测 1.23ms → 0.70ms。属上游库实现，此处仅记录。
+
+4. **p90 的 1.2 秒毛刺出现在稠密一路**，是 CPU 争用，不是索引问题。词法一路
    的 max 只有 3.9ms，非常平稳。
 
 `store_init` + `dense_search` + `sparse_search` 精确等于 `search`——分项对不上的计时是
@@ -103,6 +117,60 @@ total              411.4ms   391.5ms  1201.6ms  1226.3ms
 > 的 93%；且**每个查询改写变体各扫一遍全库**，三变体的查询要 16.4 秒。原因是嵌入式
 > `qdrant-client` 对稀疏向量没有倒排索引，在 `local/sparse_distances.py` 里逐点做纯
 > Python 点积。
+
+## 嵌入式 Qdrant 没有 HNSW 意味着什么
+
+用独立的 local Qdrant 实测（纯净集合，排除嵌入与业务代码）：
+
+| N | 无过滤 | 带过滤 | 每点耗时 |
+|---|---|---|---|
+| 1,000 | 3.0 ms | 11.2 ms | 3.03 µs |
+| 5,000 | 17.2 ms | 56.1 ms | 3.44 µs |
+| 10,000 | 36.5 ms | 112.1 ms | 3.65 µs |
+
+**严格线性，每点约 3.5µs。** 纯 numpy 点积每点只要 0.05µs——70 倍的差距全在 Python 开销。
+有 HNSW 时是 O(log N)，下表每一档都在 1–5ms 且基本不随规模变化。
+
+| 语料规模 | 无过滤 | 带过滤 |
+|---|---|---|
+| 22,659 段（当前） | ~385 ms（实测） | ~501 ms（实测） |
+| 100,000 段 | ~1.4 s | ~4 s |
+| 500,000 段 | ~7 s | ~20 s |
+
+**触发点约在 10 万段**（现有语料的 4 倍）。另有隐性成本：local 模式把全部向量常驻内存，
+22,659×512×4B ≈ 46MB 无所谓，100 万段就是 2GB。
+
+### 过滤条件会让检索变慢，不是变快
+
+`local_collection.py` 的执行顺序是**先对全部向量算分，再算过滤掩码**：
+
+```python
+590:  scores = calculate_distance(query_vector, vectors, distance)   # 全部向量
+653:  mask  = self._payload_and_non_deleted_mask(query_filter, ...)  # 之后才过滤
+```
+
+所以过滤不减少计算量，反而要额外遍历全部 payload。实测：
+
+```
+无过滤（22,659 段）                385.5 ms
+按 source 过滤                     501.0 ms   +30%
+按单个 document 过滤（约 30 段）     505.4 ms   +31%
+```
+
+把范围收窄到 **0.13%** 的语料，反而慢 31%。**这与用户直觉相反**——界面上勾选「来源」
+「限定章节」不会更快。服务端 Qdrant 有 payload 索引与过滤下推，行为正好相反。
+
+词法一路不受影响：Tantivy 是真正的倒排索引，过滤是下推的，`mode=sparse` 端到端 16ms。
+
+### 嵌入式相比服务端还失去了什么
+
+| 能力 | 影响 |
+|---|---|
+| HNSW 索引 | O(log N) → O(N) |
+| payload 索引 + 过滤下推 | 过滤从「缩小搜索空间」变成「纯加成本」 |
+| 标量 / 乘积量化 | 内存占用本可降到 1/4–1/32 |
+| 多进程并发 | 嵌入式持目录锁，只能一个进程 |
+| 快照备份 | 只能停服务复制目录 |
 
 ## Windows 与写入线程
 
@@ -128,8 +196,125 @@ Windows 上可能与按访问扫描的安全软件抢句柄，表现为写入中
 |---|---|
 | 单 worker 追不上导入速度 | 切 PostgreSQL + Qdrant Server profile，再增加独立 worker |
 | 需要 API 与 worker 同时运行 | local 默认在同一 API 进程中同时运行 |
-| **稠密检索超过 1 秒** | 切 Qdrant Server（HNSW）；嵌入式模式是全量扫描，没有索引可调 |
+| **chunk 数接近 10 万** | 稠密一路会到 1.4 秒（带过滤 4 秒）。切 Qdrant Server（HNSW）是唯一有效手段——嵌入式模式没有索引可调 |
+| 用户抱怨「加了过滤反而更慢」 | 这是嵌入式模式的真实行为，不是错觉。见上文「过滤条件会让检索变慢」 |
 | 词法检索超过 50ms | 先确认不是杀软干扰；Tantivy 在这个量级上应是个位数毫秒 |
 | `lexical_docs` ≠ `chunks` | 两个索引漂移了，跑 `kbsvc rebuild-lexical` |
 | chunk 数超过百万级 | 使用完整 server profile、Qdrant payload 索引并独立规划容量 |
 | 需要真实语义召回 | `KB_DENSE_PROVIDER=fastembed` 或 `openai`，然后 reindex |
+
+## server profile 实测
+
+环境：Windows 11 + Docker Desktop（WSL2），宿主 4 核 / 16 GB，VM 上限 7.7 GB。
+Postgres 16 + Qdrant Server v1.18.2 + MinIO + 独立 worker 容器。fastembed
+bge-small-zh-v1.5（512 维）。
+
+语料 202 篇 / 22,350 段，与上文 22,659 段的基线**同规模，可直接对比**。测于导入完成、
+HNSW 已构建、无并发写入的静态状态，n=30，热态。
+
+**注意这台机器比 local 基线的机器弱得多**——同一个嵌入模型在这里只有 4.4 段/秒，基线机器
+是约 866 段/秒。下面的稠密提速是在这个劣势下取得的。
+
+### 检索延迟（22,350 段，n=30）
+
+```
+mode=hybrid          median      min      p90      max
+store_init            0.0ms    0.0ms    0.0ms    0.0ms
+dense_search         35.3ms   19.2ms   82.6ms  184.4ms
+sparse_search         6.7ms    2.6ms   14.7ms   37.7ms
+total                88.2ms   52.3ms  165.3ms  261.3ms
+
+mode=dense           median      min      p90      max
+dense_search         28.5ms   18.2ms   82.5ms  135.8ms
+total                73.0ms   42.4ms  170.7ms  316.5ms
+
+mode=sparse          median      min      p90      max
+sparse_search         3.6ms    2.4ms    6.9ms    7.4ms
+total                33.8ms   22.9ms   48.1ms   61.0ms
+```
+
+与嵌入式基线的同规模对照：
+
+| 阶段 | 嵌入式（22,659 段） | server（22,350 段） | 变化 |
+|---|---|---|---|
+| `store_init` | 约 7,000 ms（每进程一次） | **0.0 ms** | 消失 |
+| `dense_search`（hybrid） | 396 ms | **35.3 ms** | **11.2×** |
+| `total`（hybrid） | 411 ms | **88.2 ms** | **4.7×** |
+| `sparse_search` | 2.5 ms | 6.7 ms | 慢 2.7×，见下 |
+
+`sparse_search` 变慢是机器差异，不是回退：Tantivy 一路完全不经过 Qdrant，两种 profile 的
+代码路径相同。同理 `mode=sparse` 端到端从 16ms 变成 33.8ms——那里面的改写与重排要跑查询
+嵌入，而这台机器的 ONNX 推理慢得多。
+
+三点结论：
+
+1. **`store_init` 归零。** 嵌入式模式下进程内首次查询要多付约 7 秒打开集合，每进程一次；
+   连到 Qdrant Server 之后这项消失。受益最大的是 CLI 和短生命周期进程——上文「别用 CLI
+   的耗时判断线上延迟」那条警告在 server profile 下不再适用。
+
+2. **稠密一路不再是纯 Python 逐点扫描。** 同规模下 396ms → 35.3ms。嵌入式模式是严格线性的
+   O(N)（每点约 3.5µs），服务端是 HNSW 的 O(log N)——真正的差别不在这 11 倍，而在斜率：
+   语料再翻几倍，嵌入式按比例劣化，服务端基本持平。
+
+   HNSW 的构建有阈值。本次实测 `indexing_threshold=10000`，语料只有 8,980 段时
+   `indexed_vectors_count` 是 0，走的仍是精确检索（只不过实现在 Rust 里而非 Python）；
+   满库 22,350 段后为 20,367，图已建成。**规模小于阈值时看不到 HNSW 的收益，别据此判断
+   服务端没用。**
+
+3. **`total` 与两路之和的差额主要是查询嵌入。** 上文 local 基线记录「融合与重排合计不到
+   20ms」，这里差额约 46ms。原因不在融合或重排，而是这台机器的 ONNX 推理慢得多——见下节。
+
+### 过滤条件：行为与嵌入式模式相反
+
+同一查询，`mode=dense`，22,350 段，n=20：
+
+| 过滤 | dense_search 中位数 | server | 嵌入式（同规模） |
+|---|---|---|---|
+| 无 | 40.4 ms | — | — |
+| 按 source | 26.9 ms | **−33%** | +30% |
+| 按单个 document | 27.5 ms | **−32%** | +31% |
+
+嵌入式是先对全部向量算分、再算过滤掩码，所以过滤只增不减；服务端有 payload 索引与过滤
+下推，范围越窄越快，与用户直觉一致。
+
+**这条结论与语料规模无关**，是切换到 Qdrant Server 后最容易验证的结构性变化：界面上勾选
+「来源」「限定章节」从纯加成本变成了真正的加速。
+
+### 嵌入吞吐是这台机器的真实瓶颈
+
+实测 bge-small-zh-v1.5 在容器内（与 worker 争抢 CPU）：
+
+| batch | 吞吐 |
+|---|---|
+| 32 | 4.4 段/秒 |
+| 128 | 3.5 段/秒 |
+
+local 基线机器上是约 866 段/秒——相差约 200 倍。由此：
+
+- 导入全量实测：**202 篇 / 22,350 段 / 160.5 分钟**，即约 **1.26 篇/分钟、2.3 段/秒**
+  （平均 110.6 段/篇），与上面 4.4 段/秒的嵌入上限同量级——差额是解析、切分与两个索引的
+  写入。上文「索引阶段成本以 `tokenize()` 的 n-gram 展开为首」是 local 基线机器上的结论，
+  **在这台机器上不成立**：瓶颈是 ONNX 推理。
+- **加大 `KB_DENSE_BATCH_SIZE` 在 CPU 已饱和时是负优化**（batch=128 反而更慢）。这个旋钮
+  只在还有空闲核心时有用。
+- 查询嵌入同样受影响，这是 `total` 与两路之和差额的来源。
+
+结论：server profile 解决的是**检索**的扩展性（HNSW、过滤下推、多进程并发、无 store_init），
+**导入吞吐仍然取决于嵌入算力**。要提高导入速度，方向是更快的 CPU、GPU，或把
+`KB_DENSE_PROVIDER` 指向外部推理服务（vLLM / TEI），而不是加 worker 副本——见下节。
+
+### worker 副本数的硬上限是 1
+
+任务表的租约机制支持水平扩展，但 Tantivy 是进程内库并持目录独占锁，而 worker 在
+`ingest/worker.py` 里内联写词法索引。**第二个 worker 副本抢不到 writer 会失败**，
+`docker compose up -d --scale worker=4` 今天不可用。
+
+上文「切 server profile 后多开 worker」需要按此修正：那句话描述的是任务队列的能力，不是
+当前部署的能力。真正扩 worker 需要先把词法写入收敛到单一写入者背后。
+
+### 共享索引目录与读侧可见性
+
+api / worker / mcp 共享一个卷承载词法索引。只读进程按 1 秒节流调用 `Index.reload()`
+（`lexical/tantivy_store.py` 的 `_refresh_reader`）来看见 worker 的提交，否则它们会一直停在
+启动那一刻的段集合上。代价是每秒至多一次段元数据重读，实测 `sparse_search` 中位数 12.5ms
+（含与导入的争抢），未见可归因于 reload 的开销。

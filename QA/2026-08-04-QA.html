@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="文脉检索项目问答整理：2026-08-04 发布与部署，2026-08-05 检索链路核查与 Tantivy 改造">
-  <title>文脉检索项目 QA · 2026-08-04 ~ 08-05</title>
+  <meta name="description" content="文脉检索项目问答整理：2026-08-04 发布与部署，2026-08-05 检索链路核查与 Tantivy 改造，2026-08-06 server profile 部署">
+  <title>文脉检索项目 QA · 2026-08-04 ~ 08-06</title>
   <style>
     :root {
       color-scheme: light;
@@ -292,10 +292,11 @@
       <p class="lead">
         <strong>08-04：</strong>GitHub 发布、文档解析、后台任务、Qdrant 与嵌入模型。
         <strong>08-05：</strong>检索链路逐项核查、5.6 秒瓶颈的根因定位、用 Tantivy 替换自研 BM25、繁简归一化。
+        <strong>08-06：</strong>server profile 落地部署，修掉 compose 模板的六处缺陷，实测过滤行为反转。
         所有结论均以对运行中系统的实测为准，推翻的判断也一并保留。
       </p>
       <div class="meta">
-        <span class="pill">日期：2026-08-04 ~ 08-05</span>
+        <span class="pill">日期：2026-08-04 ~ 08-06</span>
         <span class="pill">项目：wenmai-search</span>
         <span class="pill">语料：204 部 / 22,659 段</span>
         <span class="pill">格式：HTML</span>
@@ -320,6 +321,15 @@
       <a href="#tantivy">Tantivy 选型与实施</a>
       <a href="#normalize">繁简与拼音</a>
       <a href="#delivery">交付与遗留</a>
+      <a href="#hnsw">嵌入式无 HNSW 的影响</a>
+      <strong style="margin-top:18px">08-06 server 部署</strong>
+      <a href="#topology">拓扑选择</a>
+      <a href="#lexical-share">词法索引静默失效</a>
+      <a href="#build">三次构建失败</a>
+      <a href="#bootstrap">引导中的四处缺陷</a>
+      <a href="#measured">server profile 实测</a>
+      <a href="#limits">两条硬约束</a>
+      <a href="#handover">交付与遗留</a>
     </aside>
 
     <main>
@@ -1038,13 +1048,535 @@ e751920  refactor: 用 Tantivy 替换自研 BM25  27 个文件</code></pre>
           </div>
         </article>
       </section>
+
+      <section id="hnsw">
+        <h2>十四、嵌入式 Qdrant 没有 HNSW，影响是什么</h2>
+
+        <article class="qa">
+          <h3 class="question">先纠正：之前对这一条的解释是错的</h3>
+          <div class="answer">
+            <p>性能文档里原本写着「396ms 是全量扫描，之所以还能接受是因为 numpy 是 C 实现」。
+              把耗时拆开测之后发现<strong>这个解释站不住</strong>：</p>
+            <table>
+              <thead><tr><th>环节</th><th>耗时</th></tr></thead>
+              <tbody>
+                <tr><td>查询嵌入（ONNX bge-small-zh）</td><td>2.3 ms</td></tr>
+                <tr><td>22,659×512 全量点积 + argsort（纯 numpy）</td><td>1.23 ms</td></tr>
+                <tr><td><strong>实测 <code>dense_search</code></strong></td><td><strong>385 ms</strong></td></tr>
+              </tbody>
+            </table>
+            <p>numpy 部分只占 <strong>0.3%</strong>，还有 380ms 不知去向。真正的开销是
+              <code>qdrant-client</code> local 模式在 <strong>Python 层逐点做的对象处理</strong>，
+              和 numpy 快不快没关系。文档已订正。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">实际的扩展行为是怎样的？</h3>
+          <div class="answer">
+            <p>用独立的 local Qdrant 实测（纯净集合，排除嵌入与业务代码干扰）：</p>
+            <table>
+              <thead><tr><th>N</th><th>无过滤</th><th>带过滤</th><th>每点耗时</th></tr></thead>
+              <tbody>
+                <tr><td>1,000</td><td>3.0 ms</td><td>11.2 ms</td><td>3.03 µs</td></tr>
+                <tr><td>5,000</td><td>17.2 ms</td><td>56.1 ms</td><td>3.44 µs</td></tr>
+                <tr><td>10,000</td><td>36.5 ms</td><td>112.1 ms</td><td>3.65 µs</td></tr>
+              </tbody>
+            </table>
+            <p><strong>严格线性，每点约 3.5 微秒。</strong>而纯 numpy 点积每点只要 0.05 微秒——
+              <strong>70 倍的差距全在 Python 开销上</strong>。有 HNSW 时是 <code>O(log N)</code>，
+              下表每一档都在 1–5ms，基本不随规模变化。</p>
+            <table>
+              <thead><tr><th>语料规模</th><th>无过滤</th><th>带过滤</th></tr></thead>
+              <tbody>
+                <tr><td>22,659 段（当前）</td><td>~385 ms（实测）</td><td>~501 ms（实测）</td></tr>
+                <tr><td>100,000 段</td><td>~1.4 s</td><td>~4 s</td></tr>
+                <tr><td>500,000 段</td><td>~7 s</td><td>~20 s</td></tr>
+              </tbody>
+            </table>
+            <p><strong>触发点约在 10 万段</strong>，是现有语料的 4 倍。另有隐性成本：local 模式把
+              全部向量常驻内存，22,659×512×4B ≈ 46MB 现在无所谓，100 万段就是 2GB。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">最反直觉的一条：加过滤条件会让检索变慢</h3>
+          <div class="answer">
+            <p>看 <code>local_collection.py</code> 的执行顺序——<strong>先对全部向量算分，再算过滤掩码</strong>：</p>
+            <pre><code>590:  scores = calculate_distance(query_vector, vectors, distance)   # 全部向量
+653:  mask  = self._payload_and_non_deleted_mask(query_filter, ...)  # 之后才过滤
+668:  order = np.argsort(scores)[::-1]                               # 全量排序，非 top-k</code></pre>
+            <p>过滤不减少计算量，反而要额外遍历全部 payload 做掩码。实测：</p>
+            <pre><code>无过滤（22,659 段）                385.5 ms
+按 source 过滤                     501.0 ms   +30%
+按单个 document 过滤（约 30 段）     505.4 ms   +31%</code></pre>
+            <p>把范围收窄到 <strong>0.13%</strong> 的语料，反而慢 31%。</p>
+            <div class="note">
+              这条最有实际影响：<strong>界面上勾选「来源」「限定章节」，直觉是缩小范围会更快，
+              实际是更慢。</strong>服务端 Qdrant 有 payload 索引与过滤下推，行为正好相反。
+            </div>
+            <p>顺带一提，<code>np.argsort</code> 是 O(N log N) 全量排序，只取前 40 条用
+              <code>argpartition</code> 就够，实测 1.23ms → 0.70ms。属上游库实现，未改。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">除了慢，嵌入式还失去了什么？</h3>
+          <div class="answer">
+            <table>
+              <thead><tr><th>能力</th><th>影响</th></tr></thead>
+              <tbody>
+                <tr><td>HNSW 索引</td><td><code>O(log N)</code> → <code>O(N)</code></td></tr>
+                <tr><td>payload 索引 + 过滤下推</td><td>过滤从「缩小搜索空间」变成「纯加成本」</td></tr>
+                <tr><td>标量 / 乘积量化</td><td>内存占用本可降到 1/4–1/32</td></tr>
+                <tr><td>多进程并发</td><td>嵌入式持目录锁，只能一个进程</td></tr>
+                <tr><td>快照备份</td><td>只能停服务复制目录</td></tr>
+              </tbody>
+            </table>
+            <p><strong>词法一路已经不受这个问题影响</strong>——Tantivy 是真正的倒排索引，
+              2.5ms 且过滤是下推的，所以 <code>mode=sparse</code> 端到端只要 16ms。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">现在该怎么办？</h3>
+          <div class="answer">
+            <ol>
+              <li><strong>短期不用动。</strong>385ms 在可接受范围，且瓶颈已从 5.6 秒降到 413ms。</li>
+              <li><strong>但有一件事值得立刻做：</strong>界面上的过滤条件会让检索变慢而非变快，
+                与用户直觉相反，应在 UI 上提示或在文档中写明。</li>
+              <li><strong>语料接近 10 万段时</strong>，切 Qdrant Server 是唯一有效手段——
+                这不是调参能解决的，嵌入式模式根本没有索引可调。但那会引入 Docker，
+                与 <code>run.bat</code> 的「无 Docker」设计目标冲突，届时需要重新权衡。</li>
+            </ol>
+          </div>
+        </article>
+      </section>
+
+      <hr style="margin:56px 0 40px;border:0;border-top:2px solid var(--line)">
+
+      <p class="eyebrow" style="margin-bottom:8px">2026-08-06</p>
+      <h2 style="margin-top:0">server profile 落地部署</h2>
+      <p style="color:var(--muted);max-width:760px">
+        承接 08-05 的结论：稠密一路的 385ms 是嵌入式 Qdrant 没有索引造成的，切 Qdrant Server
+        是唯一有效手段。这一天把完整的 compose server profile 真正跑起来，过程中发现
+        <strong>deploy 模板从未被真实部署验证过</strong>——六处缺陷里有四处是静默失败。
+      </p>
+
+      <div class="summary" aria-label="08-06 核心结果">
+        <article>
+          <span>11.2×</span>
+          <p>同规模稠密检索提速：396ms → 35.3ms</p>
+        </article>
+        <article>
+          <span>−32%</span>
+          <p>按单文档过滤的稠密延迟变化（嵌入式为 +31%）</p>
+        </article>
+        <article>
+          <span>6</span>
+          <p>修复的部署缺陷，其中 4 处静默失败</p>
+        </article>
+      </div>
+
+      <section id="topology">
+        <h2>十六、拓扑选择</h2>
+
+        <article class="qa">
+          <h3 class="question">要提高检索性能，是否必须上完整的 server profile？</h3>
+          <div class="answer">
+            <p>不是。这里有两条收益不同、成本差很多的路：</p>
+            <table>
+              <thead><tr><th>方案</th><th>检索延迟收益</th><th>额外收益</th><th>成本</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>仅 Qdrant Server + 本机进程</td>
+                  <td><strong>全部</strong></td>
+                  <td>无</td>
+                  <td>一个容器，不改代码</td>
+                </tr>
+                <tr>
+                  <td>完整 compose server profile</td>
+                  <td><strong>相同</strong></td>
+                  <td>元数据/对象存储生产化、导入与 API 解耦</td>
+                  <td>七个服务、4.26GB 镜像、需修 compose</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="note">
+              关键判断：<strong>Postgres 与 MinIO 对检索延迟没有任何贡献。</strong>
+              延迟收益全部来自 Qdrant Server 的 HNSW 与 payload 索引下推。选完整方案是为了
+              生产化，不是为了更快。
+            </div>
+            <p>本次按要求选了完整方案，并导入 <code>book/</code> 全量语料。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="lexical-share">
+        <h2>十七、词法索引在 compose 里静默失效</h2>
+
+        <article class="qa">
+          <h3 class="question">部署前审查 compose，发现了什么？</h3>
+          <div class="answer">
+            <p>原模板里 <code>api</code>、<code>worker</code>×2、<code>mcp</code> 三类容器
+              <strong>都没有挂载 <code>KB_DATA_DIR</code> 卷</strong>。而 Tantivy 是进程内库，
+              索引就是文件系统上的一个目录。后果：</p>
+            <ol>
+              <li>worker 容器把词法索引写进<em>它自己那一层</em>的 <code>/app/.kbdata/lexical</code>；</li>
+              <li>api 容器读<em>它自己那一层</em>的同名目录——是空的；</li>
+              <li>于是 <code>mode=sparse</code> 恒返回 0 条，hybrid 静默退化成纯 dense。</li>
+            </ol>
+            <div class="warn">
+              <strong>不会报任何错。</strong>索引目录不存在时 Tantivy 会新建一个空索引，
+              查询正常返回、只是没有结果。唯一的信号是 <code>/v1/stats</code> 里
+              <code>lexical_docs</code> 与 <code>chunks</code> 对不上。
+            </div>
+            <p>讽刺的是 <code>05-performance.md</code> 里早就写了「server profile 下需要让词法
+              写入集中在单一写入者后面」——结论写对了，compose 没有实现它。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">怎么修的？</h3>
+          <div class="answer">
+            <p>三件事：</p>
+            <ol>
+              <li><strong>共享卷。</strong>三类容器挂同一个 <code>kbdata</code> 卷到
+                <code>/data</code>，词法索引与 ONNX 权重各一份。</li>
+              <li><strong>读侧 reload。</strong>Tantivy 的 reader 只在 <code>reload()</code> 时
+                才看到新段。写进程在 <code>_commit</code> 里已经 reload，但<strong>只读进程永远
+                停在启动那一刻的段集合上</strong>。新增 <code>_refresh_reader()</code>，
+                按 1 秒节流；写进程走 <code>_writer is not None</code> 直接跳过。</li>
+              <li><strong>worker 副本降到 1。</strong>见后文「两条硬约束」。</li>
+            </ol>
+            <p>配了回归测试：同一目录上建两个 store，reader 先 <code>ensure_ready()</code>
+              再由 writer 写入，断言 reader 能查到。<strong>去掉修复后该测试失败</strong>
+              （<code>assert [] == ['chunk-1']</code>），不是摆设。</p>
+            <div class="note">
+              端到端验证：从 api 容器发 <code>mode=sparse</code> 请求，命中 12 条——
+              这正是原模板下会返回空的地方。
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="build">
+        <h2>十八、三次构建失败与一次误判</h2>
+
+        <article class="qa">
+          <h3 class="question">第一次失败：apt 装不上</h3>
+          <div class="answer">
+            <p><code>apt-get</code> 连不上 <code>deb.debian.org</code>，exit 100。
+              容器内实测 80 和 443 端口都通，重跑同一条命令即成功——瞬时网络故障，
+              没有为此改 Dockerfile 加镜像源。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">第二次失败：buildkit 掉线，以及我判断错的地方</h3>
+          <div class="answer">
+            <p>报错 <code>rpc error: code = Unavailable desc = error reading from server: EOF</code>，
+              日志里满屏「临时目录删不掉」，且三个后台任务被同时杀掉。</p>
+            <p><strong>我的第一判断是磁盘空间不足</strong>：宿主 C: 盘只剩 13.3 GB，
+              而这个镜像要装 torch 全家桶。据此还向用户提出了「把 Docker 磁盘映像迁到 F: 盘」
+              的方案。</p>
+            <div class="warn">
+              <strong>这个判断是错的。</strong>查 <code>settings-store.json</code> 发现
+              <code>CustomWslDistroDir</code> 早已指向
+              <code>F:\docker\wsl\DockerDesktopWSL</code>，数据盘
+              <code>docker_data.vhdx</code> 就在 F: 上，那里还有 202.5 GB 空闲。
+              C: 盘的余量与这次构建毫无关系，不需要迁移任何东西。
+            </div>
+            <p>容器内 <code>df</code> 显示 950 GB 可用是稀疏 VHDX 的假象，我当时用它反推
+              「宿主受限」，方向对了但落点错了。真正的原因是<strong>内存</strong>：
+              宿主 16 GB 只剩 2.6 GB 空闲，4 核；WSL2 VM 在 pip 解析安装 torch 时被压垮，
+              Docker 引擎重启——这同时解释了 EOF 和后台任务被集体杀掉。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">怎么让它构建成功的？</h3>
+          <div class="answer">
+            <p>改 Dockerfile 两处：</p>
+            <ol>
+              <li><strong>torch 改用 CPU-only 索引</strong>
+                （<code>--index-url https://download.pytorch.org/whl/cpu</code>）。
+                默认 Linux wheel 会拖进约 5 GB 的 nvidia CUDA 库，而 compose 拓扑里根本没有 GPU
+                ——纯粹的死重，也是内存峰值、构建时长和镜像体积的最大来源。</li>
+              <li><strong>pip 拆成三层</strong>（torch → 其余依赖 → 校验 import）。
+                构建再被打断时能从缓存续，而不是从头重下 torch。</li>
+            </ol>
+            <p>结果：镜像 4.26 GB，构建通过。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">第三处：源码改一行，依赖重装 20 分钟</h3>
+          <div class="answer">
+            <p>原 Dockerfile 把 <code>COPY src ./src</code> 放在 apt 与 pip 之前，
+              于是<strong>任何源码改动都会让下面所有层失效</strong>，包括那个 20 分钟的
+              torch 安装。部署过程中改了三次代码，每次都要重来。</p>
+            <p>改为标准做法：先只 <code>COPY pyproject.toml</code>，用一个 stub 包
+              (<code>touch src/kbsvc/__init__.py</code>) 让 pip 能构建元数据，装完依赖后再
+              <code>COPY src</code> 并 <code>pip install --no-deps --force-reinstall .</code>。</p>
+            <div class="warn">
+              <strong>这一处截至文档写作时尚未验证通过。</strong>触发的重建两次都挂在 apt 层
+              （与第一次同样的网络瞬时故障，与层序改动无关），仍在重试中。
+              在跑通之前不应认为它没问题。
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="bootstrap">
+        <h2>十九、引导过程中暴露的四处缺陷</h2>
+
+        <article class="qa">
+          <h3 class="question"><code>kbsvc init</code> 报 PermissionError</h3>
+          <div class="answer">
+            <p><code>PermissionError: [Errno 13] Permission denied: '/data/lexical'</code>。
+              命名卷是 root 所有，容器以 uid 10001 运行。</p>
+            <p>Docker 会用镜像中被覆盖路径的属主来初始化新卷，而镜像里根本没有
+              <code>/data</code>。修复：<code>RUN mkdir -p /data &amp;&amp; chown kbsvc:kbsvc /data</code>，
+              放在 <code>useradd</code> 之后、<code>USER</code> 之前，再删掉已建的 root 属主卷。</p>
+            <p>顺带给 <code>kbsvc init</code> 加了一步：显式建出空的 Tantivy 索引。
+              否则 api / worker / mcp 同时启动时会并发对空目录调
+              <code>tantivy.Index(schema, path=...)</code>，是个竞态。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">MCP 容器起来了，但连不上</h3>
+          <div class="answer">
+            <p>日志：<code>Uvicorn running on http://127.0.0.1:8000</code>——既不是
+              <code>0.0.0.0</code> 也不是 8078，端口映射自然全落空。</p>
+            <p>原因：compose 里用 <code>FASTMCP_HOST</code> / <code>FASTMCP_PORT</code> 传参，
+              那是 <code>mcp&lt;2</code> 时代 FastMCP 的 pydantic-settings 约定。
+              实际装的是 <strong>mcp 2.0.0</strong>，<code>mcp.server.fastmcp</code> 模块已不存在，
+              走的是 <code>MCPServer</code> 分支，<strong>它完全不读这两个环境变量</strong>，
+              bind 地址是 <code>run()</code> 的关键字参数。</p>
+            <div class="note">
+              这类失效最难发现：环境变量拼写没错、容器也正常启动、健康检查还是绿的
+              （因为镜像的 HEALTHCHECK 探的是另一个端口）。
+            </div>
+            <p>修复：给 <code>kbsvc mcp</code> 加 <code>--host</code> / <code>--port</code>
+              显式传参，compose 改用命令行参数。验证：initialize 握手 200，
+              <code>tools/list</code> 返回三个只读工具。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">worker 和 mcp 永远 unhealthy</h3>
+          <div class="answer">
+            <p>镜像的 HEALTHCHECK 探 <code>127.0.0.1:8077/healthz</code>。worker 不提供 HTTP，
+              mcp 在 8078，两者都必然失败。修复：worker 用
+              <code>healthcheck: disable: true</code>，mcp 覆盖为探 8078。</p>
+            <p>这一条不影响功能，但它<strong>掩盖了上一条真实的故障</strong>——mcp 本来就该是
+              红的，只是分不清是配置问题还是探针问题。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">导入命令返回 <code>registered=0</code>，且不报错</h3>
+          <div class="answer">
+            <p><code>kbsvc ingest /corpus</code> 登记了 0 个文件，但容器里
+              <code>ls /corpus</code> 明明有 205 个。</p>
+            <p>是 Windows git bash 的 MSYS 路径改写：<code>/corpus</code> 作为命令行参数被转成了
+              Windows 路径。代码里 <code>path.resolve()</code> 对不存在的目录不报错，
+              <code>rglob</code> 返回空，于是安静地登记了 0 个文件。</p>
+            <p>加 <code>MSYS_NO_PATHCONV=1</code> 前缀后正常：<code>registered=202</code>，
+              与文档基线一致。</p>
+            <p>另外 CLI 导入<strong>必须加 <code>--no-run-worker</code></strong>——
+              它默认会在自己进程里 drain 队列，而 worker 容器已经持有 Tantivy 的写锁。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="measured">
+        <h2>二十、server profile 实测</h2>
+
+        <article class="qa">
+          <h3 class="question">检索延迟降到了多少？</h3>
+          <div class="answer">
+            <p>测量条件：语料导入已完成（202 篇 / 22,350 段，与 08-05 基线的 22,659 段
+              <strong>同规模，可直接对比</strong>），HNSW 已构建，无并发写入，n=30 热态。
+              但这台机器（4 核 / 16 GB）比 08-05 基线的机器弱得多——同一嵌入模型在这里只有
+              4.4 段/秒，基线机器约 866 段/秒。<strong>下面的稠密提速是在这个劣势下取得的。</strong></p>
+            <pre><code>mode=hybrid          median      min      p90      max
+store_init            0.0ms    0.0ms    0.0ms    0.0ms
+dense_search         35.3ms   19.2ms   82.6ms  184.4ms
+sparse_search         6.7ms    2.6ms   14.7ms   37.7ms
+total                88.2ms   52.3ms  165.3ms  261.3ms
+
+mode=dense           median
+dense_search         28.5ms
+
+mode=sparse          median
+sparse_search         3.6ms</code></pre>
+            <table>
+              <thead><tr><th>阶段</th><th>嵌入式（22,659 段）</th><th>server（22,350 段）</th><th>变化</th></tr></thead>
+              <tbody>
+                <tr><td><code>store_init</code></td><td>约 7,000 ms（每进程一次）</td><td><strong>0.0 ms</strong></td><td>消失</td></tr>
+                <tr><td><code>dense_search</code>（hybrid）</td><td>396 ms</td><td><strong>35.3 ms</strong></td><td><strong>11.2×</strong></td></tr>
+                <tr><td><code>total</code>（hybrid）</td><td>411 ms</td><td><strong>88.2 ms</strong></td><td><strong>4.7×</strong></td></tr>
+                <tr><td><code>sparse_search</code></td><td>2.5 ms</td><td>6.7 ms</td><td>慢 2.7×</td></tr>
+              </tbody>
+            </table>
+            <p><code>sparse_search</code> 变慢是机器差异，<strong>不是回退</strong>：
+              Tantivy 一路完全不经过 Qdrant，两种 profile 的代码路径相同。</p>
+            <p><strong><code>store_init</code> 归零</strong>是最干净的一项：嵌入式模式下
+              进程内首次查询要多付约 7 秒打开集合、每进程一次，连到 Qdrant Server 后这项消失。
+              前文那句「别用 CLI 的耗时判断线上延迟」在 server profile 下不再适用。</p>
+            <div class="note">
+              <strong>HNSW 有构建阈值，实测是 <code>indexing_threshold=10000</code>。</strong>
+              语料只有 8,980 段时 <code>indexed_vectors_count</code> 为 0，走的仍是精确检索
+              （只是实现在 Rust 而非 Python）；满库 22,350 段后为 20,367，图已建成。
+              <strong>规模小于阈值时看不到 HNSW 的收益，别据此判断服务端没用。</strong>
+              （本文初稿把该阈值写成 20000，已订正。）
+            </div>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">08-05 说「加过滤反而更慢」，现在呢？</h3>
+          <div class="answer">
+            <p>反过来了。同一查询，<code>mode=dense</code>，22,350 段，n=20：</p>
+            <table>
+              <thead><tr><th>过滤</th><th>server profile</th><th>相对无过滤</th><th>嵌入式（08-05）</th></tr></thead>
+              <tbody>
+                <tr><td>无</td><td>40.4 ms</td><td>—</td><td>—</td></tr>
+                <tr><td>按 source</td><td>26.9 ms</td><td><strong>−33%</strong></td><td>+30%</td></tr>
+                <tr><td>按单个 document</td><td>27.5 ms</td><td><strong>−32%</strong></td><td>+31%</td></tr>
+              </tbody>
+            </table>
+            <div class="note">
+              <strong>这条结论与语料规模无关</strong>，是切换到 Qdrant Server 后最容易验证的
+              结构性变化。08-05 那条「应在 UI 上提示过滤会变慢」的建议，在 server profile 下
+              <strong>应当撤销</strong>：范围越窄越快，与用户直觉一致了。
+            </div>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">导入为什么这么慢？（以及我第二次判断错的地方）</h3>
+          <div class="answer">
+            <p>实测约 1.1 篇/分钟、约 2.1 段/秒，而 08-05 基线是 6 篇/分钟。</p>
+            <p><strong>我先给出的解释是错的。</strong>当时我按文档里「索引阶段头号成本是
+              <code>tokenize()</code> 的 n-gram 展开」和「嵌入吞吐 866 段/秒」两个数字推算，
+              得出「2.1 段/秒远低于 866，所以嵌入不是瓶颈」——这是拿别的机器的数字做推理。</p>
+            <p>实测推翻了它：</p>
+            <table>
+              <thead><tr><th>batch</th><th>本机吞吐</th><th>08-05 基线机器</th></tr></thead>
+              <tbody>
+                <tr><td>32</td><td>4.4 段/秒</td><td rowspan="2">约 866 段/秒</td></tr>
+                <tr><td>128</td><td>3.5 段/秒</td></tr>
+              </tbody>
+            </table>
+            <p>相差约 200 倍。<strong>嵌入就是这台机器的瓶颈</strong>，端到端 2.1 段/秒与
+              4.4 段/秒的上限（还要与 worker 争 CPU）完全吻合。</p>
+            <div class="note">
+              附带结论：<strong>CPU 已饱和时加大 <code>KB_DENSE_BATCH_SIZE</code> 是负优化</strong>
+              （batch=128 反而更慢）。这个旋钮只在还有空闲核心时有用，所以没有去动它。
+              查询嵌入同样受此拖累，这解释了为什么 <code>total</code> 比两路之和多出约 110ms
+              ——不是融合或重排的问题。
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="limits">
+        <h2>二十一、两条硬约束</h2>
+
+        <article class="qa">
+          <h3 class="question">worker 真的可以水平扩展吗？</h3>
+          <div class="answer">
+            <p><strong>不能。上限是 1 个进程。</strong></p>
+            <p>任务表的租约机制确实支持水平扩展，但 Tantivy 挡在前面：它是进程内库、持目录
+              独占锁，而 worker 在 <code>ingest/worker.py</code> 里内联写词法索引。
+              第二个副本抢不到 writer 会失败。</p>
+            <div class="warn">
+              README 的「独立常驻 worker，可水平扩展」与 <code>05-performance.md</code> 的
+              「切 server profile 后多开 worker：<code>--scale worker=4</code>」
+              <strong>描述的是任务队列的能力，不是当前部署的能力</strong>。两处均已订正。
+            </div>
+            <p>要真正扩 worker，得先把词法写入收敛到单一写入者背后（独立的 lexical-writer
+              服务，或一个专门的任务类型）。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">那导入慢该怎么解决？</h3>
+          <div class="answer">
+            <p>既然瓶颈是嵌入算力而不是并发度，<strong>加 worker 副本方向就是错的</strong>
+              （何况也加不了）。有效方向是更快的 CPU、GPU，或把
+              <code>KB_DENSE_PROVIDER</code> 指向外部推理服务（vLLM / TEI）。</p>
+            <div class="note">
+              一句话概括这次部署的收益边界：<strong>server profile 解决的是「检索」的扩展性
+              （HNSW、过滤下推、多进程并发、无 store_init），「导入」吞吐仍然取决于嵌入算力。</strong>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="handover">
+        <h2>二十二、交付与遗留</h2>
+
+        <article class="qa">
+          <h3 class="question">最终交付了什么？</h3>
+          <div class="answer">
+            <p>七个服务的完整 compose 栈：postgres、qdrant、minio、api、worker、mcp、web
+              （web 服务与 <code>knowledge-web/deploy/Dockerfile</code> 为本次新增，48.6 MB）。</p>
+            <table>
+              <thead><tr><th>验证项</th><th>结果</th></tr></thead>
+              <tbody>
+                <tr><td><code>/v1/stats</code> 三项计数</td><td>chunks = vector_points = lexical_docs</td></tr>
+                <tr><td><code>mode=sparse</code>（原模板会返回空）</td><td>命中，跨容器共享索引生效</td></tr>
+                <tr><td>Qdrant payload 索引</td><td>6 个 keyword + <code>is_current</code> 已建</td></tr>
+                <tr><td>MCP streamable-http</td><td><code>0.0.0.0:8078</code>，三个工具可列出</td></tr>
+                <tr><td>Web UI 端到端</td><td>结果与引用高亮正常渲染</td></tr>
+                <tr><td>认证</td><td><code>KB_AUTH_REQUIRED=true</code>，Bearer key 生效</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">还剩什么没做完？</h3>
+          <div class="answer">
+            <p>当天收尾时列的四项，前三项已完成：</p>
+            <ol>
+              <li><s>语料导入未完成</s> — <strong>已完成</strong>：202 篇全部 completed、零失败，
+                22,350 段，耗时 160.5 分钟（约 1.26 篇/分钟）。</li>
+              <li><s>Dockerfile 层序修复未验证</s> — <strong>已验证</strong>：重建通过，
+                解析器 import、CLI 选项与词法修复均在新镜像中确认。</li>
+              <li><s>满库基准未跑</s> — <strong>已跑</strong>，数字见第二十节；
+                <code>indexed_vectors_count</code> 已从 0 变为 20,367，HNSW 确认构建。
+                <code>/v1/stats</code> 三项在满库下相等（22,350）。</li>
+              <li><strong>UI 提示待撤销</strong>（未做）。08-05 建议在界面上提示「过滤会变慢」，
+                server profile 下该提示是错的——实测过滤快 32~33%。</li>
+            </ol>
+            <div class="note">
+              另有一项当天之后确定的工作：<strong>worker 水平扩展方案已完成设计</strong>
+              （专职 lexical-writer + 词法任务队列，零 schema 变更），规格见
+              <code>docs/superpowers/specs/2026-08-06-lexical-writer-worker-scaling-design.md</code>，
+              尚未实施。设计过程中发现一个本次改动会引入的新风险：N 个 worker 下同一文档可被
+              并发处理，两者的 <code>_supersede_older</code> 会互删 chunk，已纳入同一份设计解决。
+            </div>
+          </div>
+        </article>
+      </section>
     </main>
   </div>
 
   <footer>
     <div class="shell">
-      本文档根据 2026-08-04 与 2026-08-05 的项目问答整理生成。
-      文中所有性能数字与对照表均来自对运行中系统的实测，推翻的判断（overfetch 优化无效、双写方案被 IDF 否决）一并保留。
+      本文档根据 2026-08-04、08-05 与 08-06 的项目问答整理生成。
+      文中所有性能数字与对照表均来自对运行中系统的实测，推翻的判断一并保留：
+      overfetch 优化经实测无效、双写方案被 BM25 的 IDF 否决、
+      第十四节对「稠密 396ms 是 numpy 全量扫描」这一错误解释的订正，
+      以及 08-06 的两处误判——把构建失败归因于 C: 盘空间（实为内存不足，Docker 数据盘早已在 F: 上），
+      和用别的机器的数字推断「嵌入不是瓶颈」（实测相差 200 倍，嵌入正是瓶颈）。
+      08-06 的检索延迟测于导入进行中且语料未满库，属上界；Dockerfile 层序修复尚未验证通过。
       运行状态、依赖版本和部署方式以后续代码变更为准。
     </div>
   </footer>

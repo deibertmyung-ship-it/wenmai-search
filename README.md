@@ -129,9 +129,17 @@ uv run kbsvc mcp
 | 词法索引（sparse） | 嵌入式 Tantivy（本地目录） | 同左 —— Tantivy 无服务端形态 |
 | dense embedding | FastEmbed（默认 bge-small-zh-v1.5） | FastEmbed 或 OpenAI-compatible endpoint |
 | sparse retrieval | 字符 1-gram / 2-gram 分词 + Tantivy BM25 | 同左 |
-| 任务执行 | API 内置单 worker 线程，上传后自动处理 | 独立常驻 worker，可水平扩展 |
+| 任务执行 | API 内置单 worker 线程，上传后自动处理 | 独立常驻 worker 容器（当前上限 1 个进程，见下） |
 
-服务端 Docker Compose 模板位于 [`knowledge-service/deploy/`](knowledge-service/deploy/)。所有配置项及默认值见 [`knowledge-service/.env.example`](knowledge-service/.env.example) 与 [`knowledge-web/.env.example`](knowledge-web/.env.example)。
+服务端 Docker Compose 模板位于 [`knowledge-service/deploy/`](knowledge-service/deploy/)，包含
+postgres、qdrant、minio、api、worker、mcp、web 七个服务。所有配置项及默认值见
+[`knowledge-service/.env.example`](knowledge-service/.env.example) 与
+[`knowledge-web/.env.example`](knowledge-web/.env.example)。
+
+两条 server profile 的硬约束：**worker 只能跑一个进程**（Tantivy 持目录独占锁，而 worker
+内联写词法索引），且 **api / worker / mcp 必须共享同一个索引卷**（否则各写各的空索引，
+`mode=sparse` 恒返回空且不报错）。详见
+[`knowledge-service/docs/04-runbook.md`](knowledge-service/docs/04-runbook.md) 第 2 节。
 
 ## 仓库结构
 

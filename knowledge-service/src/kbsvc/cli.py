@@ -28,13 +28,24 @@ def _setup_logging(verbose: bool) -> None:
 
 @app.command("init")
 def init_command() -> None:
-    """Create the schema and the default tenant."""
+    """Create the schema, the default tenant and an empty lexical index."""
     from .db.session import init_db
+    from .lexical import get_lexical_store, reset_lexical_store
 
     _setup_logging(False)
     init_db()
+    # Materialise the tantivy index here rather than letting the first process
+    # that touches it do so. In the server profile the API, MCP and worker
+    # containers share one index directory and start together, and two of them
+    # calling `tantivy.Index(schema, path=...)` on an empty directory at once is
+    # a race. One-shot `kbsvc init` runs alone, by construction.
+    get_lexical_store()
+    reset_lexical_store()
     settings = get_settings()
-    typer.echo(f"initialised profile={settings.profile} db={settings.resolved_database_url}")
+    typer.echo(
+        f"initialised profile={settings.profile} db={settings.resolved_database_url} "
+        f"lexical={settings.resolved_lexical_dir}"
+    )
 
 
 @app.command("add-source")
@@ -295,11 +306,13 @@ def serve_command(host: str = "", port: int = 0, reload: bool = False) -> None:
 @app.command("mcp")
 def mcp_command(
     transport: str = typer.Option("stdio", help="stdio | streamable-http | sse"),
+    host: str = typer.Option("", help="bind address for the HTTP transports"),
+    port: int = typer.Option(0, help="bind port for the HTTP transports"),
 ) -> None:
     """Run the MCP server."""
     from .mcp.server import run
 
-    run(transport)
+    run(transport, host=host, port=port)
 
 
 @app.command("stats")

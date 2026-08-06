@@ -56,6 +56,9 @@ services:
     command: ["kbsvc", "serve", "--host", "0.0.0.0", "--port", "8077"]
     environment: &kb_env
       KB_PROFILE: server
+      # Holds the tantivy index and the ONNX weights. Postgres owns the
+      # metadata and MinIO owns the raw files, so nothing else lands here.
+      KB_DATA_DIR: /data
       KB_DATABASE_URL: postgresql+psycopg://kbsvc:${POSTGRES_PASSWORD}@postgres:5432/kbsvc
       KB_STORAGE_BACKEND: s3
       KB_S3_ENDPOINT_URL: http://minio:9000
@@ -68,6 +71,14 @@ services:
       KB_DENSE_PROVIDER: ${KB_DENSE_PROVIDER:-fastembed}
       KB_DENSE_MODEL: ${KB_DENSE_MODEL:-BAAI/bge-small-zh-v1.5}
       KB_AUTH_REQUIRED: "true"
+    volumes: &kb_volumes
+      # Every kbsvc container shares one lexical index and one model cache.
+      # Tantivy is an in-process library with no server form: without a shared
+      # mount each container silently indexes into its own empty directory and
+      # the sparse half of hybrid search returns nothing.
+      - kbdata:/data
+      # Corpus visible to `kbsvc ingest` and POST /v1/ingest/path.
+      - ../../book:/corpus:ro
     ports:
       - "${KB_API_PORT:-8077}:8077"
     depends_on:
@@ -81,9 +92,18 @@ services:
       dockerfile: deploy/Dockerfile
     command: ["kbsvc", "worker"]
     environment: *kb_env
-    # Scale freely: jobs are leased, so workers never process the same job twice.
+    volumes: *kb_volumes
+    # The image probes /healthz on 8077. A worker serves no HTTP, so inheriting
+    # that check would report a healthy worker as permanently unhealthy.
+    healthcheck:
+      disable: true
+    # Jobs are leased, so the Postgres side scales freely - but tantivy takes an
+    # exclusive directory lock and every worker writes the lexical index inline
+    # (ingest/worker.py). A second replica fails to acquire the writer. Raising
+    # this needs the lexical writes moved behind a single writer first; until
+    # then the ceiling is one worker process.
     deploy:
-      replicas: ${KB_WORKER_REPLICAS:-2}
+      replicas: ${KB_WORKER_REPLICAS:-1}
     depends_on:
       postgres: {condition: service_healthy}
       qdrant: {condition: service_healthy}
@@ -93,14 +113,40 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    command: ["kbsvc", "mcp", "--transport", "streamable-http"]
+    command:
+      ["kbsvc", "mcp", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8078"]
     environment:
       <<: *kb_env
       KB_MCP_API_KEY: ${KB_MCP_API_KEY:?issue one with `kbsvc issue-key`}
-      FASTMCP_HOST: 0.0.0.0
-      FASTMCP_PORT: "8078"
+    volumes: *kb_volumes
+    # Same reason as the worker: this process listens on 8078, not 8077.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket,sys; s=socket.create_connection(('127.0.0.1',8078),3); s.close()"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     ports:
       - "${KB_MCP_PORT:-8078}:8078"
+    depends_on:
+      api: {condition: service_started}
+
+  web:
+    build:
+      context: ../../knowledge-web
+      dockerfile: deploy/Dockerfile
+    environment:
+      KBWEB_API_BASE: http://api:8077
+      KBWEB_API_KEY: ${KBWEB_API_KEY:?issue one with `kbsvc issue-key`}
+      KBWEB_SECRET_KEY: ${KBWEB_SECRET_KEY:?set KBWEB_SECRET_KEY in .env}
+      KBWEB_DEBUG_UI: ${KBWEB_DEBUG_UI:-true}
+      KBWEB_TIMEOUT: "60"
+    ports:
+      - "${KBWEB_PORT:-5055}:5055"
     depends_on:
       api: {condition: service_started}
 
@@ -108,3 +154,4 @@ volumes:
   pgdata:
   qdrantdata:
   miniodata:
+  kbdata:

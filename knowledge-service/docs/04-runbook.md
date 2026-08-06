@@ -36,16 +36,76 @@ Tantivy 索引。停止 API 会同时停止 worker。不要在 API 运行期间�
 
 ## 2. 服务端 Profile
 
+compose 栈包含 postgres、qdrant、minio、api、worker、mcp 与 web 七个服务。
+
 ```bash
 cd deploy
-cp ../.env.example .env    # 填 POSTGRES_PASSWORD / QDRANT_API_KEY / MINIO_ROOT_PASSWORD
-docker compose up -d postgres qdrant minio
-docker compose run --rm api kbsvc init
-docker compose run --rm api kbsvc issue-key mcp-agent --acl public   # 记下明文
-# 写入 .env 的 KB_MCP_API_KEY 后
-docker compose up -d api worker mcp
-docker compose up -d --scale worker=4      # 按吞吐扩 worker
+cp ../.env.example .env
 ```
+
+`.env` 至少要填 `POSTGRES_PASSWORD` / `QDRANT_API_KEY` / `MINIO_ROOT_PASSWORD` /
+`KBWEB_SECRET_KEY`。密码会被插值进 `postgresql://` URL，用十六进制串，别带 `@` `:` `/`。
+
+`KB_MCP_API_KEY` 与 `KBWEB_API_KEY` 要等数据库建好才能签发，但 **compose 在执行任何命令前
+会先插值整个文件**，`${VAR:?}` 缺失就直接报错。所以这两项先填占位串，签发后再替换：
+
+```bash
+docker compose up -d postgres qdrant minio
+docker compose run --rm api kbsvc init                              # 建表 + 租户 + 空词法索引
+docker compose run --rm api kbsvc issue-key mcp-agent --acl public  # 明文只显示这一次
+docker compose run --rm api kbsvc issue-key kbweb --acl public
+# 把两个明文写回 .env 的 KB_MCP_API_KEY / KBWEB_API_KEY
+```
+
+起服务前先单独预热一次嵌入权重。api 与 worker 共享同一个模型缓存目录，同时启动会并发下载
+同一份 ONNX：
+
+```bash
+docker compose run --rm api python -c "from kbsvc.embedding import get_dense_embedder; get_dense_embedder().embed_query('warmup')"
+docker compose up -d api worker mcp web
+```
+
+### worker 数量的上限是 1
+
+任务表的租约机制本身支持水平扩展，但**词法索引挡在前面**：Tantivy 是进程内库、持目录独占锁，
+而 worker 在 `ingest/worker.py` 里内联写词法索引。第二个 worker 副本抢不到 writer 会失败。
+
+```bash
+docker compose up -d --scale worker=4      # 今天会挂，不要这么做
+```
+
+要真正扩 worker，得先把词法写入收敛到单一写入者背后（独立的 lexical-writer 服务或一个
+专门的任务类型），在那之前 `KB_WORKER_REPLICAS` 只能是 1。
+
+### 共享卷不是可选项
+
+api / worker / mcp 三类容器挂同一个 `kbdata` 卷到 `/data`（`KB_DATA_DIR`），里面是词法索引和
+模型缓存。**不挂共享卷时不会报错**：每个容器各自在自己的层里建一个空的 Tantivy 索引，worker
+写它自己那份，api 读它自己那份空的，于是 hybrid 静默退化成纯 dense，`mode=sparse` 恒返回空。
+`/v1/stats` 的 `lexical_docs` 与 `chunks` 对不上是这个故障的信号。
+
+只读容器（api / mcp）按秒级节流 reload 索引来看见 worker 的提交，见
+`lexical/tantivy_store.py` 的 `_refresh_reader`。
+
+### 语料导入
+
+`book/` 以 `/corpus:ro` 挂进 api 与 worker。用 CLI 导入时**必须加 `--no-run-worker`**——
+CLI 自带的 drain 会去抢 worker 容器已持有的 Tantivy 写锁：
+
+```bash
+docker compose run --rm api kbsvc ingest /corpus --source guji \
+    --patterns "*.txt,*.md" --no-run-worker
+```
+
+登记完由 worker 容器消费队列。进度：
+
+```bash
+docker compose exec postgres psql -U kbsvc -d kbsvc \
+    -c "select state, count(*) from ingest_job group by state"
+```
+
+> Windows 的 git bash 会把 `/corpus` 这类参数改写成 Windows 路径，导致 `registered=0` 且
+> 不报错。加 `MSYS_NO_PATHCONV=1` 前缀，或改用 PowerShell。
 
 ## 3. 导入方式对照
 
