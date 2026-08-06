@@ -15,7 +15,7 @@
     <p class="reader__sub">
       共 {{ document.chunk_count }} 段 · 版本 {{ document.version_count }} ·
       <a href="{{ url_for('library.document', document_id=document.id) }}">详情</a> ·
-      <a href="{{ url_for('search.index', q='', source_id=document.source_id) }}">在本来源中检索</a>
+      <a href="{{ url_for('search.index', q='', source_id=document.source_id) }}">在本目录中检索</a>
     </p>
   </header>
 

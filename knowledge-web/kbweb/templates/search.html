@@ -26,7 +26,7 @@
     </div>
 
     <div class="rail__group">
-      <label class="rail__label" for="source_id">来源</label>
+      <label class="rail__label" for="source_id">目录</label>
       <select class="field field--sm" id="source_id" name="source_id">
         <option value="">全部</option>
         {% for source in sources %}
@@ -69,7 +69,7 @@
         <span class="empty__mark">卷</span>
         <h2>在典籍中查找</h2>
         <p>混合检索同时走语义与字面两路，结果标注可核对的出处。
-           左栏可按来源、章节收窄范围。</p>
+           左栏可按目录、章节收窄范围。</p>
       </div>
 
     {% elif not payload.results %}

@@ -19,7 +19,7 @@ def index():
 def create_source():
     name = (request.form.get("name") or "").strip()
     if not name:
-        flash("来源名称不能为空", "error")
+        flash("目录名称不能为空", "error")
         return redirect(url_for("ingest.index"))
 
     kind = request.form.get("kind", "upload")
@@ -30,7 +30,7 @@ def create_source():
         flash(f"创建失败：{exc.message}", "error")
         return redirect(url_for("ingest.index"))
 
-    flash(f"来源「{source['name']}」已就绪", "ok")
+    flash(f"目录「{source['name']}」已就绪", "ok")
     return redirect(url_for("ingest.index"))
 
 
@@ -39,7 +39,7 @@ def upload():
     source_id = request.form.get("source_id", "")
     upload_file = request.files.get("file")
     if not source_id or not upload_file or not upload_file.filename:
-        flash("请选择来源与文件", "error")
+        flash("请选择目录与文件", "error")
         return redirect(url_for("ingest.index"))
 
     try:
@@ -66,7 +66,7 @@ def ingest_path():
     source_id = request.form.get("source_id", "")
     path = (request.form.get("path") or "").strip()
     if not source_id or not path:
-        flash("请填写来源与路径", "error")
+        flash("请填写目录与路径", "error")
         return redirect(url_for("ingest.index"))
 
     patterns = [p.strip() for p in (request.form.get("patterns") or "*").split(",") if p.strip()]

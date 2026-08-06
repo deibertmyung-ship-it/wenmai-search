@@ -5,12 +5,12 @@
 <h1 class="section-title">导入</h1>
 
 <div class="panel">
-  <h2>新建来源</h2>
+  <h2>新建目录</h2>
   <form class="form-grid" method="post" action="{{ url_for('ingest.create_source') }}">
     <div class="form-row">
       <label class="rail__label" for="src-name">名称</label>
       <input class="field field--sm" id="src-name" name="name" required placeholder="guji">
-      <span class="form-row__hint">同名来源会被复用，不会重复创建。</span>
+      <span class="form-row__hint">同名目录会被复用，不会重复创建。</span>
     </div>
     <div class="form-row">
       <label class="rail__label" for="src-kind">类型</label>
@@ -32,7 +32,7 @@
   <h2>上传单个文件</h2>
   <form class="form-grid" method="post" action="{{ url_for('ingest.upload') }}" enctype="multipart/form-data">
     <div class="form-row">
-      <label class="rail__label" for="up-source">来源</label>
+      <label class="rail__label" for="up-source">目录</label>
       <select class="field field--sm" id="up-source" name="source_id" required>
         {% for source in sources %}<option value="{{ source.id }}">{{ source.name }}</option>{% endfor %}
       </select>
@@ -55,13 +55,13 @@
   <p class="form-row__hint">路径必须是 <strong>kbsvc 服务端</strong>可读的位置。大批量语料走这条，避免经 HTTP 传输。</p>
   <form class="form-grid" method="post" action="{{ url_for('ingest.ingest_path') }}" style="margin-top: var(--space-3)">
     <div class="form-row">
-      <label class="rail__label" for="path-source">来源</label>
+      <label class="rail__label" for="path-source">目录</label>
       <select class="field field--sm" id="path-source" name="source_id" required>
         {% for source in sources %}<option value="{{ source.id }}">{{ source.name }}</option>{% endfor %}
       </select>
     </div>
     <div class="form-row">
-      <label class="rail__label" for="path-path">目录</label>
+      <label class="rail__label" for="path-path">服务端路径</label>
       <input class="field field--sm" id="path-path" name="path" required placeholder="D:/books/六壬">
     </div>
     <div class="form-row">

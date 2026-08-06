@@ -9,7 +9,7 @@
   <div class="stat"><span class="stat__value">{{ stats.documents }}</span><span class="stat__label">文档</span></div>
   <div class="stat"><span class="stat__value">{{ stats.chunks }}</span><span class="stat__label">段落</span></div>
   <div class="stat"><span class="stat__value">{{ stats.vector_points }}</span><span class="stat__label">向量</span></div>
-  <div class="stat"><span class="stat__value">{{ stats.sources }}</span><span class="stat__label">来源</span></div>
+  <div class="stat"><span class="stat__value">{{ stats.sources }}</span><span class="stat__label">目录</span></div>
 </div>
 {% endif %}
 
@@ -46,7 +46,7 @@
   <div class="empty">
     <span class="empty__mark">空</span>
     <h2>书库尚无内容</h2>
-    <p>先到<a href="{{ url_for('ingest.index') }}">导入</a>页登记来源并加入文档。</p>
+    <p>先到<a href="{{ url_for('ingest.index') }}">导入</a>页登记目录并加入文档。</p>
   </div>
 {% endfor %}
 {% endblock %}
