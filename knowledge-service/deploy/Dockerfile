@@ -6,8 +6,13 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# Dependencies are resolved from the manifest alone, before any source is
+# copied. `pip install .` needs an importable package to build metadata from,
+# so a stub stands in for the real one - it is overwritten below. Without this
+# split, editing a single line of kbsvc invalidates every layer underneath and
+# re-downloads torch.
 COPY pyproject.toml README.md ./
-COPY src ./src
+RUN mkdir -p src/kbsvc && touch src/kbsvc/__init__.py
 
 # Native runtimes used by Unstructured/Marker for MIME detection, OCR and PDF rendering.
 RUN apt-get update \
@@ -19,12 +24,36 @@ RUN apt-get update \
         tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
-# Docling, Unstructured and Marker are core dependencies. Import them during the
-# image build so a deployment fails early instead of accepting unprocessable jobs.
-RUN pip install --no-cache-dir ".[postgres,s3,fastembed]" \
-    && python -c "from docling.document_converter import DocumentConverter; from marker.converters.pdf import PdfConverter; from marker.models import create_model_dict; from marker.output import text_from_rendered; from unstructured.partition.auto import partition"
+# CPU-only torch, ahead of everything that depends on it. The default Linux
+# wheels pull ~5 GB of nvidia CUDA libraries that this stack can never use -
+# there is no GPU in the compose topology - and downloading them is the largest
+# single contributor to build time, image size and peak memory.
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
+    torch torchvision
+
+# Docling, Unstructured and Marker are core dependencies. Kept in their own
+# layer: on a memory-constrained host the resolver is the step most likely to
+# be killed, and a separate layer means a retry resumes from cache instead of
+# re-downloading torch.
+RUN pip install --no-cache-dir ".[postgres,s3,fastembed]"
+
+# Only now the real source, and a metadata-only reinstall over the stub. Every
+# layer above is cached across source edits; this one costs a second.
+COPY src ./src
+RUN pip install --no-cache-dir --no-deps --force-reinstall .
+
+# Import the parsers during the build so a deployment fails here rather than
+# accepting jobs it cannot process.
+RUN python -c "from docling.document_converter import DocumentConverter; from marker.converters.pdf import PdfConverter; from marker.models import create_model_dict; from marker.output import text_from_rendered; from unstructured.partition.auto import partition"
 
 RUN useradd --create-home --uid 10001 kbsvc
+
+# KB_DATA_DIR in the server profile, and the mount point for the shared volume
+# holding the lexical index and the ONNX weights. Docker seeds a fresh named
+# volume with the ownership of the image directory it covers, so creating it as
+# kbsvc here is what lets the unprivileged user write to it.
+RUN mkdir -p /data && chown kbsvc:kbsvc /data
+
 USER kbsvc
 
 EXPOSE 8077 8078

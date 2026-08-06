@@ -14,6 +14,11 @@ Concurrency: one writer per process, guarded by a lock, because the API request
 threads and the API-owned ingest worker thread share this object. Tantivy also
 takes a directory lock, so the CLI must not write while the API is running -
 `run.bat reembed` already stops the stack first.
+
+Across processes (the server profile, where the writer is the worker container
+and the API and MCP containers only read a shared index directory) readers must
+reload to see published commits; see `_refresh_reader`. That directory lock also
+caps the deployment at exactly one writing worker process.
 """
 
 from __future__ import annotations
@@ -43,6 +48,9 @@ _PURGE_ATTEMPTS = 5
 _PURGE_BACKOFF = 0.4
 _COMMIT_ATTEMPTS = 3
 _COMMIT_BACKOFF = 0.3
+# How often a read-only process re-reads the segment metadata. Bounds the cost
+# for a busy API while keeping newly indexed documents visible within a second.
+_READER_RELOAD_INTERVAL = 1.0
 
 _TEXT_FIELDS = ("chunk_id", "tenant_id", "document_id", "version_id", "source_id", "kind", "acl")
 
@@ -75,6 +83,7 @@ class TantivyLexicalStore:
         self._index: tantivy.Index | None = None
         self._writer: tantivy.IndexWriter | None = None
         self._bulk = False
+        self._last_reload = 0.0
 
     # --- lifecycle ------------------------------------------------------
 
@@ -105,6 +114,28 @@ class TantivyLexicalStore:
                 heap_size=heap, num_threads=self.settings.lexical_writer_threads
             )
         return self._writer
+
+    def _refresh_reader(self, index: tantivy.Index) -> None:
+        """Pick up commits published by a writer in another process.
+
+        A process that writes already reloads in `_commit`, so this is skipped
+        there - that is the local profile, where the API owns both the request
+        threads and the ingest worker thread. In the server profile the writer
+        lives in the worker container while the API and MCP containers only
+        read the shared index directory; without this they would keep answering
+        from the segment set they happened to see at startup, and a freshly
+        ingested document would never appear in sparse results.
+
+        Throttled: a reload re-reads segment metadata, which is wasted work
+        several times per second on a busy API.
+        """
+        if self._writer is not None:
+            return
+        now = time.monotonic()
+        if now - self._last_reload < _READER_RELOAD_INTERVAL:
+            return
+        index.reload()
+        self._last_reload = now
 
     def _commit(self) -> None:
         """Publish pending writes and make them visible to new searchers.
@@ -274,6 +305,7 @@ class TantivyLexicalStore:
             return []
         with self._lock:
             index = self._open()
+            self._refresh_reader(index)
             searcher = index.searcher()
             schema = index.schema
         body = tantivy.Query.boolean_query(

@@ -16,6 +16,7 @@ from ..config import get_settings
 from ..db import repo
 from ..db.models import Document
 from ..db.session import init_db, session_scope
+from ..errors import KbError
 from ..retrieval.pipeline import RetrievalRequest, get_retrieval_service
 from .compat import build_server
 
@@ -132,9 +133,24 @@ def list_sources() -> str:
     return f"{listing}\n\n```json\n{json.dumps(rows, ensure_ascii=False)}\n```"
 
 
-def run(transport: str = "stdio") -> None:
+def run(transport: str = "stdio", *, host: str = "", port: int = 0) -> None:
     init_db()
-    mcp.run(transport=transport)
+    if transport == "stdio":
+        mcp.run(transport=transport)
+        return
+    # The HTTP transports default to 127.0.0.1:8000, and since mcp 2.0 they no
+    # longer read the FASTMCP_* environment variables the v1 FastMCP honoured -
+    # the bind address is a keyword argument now. A container that binds
+    # loopback is unreachable from anywhere, so pass it explicitly rather than
+    # relying on a convention that silently stopped applying.
+    try:
+        mcp.run(transport=transport, host=host or "127.0.0.1", port=port or 8000)
+    except TypeError as exc:  # pragma: no cover - only on the mcp<2 shim path
+        raise KbError(
+            f"{MCP_FLAVOUR} does not accept host/port at run time; "
+            "set FASTMCP_HOST and FASTMCP_PORT instead",
+            {"transport": transport},
+        ) from exc
 
 
 if __name__ == "__main__":  # pragma: no cover
