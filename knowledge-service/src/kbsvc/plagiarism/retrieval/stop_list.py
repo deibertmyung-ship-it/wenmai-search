@@ -32,6 +32,7 @@ Modified for kbsvc, substantially:
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Sequence
 
 from sqlalchemy.orm import Session
@@ -65,6 +66,35 @@ def stop_fingerprints(
         ratio_threshold=ratio_threshold,
         corpus_size=corpus_size,
     )
+
+
+_WORD_CHAR = re.compile(r"[\w㐀-䶿一-鿿豈-﫿]")
+
+
+def is_discriminative(chunk_text: str, *, min_word_ratio: float) -> bool:
+    """Whether a chunk carries enough real content to be worth probing with.
+
+    A chunk that is mostly punctuation or box-drawing - a rule line, a table
+    border, a run of dashes separating sections - matches every other such run
+    in the corpus *exactly*, at score 1.0. Those are real verbatim matches and
+    completely meaningless ones.
+
+    Found by acceptance testing against the real corpus: a submission of 300
+    dashes reported 100% reuse across four books. Real prose, classical or
+    modern, produced zero false positives; only formatting did.
+
+    The DF stop list cannot catch this. Separator runs appear in a handful of
+    books, so their document frequency is low - they look rare, which is exactly
+    what the stop list is built to keep.
+
+    Upstream carried this guard inside `retrieval/l1_winnowing.py`, whose
+    candidate-selection half was not ported (the GIN query replaces it). This is
+    the part that still had to come across.
+    """
+    if not chunk_text:
+        return False
+    word_chars = sum(1 for _ in _WORD_CHAR.finditer(chunk_text))
+    return word_chars / len(chunk_text) >= min_word_ratio
 
 
 def apply(probe: Sequence[int], stopped: set[int]) -> list[int]:

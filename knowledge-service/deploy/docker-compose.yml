@@ -71,6 +71,10 @@ services:
       KB_DENSE_PROVIDER: ${KB_DENSE_PROVIDER:-fastembed}
       KB_DENSE_MODEL: ${KB_DENSE_MODEL:-BAAI/bge-small-zh-v1.5}
       KB_AUTH_REQUIRED: "true"
+      # Plagiarism (PostgreSQL-only, default-off). The two switches are
+      # independent so the corpus can be built while the API stays shut.
+      KB_PLAG_ENABLED: ${KB_PLAG_ENABLED:-false}
+      KB_PLAG_INDEXING_ENABLED: ${KB_PLAG_INDEXING_ENABLED:-false}
     volumes: &kb_volumes
       # Every kbsvc container shares one lexical index and one model cache.
       # Tantivy is an in-process library with no server form: without a shared
@@ -108,6 +112,24 @@ services:
       postgres: {condition: service_healthy}
       qdrant: {condition: service_healthy}
       minio: {condition: service_healthy}
+
+  # Detection and projection building. A process of its own, not extra replicas
+  # of `worker`: alignment is CPU-bound and would stall parsing, embedding and
+  # index writes if it shared one. Unlike `worker` this one has no lexical
+  # index to lock, so replicas scale freely - the ceiling here is CPU.
+  plagiarism-worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["kbsvc", "plagiarism-worker"]
+    environment: *kb_env
+    volumes: *kb_volumes
+    healthcheck:
+      disable: true
+    deploy:
+      replicas: ${KB_PLAG_WORKER_REPLICAS:-0}
+    depends_on:
+      postgres: {condition: service_healthy}
 
   mcp:
     build:

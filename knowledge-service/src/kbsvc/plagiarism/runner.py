@@ -133,6 +133,16 @@ class CheckRunner:
             if budget.should_stop():
                 break
 
+            # A rule line or separator run matches every other one in the corpus
+            # exactly, at score 1.0 - real verbatim matches, and meaningless.
+            # Counted as checked: it *was* examined, and excluding it would make
+            # the coverage numbers lie.
+            if not stop_list.is_discriminative(
+                chunk.text, min_word_ratio=self.settings.plag_min_word_ratio
+            ):
+                checked += 1
+                continue
+
             probe = stop_list.apply(
                 fingerprint(
                     chunk.text,
@@ -161,6 +171,17 @@ class CheckRunner:
                 extend_tolerance=self.settings.plag_extend_tolerance,
                 should_stop=budget.should_stop,
             ):
+                # Guard the emitted span, not just the probe chunk. A rule line
+                # embedded in otherwise real prose rides through the chunk-level
+                # check - the chunk is mostly words - and then aligns against
+                # every other rule line in the corpus at score 1.0. What has to
+                # be discriminative is the span actually being reported.
+                matched_text = chunk.text[passage.query_start : passage.query_end]
+                if not stop_list.is_discriminative(
+                    matched_text, min_word_ratio=self.settings.plag_min_word_ratio
+                ):
+                    continue
+
                 source = candidate_index[passage.candidate_chunk_id]
                 # Translate chunk-local offsets into document coordinates on
                 # both sides, so a stored finding needs no further context to be

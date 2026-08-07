@@ -335,3 +335,33 @@ def test_heartbeat_is_recorded_for_readiness(kb_session, enabled, app_db_on_test
     worker.run_once()
     kb_session.expire_all()
     assert repo.live_worker_count(kb_session, within_seconds=300) >= 1
+
+
+# --- non-discriminative chunks -----------------------------------------
+
+
+def test_separator_runs_are_not_reported_as_reuse(kb_session, enabled, build_corpus):
+    """Found by acceptance testing on the real corpus: 300 dashes reported 100%
+    reuse across four books. A rule line matches every other rule line exactly -
+    a real verbatim match, and a meaningless one."""
+    build_corpus(text="正文若干。" + "-" * 200 + "又有正文若干。" * 5)
+    svc = service(enabled)
+    summary = svc.create_text_check(
+        kb_session, CreateTextCheck(tenant_id=TENANT, creator_key_id="k1", text="-" * 300)
+    )
+    kb_session.commit()
+    CheckRunner(enabled).run(kb_session, summary.check_id)
+    assert kb_session.query(PlagCheckSource).filter_by(check_id=summary.check_id).count() == 0
+
+
+def test_real_prose_is_still_probed(kb_session, enabled, build_corpus):
+    """The guard must not silence genuine content - the failure mode it would
+    trade for is worse than the one it fixes."""
+    build_corpus(text=REUSED)
+    svc = service(enabled)
+    summary = svc.create_text_check(
+        kb_session, CreateTextCheck(tenant_id=TENANT, creator_key_id="k1", text=REUSED)
+    )
+    kb_session.commit()
+    CheckRunner(enabled).run(kb_session, summary.check_id)
+    assert kb_session.query(PlagCheckSource).filter_by(check_id=summary.check_id).count() >= 1

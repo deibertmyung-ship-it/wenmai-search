@@ -6,15 +6,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Dependencies are resolved from the manifest alone, before any source is
-# copied. `pip install .` needs an importable package to build metadata from,
-# so a stub stands in for the real one - it is overwritten below. Without this
-# split, editing a single line of kbsvc invalidates every layer underneath and
-# re-downloads torch.
-COPY pyproject.toml README.md ./
-RUN mkdir -p src/kbsvc && touch src/kbsvc/__init__.py
-
-# Native runtimes used by Unstructured/Marker for MIME detection, OCR and PDF rendering.
+# Native runtimes used by Unstructured/Marker for MIME detection, OCR and PDF
+# rendering. First, above every COPY: this layer depends only on the base image,
+# so editing pyproject.toml can never invalidate it. It used to sit below the
+# manifest copy, which meant adding one optional extra re-ran apt against a
+# flaky mirror and failed the whole build.
 RUN apt-get update \
     && apt-get install --no-install-recommends -y \
         libglib2.0-0 \
@@ -23,6 +19,14 @@ RUN apt-get update \
         poppler-utils \
         tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
+
+# Dependencies are resolved from the manifest alone, before any source is
+# copied. `pip install .` needs an importable package to build metadata from,
+# so a stub stands in for the real one - it is overwritten below. Without this
+# split, editing a single line of kbsvc invalidates every layer underneath and
+# re-downloads torch.
+COPY pyproject.toml README.md ./
+RUN mkdir -p src/kbsvc && touch src/kbsvc/__init__.py
 
 # CPU-only torch, ahead of everything that depends on it. The default Linux
 # wheels pull ~5 GB of nvidia CUDA libraries that this stack can never use -
@@ -35,7 +39,7 @@ RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu 
 # layer: on a memory-constrained host the resolver is the step most likely to
 # be killed, and a separate layer means a retry resumes from cache instead of
 # re-downloading torch.
-RUN pip install --no-cache-dir ".[postgres,s3,fastembed]"
+RUN pip install --no-cache-dir ".[postgres,s3,fastembed,plagiarism]"
 
 # Only now the real source, and a metadata-only reinstall over the stub. Every
 # layer above is cached across source edits; this one costs a second.

@@ -127,6 +127,9 @@ class Settings(BaseSettings):
     plag_min_passage_len: int = 50
     plag_extend_tolerance: float = 0.85
     plag_df_ratio_threshold: float = 0.25
+    # A query chunk below this fraction of word characters is skipped: rule
+    # lines and separator runs match each other exactly and mean nothing.
+    plag_min_word_ratio: float = 0.5
     plag_candidate_top_k: int = 50
 
     # Jobs.

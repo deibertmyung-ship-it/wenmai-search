@@ -375,43 +375,38 @@ def rebuild_fingerprint_df(
         )
     )
 
-    live_projections = select(PlagCorpusProjection.id).where(
-        PlagCorpusProjection.tenant_id == tenant_id,
-        PlagCorpusProjection.algorithm_config_hash == algorithm_config_hash,
-        PlagCorpusProjection.active_from.is_not(None),
-        PlagCorpusProjection.active_until.is_(None),
+    # Done entirely in SQL. The corpus has millions of distinct fingerprints;
+    # selecting them into Python and building one ORM object per row turns a
+    # single set operation into millions of object instantiations - measured at
+    # over ten minutes on a 233k-chunk corpus, against seconds for this.
+    result = session.execute(
+        text(
+            """
+            INSERT INTO plag_fingerprint_df
+                (tenant_id, algorithm_config_hash, fingerprint, document_count, updated_at)
+            SELECT :tenant_id, :config_hash, fp, count(*), :now
+            FROM (
+                -- DISTINCT over (fingerprint, projection) collapses repeats
+                -- inside one document before the count, so DF stays *document*
+                -- frequency.
+                SELECT DISTINCT unnest(c.fingerprints) AS fp, c.projection_id
+                FROM plag_corpus_chunk c
+                JOIN plag_corpus_projection p ON p.id = c.projection_id
+                WHERE p.tenant_id = :tenant_id
+                  AND p.algorithm_config_hash = :config_hash
+                  AND p.active_from IS NOT NULL
+                  AND p.active_until IS NULL
+            ) per_document
+            GROUP BY fp
+            """
+        ),
+        {
+            "tenant_id": tenant_id,
+            "config_hash": algorithm_config_hash,
+            "now": utcnow(),
+        },
     )
-
-    # DISTINCT over (fingerprint, projection) collapses within-document repeats
-    # before the count.
-    per_document = (
-        select(
-            func.unnest(PlagCorpusChunk.fingerprints).label("fp"),
-            PlagCorpusChunk.projection_id.label("pid"),
-        )
-        .where(PlagCorpusChunk.projection_id.in_(live_projections))
-        .distinct()
-        .subquery()
-    )
-    counts = session.execute(
-        select(per_document.c.fp, func.count()).group_by(per_document.c.fp)
-    ).all()
-
-    now = utcnow()
-    session.add_all(
-        [
-            PlagFingerprintDf(
-                tenant_id=tenant_id,
-                algorithm_config_hash=algorithm_config_hash,
-                fingerprint=int(fingerprint),
-                document_count=int(count),
-                updated_at=now,
-            )
-            for fingerprint, count in counts
-        ]
-    )
-    session.flush()
-    return len(counts)
+    return result.rowcount or 0
 
 
 def live_projection_count(
