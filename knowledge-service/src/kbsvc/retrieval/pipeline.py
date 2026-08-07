@@ -7,11 +7,16 @@ retrieval is untunable.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Literal
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from ..config import Settings, get_settings
+from ..db import repo
+from ..db.session import session_scope
 from ..embedding import get_dense_embedder
 from ..lexical import get_lexical_store
 from ..vector import SearchFilter, get_vector_store
@@ -20,6 +25,8 @@ from .citation import build_snippet, source_anchor
 from .fusion import reciprocal_rank_fusion
 from .rerank import get_reranker
 from .rewrite import rewrite
+
+logger = logging.getLogger(__name__)
 
 Mode = Literal["hybrid", "dense", "sparse"]
 
@@ -214,11 +221,35 @@ class RetrievalService:
             if needle in " ".join(hit.payload.get("heading_path") or []).lower()
         ]
 
+    def _stored_tokens(self, tenant_id: str, candidates) -> list[list[str] | None]:
+        """Precomputed tokens for the candidates, `None` where none are stored.
+
+        A database hiccup must not take down search: reranking is a quality
+        feature, and tokenizing on the fly still produces the same scores.
+        """
+        try:
+            with session_scope() as session:
+                analyzed = repo.analyzed_by_ids(
+                    session, tenant_id=tenant_id, chunk_ids=[hit.id for hit in candidates]
+                )
+        except SQLAlchemyError:
+            logger.warning("analyzed-token lookup failed; tokenizing inline", exc_info=True)
+            return [None] * len(candidates)
+        return [
+            stored.split(" ") if (stored := analyzed.get(hit.id)) else None for hit in candidates
+        ]
+
     def _rank_and_cite(self, request: RetrievalRequest, candidates) -> tuple[list, dict]:
         texts = [hit.payload.get("text", "") for hit in candidates]
         rerank_scores: dict[str, float] = {}
         if request.rerank and candidates:
-            scores = get_reranker().score(request.query, texts)
+            reranker = get_reranker()
+            tokens = (
+                self._stored_tokens(request.tenant_id, candidates)
+                if reranker.uses_tokens
+                else None
+            )
+            scores = reranker.score(request.query, texts, tokens=tokens)
             rerank_scores = {hit.id: score for hit, score in zip(candidates, scores, strict=True)}
             order = sorted(
                 range(len(candidates)),

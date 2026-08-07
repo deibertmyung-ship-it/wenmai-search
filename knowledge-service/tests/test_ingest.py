@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import text as sa_text
 
 from kbsvc.db.models import Chunk, Document, DocumentVersion, IndexEvent, IngestJob
+from kbsvc.db.session import _apply_additive_columns
+from kbsvc.ingest.reembed import backfill_analyzed
 from kbsvc.ingest.states import JobState, backoff_seconds, can_transition
 from kbsvc.ingest.uploader import register_bytes
+from kbsvc.lexical.tokenizer import analyze
 from kbsvc.models.events import IndexEventType
 
 DOC_V1 = "# 六壬\n\n## 卷一\n\n贼克者，取用之首法也。上克下为贼，下贼上为克。\n"
@@ -123,6 +127,74 @@ def test_worker_indexes_a_document_end_to_end(session, tenant, source, worker):
 
     events = session.query(IndexEvent).filter_by(version_id=version.id).all()
     assert any(e.event_type == IndexEventType.CHUNKS_UPSERTED for e in events)
+
+
+def test_ingest_stores_the_analyzed_form_of_every_chunk(session, tenant, source, worker):
+    """The reranker reads this instead of re-tokenizing; it must never be empty."""
+    result = register_bytes(
+        session,
+        tenant_id=tenant,
+        source_id=source.id,
+        external_id="analyzed/a.md",
+        data=DOC_V1.encode(),
+        filename="a.md",
+    )
+    session.commit()
+    worker.drain()
+
+    session.expire_all()
+    chunks = session.query(Chunk).filter_by(version_id=result.version_id).all()
+    assert chunks
+    for chunk in chunks:
+        assert chunk.analyzed == analyze(chunk.text)
+
+
+def test_backfill_fills_only_the_rows_that_need_it(session, tenant, source, worker):
+    register_bytes(
+        session,
+        tenant_id=tenant,
+        source_id=source.id,
+        external_id="backfill/a.md",
+        data=DOC_V1.encode(),
+        filename="a.md",
+    )
+    session.commit()
+    worker.drain()
+
+    # Simulate rows written before the column existed.
+    session.expire_all()
+    chunks = session.query(Chunk).filter_by(tenant_id=tenant).all()
+    stale = chunks[0]
+    stale.analyzed = ""
+    session.commit()
+
+    assert backfill_analyzed(tenant) == 1
+
+    session.expire_all()
+    assert session.get(Chunk, stale.id).analyzed == analyze(stale.text)
+    assert backfill_analyzed(tenant) == 0  # nothing left to do
+
+
+def test_adding_the_analyzed_column_preserves_existing_rows(tmp_path):
+    """The production path: a database whose `chunk` table predates the column."""
+    from sqlalchemy import create_engine, inspect
+
+    url = f"sqlite:///{tmp_path / 'legacy.db'}"
+    engine = create_engine(url)
+    with engine.begin() as connection:
+        connection.execute(
+            sa_text("CREATE TABLE chunk (id VARCHAR(36) PRIMARY KEY, text TEXT NOT NULL)")
+        )
+        connection.execute(sa_text("INSERT INTO chunk (id, text) VALUES ('c1', '贼克')"))
+
+    _apply_additive_columns(engine)
+
+    assert "analyzed" in {col["name"] for col in inspect(engine).get_columns("chunk")}
+    with engine.begin() as connection:
+        row = connection.execute(sa_text("SELECT text, analyzed FROM chunk")).one()
+    assert row.text == "贼克"  # untouched
+    assert row.analyzed == ""  # defaulted, so the reranker falls back
+    _apply_additive_columns(engine)  # idempotent
 
 
 def test_updating_content_creates_a_new_version_and_supersedes_the_old(

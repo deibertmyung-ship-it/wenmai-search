@@ -150,6 +150,10 @@ curl -X POST localhost:8077/v1/jobs/<id>/retry
 **`lexical_docs` 与 `chunks` 对不上** — 两个索引漂移了。停止 API 后跑
 `kbsvc rebuild-lexical`（22,659 段约 21 秒），它只重建词法索引，不动稠密向量。
 
+**精排比预期慢** — 存量 chunk 的 `analyzed` 列为空，精排在实时分词。跑
+`kbsvc backfill-analyzed`（22,345 段约 42 秒），只写元数据库，不动两个索引。改了
+`lexical/tokenizer.py` 之后要加 `--force`，否则存量值仍是旧分词器的产物。
+
 **Windows 上词法索引写入报 `PermissionDenied`（`.pos` / `.fieldnorm`）** — Tantivy 多线程
 写入与按访问扫描的安全软件抢文件句柄。默认 `KB_LEXICAL_WRITER_THREADS=1` 已规避；若被改大
 过，调回 1，或给 `KB_DATA_DIR` 加杀软排除目录。

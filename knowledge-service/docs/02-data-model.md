@@ -97,9 +97,16 @@
 | heading_path | JSON list[str] | |
 | bbox | JSON nullable | `[[page,x0,y0,x1,y1], ...]` |
 | content_hash | str(64) | chunk 文本 sha256 |
+| analyzed | text | `tokenizer.analyze(text)` 的结果，空格分隔 |
 | created_at | datetime | |
 
 唯一约束：`(version_id, ordinal)`；索引：`(document_id, ordinal)`
+
+`analyzed` 是 ingest 时预计算的分词结果，供 lexical 精排直接使用，免去每次查询对每个候选重新分词
+（实测 40 候选 26.1ms → 14.8ms）。空值表示尚未回填，精排会退回实时分词，结果完全相同、只是较慢，
+所以回填可以随时中断、随时补做。约为原文的 3.5 倍大小，会进 TOAST。
+
+改动 `lexical/tokenizer.py` 后，存量值即失效，需 `kbsvc backfill-analyzed --force`。
 
 ## index_event
 | 列 | 类型 | 说明 |

@@ -22,6 +22,7 @@ from ..db.models import Chunk, Document, DocumentVersion
 from ..db.session import session_scope
 from ..embedding import get_dense_embedder
 from ..lexical import LexicalDocument, get_lexical_store
+from ..lexical.tokenizer import analyze
 from ..models.events import IndexEventType
 from ..vector import VectorPoint, get_vector_store
 
@@ -189,6 +190,48 @@ def rebuild_lexical(
             done += len(documents)
             if progress:
                 progress(done, total)
+
+    return done
+
+
+def backfill_analyzed(
+    tenant_id: str,
+    *,
+    batch_size: int = 1000,
+    force: bool = False,
+    progress: ProgressHook | None = None,
+) -> int:
+    """Populate `chunk.analyzed` for rows written before it existed.
+
+    Touches neither index - the analyzer output is derived purely from
+    `chunk.text`, so this is a metadata pass, not a re-embed or a lexical
+    rebuild. Pass `force` after changing the tokenizer, which invalidates every
+    stored value.
+    """
+    with session_scope() as session:
+        pending = select(func.count(Chunk.id)).where(Chunk.tenant_id == tenant_id)
+        if not force:
+            pending = pending.where(Chunk.analyzed == "")
+        total = int(session.scalar(pending) or 0)
+    if total == 0:
+        return 0
+
+    done = 0
+    last_id = ""
+    while True:
+        with session_scope() as session:
+            stmt = select(Chunk).where(Chunk.tenant_id == tenant_id, Chunk.id > last_id)
+            if not force:
+                stmt = stmt.where(Chunk.analyzed == "")
+            rows = list(session.scalars(stmt.order_by(Chunk.id).limit(batch_size)))
+            if not rows:
+                break
+            for chunk in rows:
+                chunk.analyzed = analyze(chunk.text)
+            last_id = rows[-1].id
+            done += len(rows)
+        if progress:
+            progress(min(done, total), total)
 
     return done
 

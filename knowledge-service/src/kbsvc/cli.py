@@ -248,6 +248,42 @@ def rebuild_lexical_command(
     typer.echo(f"indexed {count} chunks into {settings.resolved_lexical_dir}")
 
 
+@app.command("backfill-analyzed")
+def backfill_analyzed_command(
+    batch_size: int = typer.Option(1000, help="chunks per update batch"),
+    force: bool = typer.Option(False, help="recompute rows that already have a value"),
+    verbose: bool = False,
+) -> None:
+    """Fill in `chunk.analyzed` for chunks ingested before the column existed.
+
+    The lexical reranker reads it instead of re-tokenizing every candidate on
+    every query. Until a chunk is backfilled it still reranks correctly, just
+    at the old cost - so this is safe to run late, and safe to interrupt.
+
+    Use `--force` after changing the tokenizer; the stored values are only
+    valid for the analyzer that produced them.
+    """
+    from .db.session import init_db
+    from .ingest.reembed import backfill_analyzed
+
+    _setup_logging(verbose)
+    init_db()
+    settings = get_settings()
+
+    state = {"last": -1}
+
+    def on_progress(done: int, total: int) -> None:
+        percent = int(done * 100 / total) if total else 100
+        if percent != state["last"]:
+            state["last"] = percent
+            typer.echo(f"  {done}/{total} chunks ({percent}%)")
+
+    count = backfill_analyzed(
+        settings.default_tenant, batch_size=batch_size, force=force, progress=on_progress
+    )
+    typer.echo(f"backfilled {count} chunks")
+
+
 @app.command("search")
 def search_command(
     query: str,

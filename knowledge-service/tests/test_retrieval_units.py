@@ -186,6 +186,26 @@ def test_noop_reranker_returns_zeros():
     assert NoopReranker().score("q", ["a", "b"]) == [0.0, 0.0]
 
 
+def test_precomputed_tokens_score_identically_to_tokenizing_inline():
+    """The whole point of `chunk.analyzed`: cheaper, not different."""
+    texts = ["贼克者取用之首法也", "此篇专论涉害与比用", "取用神当先辨贼克"]
+    inline = LexicalReranker().score("贼克取用", texts)
+    stored = LexicalReranker().score(
+        "贼克取用", texts, tokens=[analyze(text).split(" ") for text in texts]
+    )
+    assert stored == inline
+
+
+def test_missing_stored_tokens_fall_back_per_candidate():
+    """A partial backfill must stay correct, not just not crash."""
+    texts = ["贼克者取用之首法也", "此篇专论涉害与比用"]
+    expected = LexicalReranker().score("贼克取用", texts)
+    mixed = LexicalReranker().score(
+        "贼克取用", texts, tokens=[None, analyze(texts[1]).split(" ")]
+    )
+    assert mixed == expected
+
+
 # --- rewrite ------------------------------------------------------------
 
 

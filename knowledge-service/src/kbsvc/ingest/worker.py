@@ -24,6 +24,7 @@ from ..db.models import Document, DocumentVersion, IngestJob, utcnow
 from ..db.session import session_scope
 from ..embedding import get_dense_embedder
 from ..lexical import LexicalDocument, get_lexical_store
+from ..lexical.tokenizer import analyze
 from ..models.events import IndexEventType
 from ..models.ir import Chunk as ChunkIR
 from ..parsing.registry import get_registry
@@ -208,6 +209,10 @@ class IngestWorker:
                 heading_path=chunk.heading_path,
                 bbox=chunk.bbox or None,
                 content_hash=chunk.content_hash,
+                # Same analyzer the lexical index uses, so reranking and
+                # retrieval agree on what a term is. Paid once here instead of
+                # per-candidate on every query.
+                analyzed=analyze(chunk.text),
             )
             for chunk in chunks
         ]

@@ -173,6 +173,21 @@ def replace_chunks(session: Session, version_id: str, chunks: list[Chunk]) -> No
     session.flush()
 
 
+def analyzed_by_ids(session: Session, *, tenant_id: str, chunk_ids: list[str]) -> dict[str, str]:
+    """Precomputed tokenizer output for reranking, keyed by chunk id.
+
+    Rows that predate the column - or that a backfill has not reached - are
+    left out rather than returned empty, so the caller can tell "no stored
+    tokens" from "stored, and genuinely empty".
+    """
+    if not chunk_ids:
+        return {}
+    stmt = select(Chunk.id, Chunk.analyzed).where(
+        Chunk.tenant_id == tenant_id, Chunk.id.in_(chunk_ids)
+    )
+    return {chunk_id: analyzed for chunk_id, analyzed in session.execute(stmt) if analyzed}
+
+
 def delete_chunks_for_versions(session: Session, version_ids: list[str]) -> int:
     if not version_ids:
         return 0

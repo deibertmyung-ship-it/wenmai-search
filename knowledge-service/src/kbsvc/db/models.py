@@ -15,6 +15,10 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+
+# Aliased: `Chunk` defines a column literally named `text`, which shadows the
+# bare import inside the class body.
+from sqlalchemy import text as sql_text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -149,6 +153,11 @@ class Chunk(Base):
     heading_path: Mapped[list] = mapped_column(JSON, default=list)
     bbox: Mapped[list | None] = mapped_column(JSON, nullable=True)
     content_hash: Mapped[str] = mapped_column(String(64), default="")
+    # Whitespace-joined tokenizer output, precomputed at ingest so the lexical
+    # reranker does not re-tokenize every candidate on every query. Empty means
+    # "not backfilled yet" - the reranker falls back to tokenizing on the fly,
+    # so a partial backfill is slow but never wrong.
+    analyzed: Mapped[str] = mapped_column(Text, default="", server_default=sql_text("''"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
