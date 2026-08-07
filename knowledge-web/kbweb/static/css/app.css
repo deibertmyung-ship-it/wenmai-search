@@ -20,6 +20,41 @@ body {
     );
 }
 
+/* ------------------------------------------------------ CJK text setting
+
+   Corpus text is classical Chinese, so it gets three settings the browser
+   default only approximates. Applied to the two places corpus text actually
+   renders - snippets and reader chunks - and nowhere else, because interface
+   chrome is short sans-serif labels that gain nothing.
+
+   line-break: strict   The browser already applies UAX#14 line breaking, so
+                        「。」and「，」do not start a line today. `strict` tightens
+                        the remaining cases (small kana, 〜, ‐, some prefixes)
+                        that `auto` still permits but 禁則 forbids. A modest
+                        gain, not a fix for something broken.
+   text-spacing-trim    Collapses the doubled side bearing inside consecutive
+                        full-width punctuation (」「 and 、。), which otherwise
+                        reads as a hole in the line.
+   text-autospace       Inserts the quarter-em between CJK and Latin runs.
+
+   Both spacing properties are native CSS and progressive - where unsupported
+   the text simply sets as it does today. heti achieves the same two effects
+   by rewriting the DOM into <h-char> wrappers, which would fight the <mark>
+   spans our highlight offsets produce. See w3c/clreq for the source rules. */
+
+.result__snippet,
+.chunk__text { line-break: strict; }
+
+@supports (text-spacing-trim: trim-start) {
+  .result__snippet,
+  .chunk__text { text-spacing-trim: trim-start; }
+}
+
+@supports (text-autospace: ideograph-alpha) {
+  .result__snippet,
+  .chunk__text { text-autospace: ideograph-alpha ideograph-numeric; }
+}
+
 a { color: inherit; text-decoration-color: var(--ink-faint); text-underline-offset: 0.2em; }
 a:hover { text-decoration-color: var(--seal); }
 a:focus-visible, button:focus-visible, input:focus-visible,
@@ -378,7 +413,10 @@ mark {
 
 .reader__head { border-bottom: 2px solid var(--ink-strong); padding-bottom: var(--space-4);
                 margin-bottom: var(--space-6); }
-.reader__title { font-family: var(--font-serif); font-size: var(--text-2xl);
+/* Kai, not song: woodblock editions set the title in 楷 and the body in 宋.
+   With a self-hosted kai this reads as a deliberate second voice; without it
+   the stack falls back to song and the page looks the way it did before. */
+.reader__title { font-family: var(--font-kai); font-size: var(--text-2xl);
                  color: var(--ink-strong); margin: 0 0 var(--space-2); line-height: var(--leading-tight); }
 .reader__sub { font-size: var(--text-sm); color: var(--ink-soft); margin: 0; }
 
@@ -393,8 +431,10 @@ mark {
 .chunk:target .chunk__body,
 .chunk[data-focus="true"] .chunk__body { border-left-color: var(--seal); }
 
+/* Heading path is annotation about the passage, not the passage - kai marks
+   that difference without changing size or adding another colour. */
 .chunk__heading {
-  font-family: var(--font-serif); font-size: var(--text-sm); font-weight: 600;
+  font-family: var(--font-kai); font-size: var(--text-sm); font-weight: 600;
   color: var(--seal); margin: 0 0 var(--space-2); letter-spacing: 0.04em;
 }
 .chunk__text {
