@@ -223,7 +223,51 @@ fallback 链可配置 `KB_PARSER_CHAIN=docling,unstructured,marker`，逐个尝�
 - 上传限制 mime 白名单 + 大小上限；对象 key 用 hash 派生，杜绝路径穿越。
 - 错误响应统一信封，不回显内部路径/堆栈。
 
-## 11. 目录
+## 11. 抄袭检测（可选，PostgreSQL-only，默认关闭）
+
+见 [ADR-0001](adr/0001-selectively-port-noplag-into-kbsvc.md) 与
+[规格](specs/2026-08-07-plagiarism-detection-backend.md)。
+
+一个深模块 `kbsvc.plagiarism`，对外只有一个 seam：`PlagiarismService`。
+HTTP 路由、CLI 与入库 worker 只依赖它，不接触指纹、候选检索或 SQL；
+反过来，算法代码不建数据库连接、不读环境变量、不碰 HTTP 对象、不自己提交事务。
+
+```
+api/routers/plagiarism.py ─┐
+cli.py                     ├─> PlagiarismService ─┬─ repository（全部 SQL）
+ingest/worker.py（钩子）    ┘                      └─ 移植算法
+plagiarism-worker ─> ProjectionBuilder / CheckRunner
+```
+
+### 与检索链路的关系
+
+**完全独立的两套索引。** 检索用 Qdrant（稠密）+ Tantivy（词法）；抄袭用
+PostgreSQL 的 `BIGINT[]` 指纹 + GIN。两者不共用索引、不共用分块——
+知识检索的分块面向语义召回，抄袭的分块面向字符级对齐，切法不同。
+
+抄袭的 `plag_*` 表是**可重建的派生投影，不是事实来源**。文档、版本、ACL、
+原始文件与检索索引仍由既有模块拥有。
+
+### 三个进程
+
+| 进程 | 职责 |
+|---|---|
+| api | 接受检测请求、读报告、推 SSE。**不执行检测** |
+| ingest worker | 索引文档；完成后登记一个抄袭投影任务 |
+| plagiarism worker | 构建投影、执行检测。独立进程 |
+
+抄袭 worker 与入库 worker 分进程：对齐是 CPU 密集的，同进程会拖住解析、
+嵌入与索引写入。API 的 lifespan 不启动抄袭 worker。
+
+### 两条必须成立的不变量
+
+1. **抄袭永不拖垮入库。** 入库 worker 在调用抄袭钩子处设了防御边界，
+   登记失败只记日志。一个索引成功的文档，无论抄袭侧发生什么都保持索引成功。
+2. **不对不完整语料执行检测。** 创建检测时校验调用方可见的每个文档都有
+   匹配当前算法哈希的活投影，否则拒绝。对着建了一半的语料检测，会因为与
+   提交内容完全无关的原因报「没有命中」。
+
+## 12. 目录
 
 ```
 src/kbsvc/
@@ -241,6 +285,13 @@ src/kbsvc/
   retrieval/  rewrite.py  fusion.py  rerank.py  citation.py  pipeline.py
   ingest/     states.py  uploader.py  worker.py
   api/        app.py  deps.py  auth.py  schemas.py  routers/*.py
+              plagiarism_schemas.py
+  plagiarism/ __init__.py（seam）  types.py  states.py
+              models.py  schema.py  repository.py      # PostgreSQL-only
+              projection.py  runner.py  worker.py  service.py
+              sse.py  ingest_hook.py  corpus_ops.py
+              fingerprinting/  chunking/  alignment/  retrieval/
+              intervals.py  language.py                # 以上多为移植，见 THIRD_PARTY_NOTICES.md
   mcp/        server.py
   cli.py
 ```

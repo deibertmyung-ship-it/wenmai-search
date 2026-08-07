@@ -25,6 +25,7 @@ REST、CLI 与 MCP 暴露统一结果。
 - **可解释调试**：可返回查询改写、双路原始排名、融合贡献、重排分数、实际过滤条件和各阶段耗时。
 - **多种接入面**：FastAPI REST、只读 MCP 工具、Typer CLI，以及服务端渲染的 Flask Web 界面。
 - **本地与服务端双配置**：本地使用 SQLite、本地文件、嵌入式 Qdrant + Tantivy 与 API 内置 worker；服务端可切换 PostgreSQL、S3/MinIO、独立 Qdrant 并水平扩展 worker。
+- **抄袭检测（可选，PostgreSQL-only，默认关闭）**：把一段文本或一篇已入库文档与本租户内可见语料比对，返回带字符区间的可核对证据，进度经可回放 SSE 推送。只做原文与近原文复用，不承诺改写、翻译或公网来源。
 
 ## 架构
 
@@ -191,7 +192,39 @@ uv pip install --python .venv -e ".[e2e]"
 uv run pytest -m e2e tests/e2e -q
 ```
 
+## 抄袭检测（可选）
+
+默认关闭，且**只支持 PostgreSQL**——候选检索依赖 `BIGINT[]` 数组重叠与 GIN 索引，
+本地 SQLite 配置下相关接口返回 503，其余功能不受影响。
+
+两个开关是独立的，这样历史语料可以在接口对外关闭时先建好：
+
+```bash
+pip install '.[plagiarism]'          # pysbd + langdetect
+kbsvc plagiarism init                # 建表与索引，幂等
+# KB_PLAG_INDEXING_ENABLED=true，重启 worker
+kbsvc plagiarism backfill            # 只登记任务
+kbsvc plagiarism-worker              # 独立进程，实际计算
+kbsvc plagiarism rebuild-df          # 重算指纹频率并 ANALYZE
+kbsvc plagiarism status              # 确认覆盖率 100%
+# 验收通过后人工设 KB_PLAG_ENABLED=true
+```
+
+抄袭 worker 必须是独立进程：对齐是 CPU 密集的，与入库 worker 同进程会拖住解析、
+嵌入和索引写入。
+
+设计与取舍见 [ADR-0001](knowledge-service/docs/adr/0001-selectively-port-noplag-into-kbsvc.md)，
+接口契约见 [03-api.md](knowledge-service/docs/03-api.md)，运维见
+[04-runbook.md](knowledge-service/docs/04-runbook.md)。
+
+算法实现选择性移植自 `noplag-engine`（Apache-2.0），归属见
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
 ## 语料与许可证
 
 项目源码及原创文档采用 [MIT License](LICENSE)。`book/` 中的文本仅用于检索演示和研究，
 不属于 MIT 授权范围；其来源和权利状态以原始作品及 [`book/README.md`](book/README.md) 的说明为准。
+
+部分算法代码移植自 Apache-2.0 授权的 `noplag-engine`，保留其原有许可证——
+见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与
+[`third_party/noplag-engine/`](third_party/noplag-engine/)。

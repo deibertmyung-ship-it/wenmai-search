@@ -89,6 +89,98 @@ Base: `/v1`。认证：`Authorization: Bearer <api_key>`（`KB_AUTH_REQUIRED=fal
 `chunks`、`vector_points`、`lexical_docs` 三者应相等；不等说明某一路索引漂移了。
 词法一路可用 `kbsvc rebuild-lexical` 修复。
 
+## 抄袭检测
+
+仅 PostgreSQL，默认关闭。功能关闭或非 PostgreSQL 时，下列端点**返回 503 而非 404**——
+路由不存在会让「没启用」和「URL 写错了」无法区分。
+
+所有端点复用既有 `get_principal()`。检测任务绑定 `tenant_id + creator_key_id`：
+**默认只有创建它的凭据可见**，其他凭据一律按不存在处理（404），避免端点变成
+探测任务 ID 是否存在的手段。
+
+### POST /v1/plagiarism/checks → 202
+```json
+{ "text": "待检文本", "language": "auto" }
+```
+可选 header `Idempotency-Key`。响应带 `Location`：
+```json
+{ "check_id": "…", "status": "pending", "snapshot_at": "…", "algorithm_config_hash": "…" }
+```
+
+### POST /v1/plagiarism/checks/documents/{document_id} → 202
+检测一篇已入库文档的当前版本。**该文档的所有版本**都会被排除出候选——
+只排除当前版本会让它的早期修订与自己匹配。
+
+### GET /v1/plagiarism/checks  ·  GET /v1/plagiarism/checks/{id}
+列表与详情**从不返回提交的原文**。
+
+### GET /v1/plagiarism/checks/{id}/report
+```json
+{
+  "check_id": "…", "status": "completed",
+  "query_chars": 1200, "matched_chars": 380,
+  "checked_chunks": 12, "total_chunks": 12,
+  "coverage_reason": null, "is_complete": true,
+  "sources": [{
+    "document_id": "…", "version_id": "…", "content_hash": "…", "title": "六壬大全",
+    "matched_chars": 380, "score": 0.98,
+    "passages": [{ "query_start": 3, "query_end": 61,
+                   "source_start": 120, "source_end": 178,
+                   "score": 0.98, "preview": "……（≤300 字符）" }]
+  }],
+  "unique_passages": [[3, 61]]
+}
+```
+
+偏移是半开区间 `[start, end)`，**两侧都是文档坐标**，可直接切原文。
+报告只给预览，来源全文仍走既有受 ACL 保护的文档接口。
+
+`coverage_reason` 非空表示**没有查完**（`time_cap` / `cancelled`），
+此时结果不可作为「无抄袭」结论。
+
+读取报告时会**重新校验**每个来源的当前可见性——权限可能在检测之后被收回，
+已存的报告不该成为绕过它的通道。
+
+### GET /v1/plagiarism/checks/{id}/progress → SSE
+```text
+id: 42
+event: queued|started|chunking|retrieving|aligning|persisting
+     |completed|completed_partial|failed|cancelled|keepalive
+data: {"check_id":"…","status":"…","progress":0.35,"detail":{},"created_at":"…"}
+```
+
+- 不带 `Last-Event-ID` 时从首条事件开始回放；带了则只返回 **id 严格更大**的事件，
+  因此重连既不丢也不重；
+- **keepalive 不带 `id`**——带了会把客户端游标推过它尚未收到的真实事件；
+- 终态事件与任务终态在同一数据库事务提交，不会出现「任务已完成但流永不关闭」；
+- 断开连接只结束这条流，**不取消检测**；
+- 事件不含待检全文、来源全文、密钥或异常堆栈。
+
+### DELETE /v1/plagiarism/checks/{id}
+- 终态或排队中 → **204**，同时清除原文与结果；
+- 运行中 → **202**，转入 `cancel_requested`。取消是协作式的，worker 在下一个
+  检查点终止，不强杀。
+
+### GET /v1/plagiarism/corpus/status
+```json
+{ "total_documents": 202, "ready_documents": 202, "pending_documents": 0,
+  "failed_documents": 0, "algorithm_config_hash": "…", "is_ready": true }
+```
+
+### 错误码
+
+| code | HTTP | 含义 |
+|---|---|---|
+| `feature_disabled` | 503 | `KB_PLAG_ENABLED=false` |
+| `feature_unavailable` | 503 | 非 PostgreSQL |
+| `plagiarism_corpus_empty` | 409 | 调用方可见语料为空——**不是**「没有抄袭」 |
+| `plagiarism_corpus_not_ready` | 409 | 语料仍在构建；不对不完整语料检测 |
+| `idempotency_conflict` | 409 | 同一幂等键用于了不同请求 |
+| `report_visibility_changed` | 409 | 报告中的来源已不可见 |
+| `plagiarism_concurrency_limit` | 429 | 该凭据活动任务超限（默认 2） |
+| `plagiarism_input_too_large` | 413 | 超过 `KB_PLAG_MAX_INPUT_CHARS`（默认 50 万） |
+| `plagiarism_check_not_found` | 404 | 不存在，或不属于调用方 |
+
 ## MCP 工具
 
 ### search_knowledge

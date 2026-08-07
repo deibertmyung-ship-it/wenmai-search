@@ -340,3 +340,74 @@ export KB_QDRANT_COLLECTION=kb_chunks_v2
 
 server profile 可进一步实现集合别名原子切换；local 嵌入式模式不支持零停机切换，
 `run.bat reembed` 会先停止 API 与 Web，再采用更简单可靠的停机重建策略。
+
+## 9. 抄袭检测运维
+
+仅 PostgreSQL，默认关闭。两个开关是独立的，这样历史语料可以在接口关闭时先建好：
+
+| 变量 | 作用 |
+|---|---|
+| `KB_PLAG_INDEXING_ENABLED` | 后台建投影（入库钩子 + 回填） |
+| `KB_PLAG_ENABLED` | 对外开放 HTTP 接口 |
+
+### 首次启用顺序
+
+```powershell
+kbsvc plagiarism init          # 建 9 张表与 GIN 索引，幂等
+# 设 KB_PLAG_INDEXING_ENABLED=true，重启 worker
+kbsvc plagiarism backfill      # 只登记任务，不计算
+kbsvc plagiarism-worker        # 独立进程，实际构建
+kbsvc plagiarism rebuild-df    # 重算指纹频率并 ANALYZE
+kbsvc plagiarism status        # 确认覆盖率 100%
+# 验收通过后，人工设 KB_PLAG_ENABLED=true
+```
+
+`backfill` 只登记幂等任务，**可随时中断、可重复运行**——大语料回填是数小时的
+指纹计算，放进 CLI 进程会让它不可恢复也不可观察。
+
+### 抄袭 worker 必须独立进程
+
+```powershell
+kbsvc plagiarism-worker            # 常驻
+kbsvc plagiarism-worker --once     # 排空后退出，适合 cron 或调试
+```
+
+不要指望入库 worker 顺带做这件事：对齐是 CPU 密集的，同进程会拖住解析、嵌入与
+索引写入。API 的 lifespan 也不会启动它。
+
+worker 先排空语料任务再处理检测任务——没有投影的文档会阻塞**每一个**检测，
+让构建排在检测后面等于让一个慢检测把整个语料变得不可检。
+
+### 常见故障
+
+**`/readyz` 报 `plagiarism_worker: no live worker`** — 没有抄袭 worker 在跑，
+或它的心跳超过 120 秒未更新。检测仍会被接受，但永远排队。
+
+**`/readyz` 报 `plagiarism_schema: gin index missing`** — 表在但 GIN 索引没了。
+候选检索**没有 Python 扫描兜底**（ADR-0001 有意如此），失去索引的表现是无上限
+地变慢而不是报错。跑 `kbsvc plagiarism init` 补建。
+
+**创建检测一直返回 409 `plagiarism_corpus_not_ready`** — 有文档还没建成投影。
+`kbsvc plagiarism status` 看 pending/failed 计数；failed 的用
+`kbsvc plagiarism backfill` 重新登记（失败任务会被重新排队）。
+
+**改了 `KB_PLAG_*` 算法参数后所有检测被拒** — 算法配置哈希变了，存量投影全部
+失效。跑 `kbsvc plagiarism rebuild` 全量重建，完成前拒绝创建检测是设计如此，
+不是故障。只有分块窗口、重叠、k-gram、winnow window 参与哈希；检索与对齐的
+调参不需要重建。
+
+**检测很慢或召回差** — 先确认 `kbsvc plagiarism rebuild-df` 跑过。指纹频率表
+为空时停用词过滤失效，高频套语会淹没真实命中。该命令同时执行 `ANALYZE`——
+回填期间表大小变化几个数量级，过期的行数估计正是让规划器放弃 GIN 索引的原因。
+
+**报告返回 409 `report_visibility_changed`** — 报告里某个来源对当前调用方已
+不可见（ACL 变更或文档删除）。这是有意的：不部分展示，也不重算旧报告。
+
+### 清理
+
+```powershell
+kbsvc plagiarism cleanup      # 删过期任务、原文、结果、事件与停用投影
+```
+
+默认保留 30 天（`KB_PLAG_RETENTION_DAYS`）。停用投影只有在没有活动检测的快照
+引用它时才会被删。**这只管 `plag_*` 数据**——对象存储里的原始文件不受影响。

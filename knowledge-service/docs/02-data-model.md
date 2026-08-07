@@ -164,3 +164,50 @@ Tantivy 的 `payload` 字段存的是同一份结构，所以单走「字面」�
   "text": "……（原文，供 snippet 与 rerank 使用）"
 }
 ```
+
+## 抄袭检测：`plag_*` 派生表
+
+仅 PostgreSQL。见 [ADR-0001](adr/0001-selectively-port-noplag-into-kbsvc.md)。
+
+这些表建在**独立的 `PlagiarismBase`** 上，不随 `init_db()` 创建——主 `Base`
+在包括 SQLite 在内的每个 profile 上都要 `create_all`，而这里用了 `BIGINT[]`
+和 GIN，共用一个 base 会让本地安装在建一个它根本不提供的功能的表时失败。
+建表是显式的运维步骤：`kbsvc plagiarism init`。
+
+**它们是可重建的投影，不是事实来源。** 文档、版本、ACL、原始文件与检索索引
+仍由既有模块拥有；`plag_*` 只做受控引用，且刻意不建外键——派生表不该有能力
+阻塞一个文档操作。
+
+| 表 | 作用 |
+|---|---|
+| `plag_corpus_projection` | 一个文档版本的一次投影，带 `active_from/active_until` 有效窗口 |
+| `plag_corpus_chunk` | 投影的滑窗分块 + `BIGINT[]` 指纹（GIN 索引） |
+| `plag_fingerprint_df` | 每个指纹的文档频率，用于停用词 |
+| `plag_corpus_job` | 投影构建任务：租约、重试、错误 |
+| `plag_check` | 检测任务：输入或版本引用、所有者、快照、状态、结果汇总 |
+| `plag_check_source` / `plag_check_passage` | 固化的命中来源与区间 |
+| `plag_check_event` | 可回放的 SSE 事件，单调自增 bigint 主键 |
+| `plag_worker_heartbeat` | worker 存活，供 `/readyz` 判断 |
+
+### 快照窗口
+
+投影的有效期是**半开区间** `[active_from, active_until)`。检测创建时记录
+`snapshot_at`，候选查询只读窗口包含该时刻的投影。切换瞬间因此只解析到新投影，
+既不是两个也不是零个——**一次重建不会改变在途检测的语料**。
+
+### 算法配置哈希
+
+`plagiarism_algorithm_config_hash` 只由**影响存储内容**的参数构成（分块窗口、
+重叠、k-gram、winnow window）。检索与对齐的调参在查询时作用于未改变的投影，
+纳入哈希会让一个根本不需要重建的改动强制全量重建。
+
+哈希变化后，新检测只能对匹配的投影执行，且在重建完成前被拒绝。
+
+### 保留
+
+待检原文、报告、事件默认保留 `KB_PLAG_RETENTION_DAYS`（30）天。停用的投影
+只有在超过保留期**且没有活动检测的快照仍指向它**时才可删除——提前删会让
+已存的报告指向一个再也解析不出来的来源。
+
+注意：这里的保留期只管 `plag_*` 数据，**不改变对象存储的既有行为**
+（文档软删不回收原始文件，见 `04-runbook.md`）。
