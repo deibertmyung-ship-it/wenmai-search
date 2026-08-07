@@ -28,10 +28,22 @@
   --ochre-wash: oklch(94% 0.045 80);
 
   /* --- type ----------------------------------------------------------
-     Two families, not two sizes: serif carries the corpus (classical
-     Chinese IS a serif context), sans carries the interface chrome. */
-  --font-serif: "Songti SC", "SimSun", "Noto Serif CJK SC", "Source Han Serif SC",
-                "Source Han Serif CN", "STSong", Georgia, serif;
+     Three families, not three sizes. Song carries the corpus (classical
+     Chinese IS a serif context), kai carries the editorial voice (titles
+     and annotation - the 宋体正文 / 楷体标题 split is how woodblock editions
+     actually separate the two), sans carries the interface chrome.
+
+     The first entry in the song and kai stacks is a self-hosted subset built
+     by deploy/build-fonts.py. Without it the stack falls through to whatever
+     the OS happens to have, which is exactly the pre-subset behaviour - so a
+     deployment that skips the font build still renders, just less
+     predictably. Both webfonts are OFL-1.1 and may be embedded freely. */
+  --font-song:  "Noto Serif SC", "Songti SC", "SimSun", "Noto Serif CJK SC",
+                "Source Han Serif SC", "Source Han Serif CN", "STSong", Georgia, serif;
+  --font-kai:   "LXGW WenKai", "Kaiti SC", "KaiTi", "STKaiti", "TW-Kai",
+                "Noto Serif CJK SC", Georgia, serif;
+  /* Alias kept so existing rules and any downstream CSS keep resolving. */
+  --font-serif: var(--font-song);
   --font-sans:  "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
                 -apple-system, "Segoe UI", system-ui, sans-serif;
   --font-mono:  "Cascadia Mono", "SFMono-Regular", "JetBrains Mono", Consolas, monospace;
@@ -48,7 +60,11 @@
 
   --leading-tight: 1.3;
   --leading-body:  1.75;
-  --leading-read:  1.95;   /* reader view: classical text needs air */
+  /* Reader view: classical text needs air. Do not drop below 1.7 - CJK
+     emphasis dots (text-emphasis, set under-right) collide with the next
+     line under that, and ruby annotation needs 2.0. Measured values from
+     heti's annotation modifier; 1.95 clears dots and just misses ruby. */
+  --leading-read:  1.95;
 
   /* --- rhythm: deliberately uneven ------------------------------------ */
   --space-1: 0.25rem;
