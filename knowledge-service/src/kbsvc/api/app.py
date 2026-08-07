@@ -17,7 +17,7 @@ from ..errors import KbError
 from ..ingest.worker import IngestWorker
 from ..lexical import get_lexical_store, reset_lexical_store
 from ..vector import get_vector_store, reset_vector_store
-from .routers import admin, documents, ingest, search, sources
+from .routers import admin, documents, ingest, plagiarism, search, sources
 
 logger = logging.getLogger(__name__)
 
@@ -118,12 +118,66 @@ def create_app() -> FastAPI:
         if settings.run_api_worker:
             thread = getattr(app.state, "ingest_worker_thread", None)
             checks["worker"] = "ok" if thread is not None and thread.is_alive() else "error"
+
+        # Only when the feature is actually serving traffic. Reporting degraded
+        # for an unbuilt corpus on an install that does not offer plagiarism
+        # would make the probe useless everywhere else.
+        if settings.plag_enabled:
+            checks.update(_plagiarism_readiness(settings))
+
         return {"status": "ok" if all(v == "ok" for v in checks.values()) else "degraded", **checks}
 
-    for router in (search.router, sources.router, documents.router, ingest.router, admin.router):
+    # Registered unconditionally. When the feature is off or the store is not
+    # PostgreSQL the routes answer 503 - a route that disappears entirely makes
+    # "not enabled" indistinguishable from "wrong URL".
+    for router in (
+        search.router,
+        sources.router,
+        documents.router,
+        ingest.router,
+        admin.router,
+        plagiarism.router,
+    ):
         app.include_router(router, prefix="/v1")
 
     return app
+
+
+def _plagiarism_readiness(settings) -> dict[str, str]:
+    """Schema, worker liveness and corpus coverage, for `/readyz`.
+
+    Each answer is `ok` or a short reason. Every failure mode here is one that
+    lets checks be *accepted* while producing meaningless results - a missing
+    GIN index, no live worker, or a corpus that has not finished building - so
+    the probe has to look past "the database answers".
+    """
+    from ..plagiarism.corpus_ops import corpus_report
+
+    try:
+        report = corpus_report(settings.default_tenant)
+    except Exception as exc:  # noqa: BLE001 - readiness must not raise
+        return {"plagiarism": f"error: {type(exc).__name__}: {exc}"}
+
+    checks = {}
+    schema = report["schema"]
+    if schema["ready"]:
+        checks["plagiarism_schema"] = "ok"
+    elif schema["missing_tables"]:
+        checks["plagiarism_schema"] = f"missing tables: {', '.join(schema['missing_tables'])}"
+    else:
+        checks["plagiarism_schema"] = "gin index missing"
+
+    checks["plagiarism_worker"] = "ok" if report["live_workers"] else "no live worker"
+
+    coverage = report["coverage"]
+    if coverage["total"] == 0 or coverage["ready"] == coverage["total"]:
+        checks["plagiarism_corpus"] = "ok"
+    else:
+        checks["plagiarism_corpus"] = (
+            f"{coverage['ready']}/{coverage['total']} ready, "
+            f"{coverage['pending']} pending, {coverage['failed']} failed"
+        )
+    return checks
 
 
 app = create_app()

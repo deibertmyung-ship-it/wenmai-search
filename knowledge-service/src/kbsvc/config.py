@@ -147,6 +147,10 @@ class Settings(BaseSettings):
     # SSE.
     plag_sse_poll_interval: float = 0.5
     plag_sse_keepalive_interval: float = 2.0
+    # Ceiling on one subscription. A client that wants more reconnects with
+    # Last-Event-ID and loses nothing; an unbounded stream would pin a worker
+    # thread on a check that never terminates.
+    plag_sse_max_seconds: float = 900.0
 
     # Retention (days) for submitted text, reports, events and retired
     # projections.
