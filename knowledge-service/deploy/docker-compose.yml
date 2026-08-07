@@ -75,6 +75,39 @@ services:
       # independent so the corpus can be built while the API stays shut.
       KB_PLAG_ENABLED: ${KB_PLAG_ENABLED:-false}
       KB_PLAG_INDEXING_ENABLED: ${KB_PLAG_INDEXING_ENABLED:-false}
+      # The tunables have to be forwarded explicitly. `.env` is read by compose
+      # for interpolation, not mounted into the container - so a var that is not
+      # named here is simply invisible to the app, which then silently uses its
+      # code default. `.env.example` documents all of these, so every one of
+      # them has to appear.
+      #
+      # These four decide the algorithm config hash; changing any invalidates
+      # every stored projection and requires `kbsvc plagiarism rebuild`.
+      KB_PLAG_SENTENCES_PER_CHUNK: ${KB_PLAG_SENTENCES_PER_CHUNK:-4}
+      KB_PLAG_CHUNK_OVERLAP: ${KB_PLAG_CHUNK_OVERLAP:-1}
+      KB_PLAG_KGRAM: ${KB_PLAG_KGRAM:-5}
+      KB_PLAG_WINNOW_WINDOW: ${KB_PLAG_WINNOW_WINDOW:-8}
+      # Query-time tuning; no rebuild needed.
+      KB_PLAG_MIN_SEED_LEN: ${KB_PLAG_MIN_SEED_LEN:-30}
+      KB_PLAG_MIN_PASSAGE_LEN: ${KB_PLAG_MIN_PASSAGE_LEN:-50}
+      KB_PLAG_EXTEND_TOLERANCE: ${KB_PLAG_EXTEND_TOLERANCE:-0.85}
+      KB_PLAG_DF_RATIO_THRESHOLD: ${KB_PLAG_DF_RATIO_THRESHOLD:-0.25}
+      KB_PLAG_MIN_WORD_RATIO: ${KB_PLAG_MIN_WORD_RATIO:-0.5}
+      KB_PLAG_CANDIDATE_TOP_K: ${KB_PLAG_CANDIDATE_TOP_K:-50}
+      # Limits.
+      KB_PLAG_MAX_INPUT_CHARS: ${KB_PLAG_MAX_INPUT_CHARS:-500000}
+      KB_PLAG_BUDGET_SECONDS: ${KB_PLAG_BUDGET_SECONDS:-60}
+      KB_PLAG_BUDGET_REFERENCE_CHARS: ${KB_PLAG_BUDGET_REFERENCE_CHARS:-100000}
+      KB_PLAG_MAX_ACTIVE_CHECKS_PER_KEY: ${KB_PLAG_MAX_ACTIVE_CHECKS_PER_KEY:-2}
+      KB_PLAG_PREVIEW_CHARS: ${KB_PLAG_PREVIEW_CHARS:-300}
+      # Jobs and SSE.
+      KB_PLAG_POLL_INTERVAL: ${KB_PLAG_POLL_INTERVAL:-1.0}
+      KB_PLAG_LEASE_SECONDS: ${KB_PLAG_LEASE_SECONDS:-600}
+      KB_PLAG_MAX_ATTEMPTS: ${KB_PLAG_MAX_ATTEMPTS:-3}
+      KB_PLAG_SSE_POLL_INTERVAL: ${KB_PLAG_SSE_POLL_INTERVAL:-0.5}
+      KB_PLAG_SSE_KEEPALIVE_INTERVAL: ${KB_PLAG_SSE_KEEPALIVE_INTERVAL:-2.0}
+      KB_PLAG_SSE_MAX_SECONDS: ${KB_PLAG_SSE_MAX_SECONDS:-900}
+      KB_PLAG_RETENTION_DAYS: ${KB_PLAG_RETENTION_DAYS:-30}
     volumes: &kb_volumes
       # Every kbsvc container shares one lexical index and one model cache.
       # Tantivy is an in-process library with no server form: without a shared

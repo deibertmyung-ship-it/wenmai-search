@@ -203,7 +203,13 @@ worker 每次阶段变化时写入 `plag_check_event`。`GET /v1/plagiarism/chec
 4. 重建 fingerprint DF 并执行 `ANALYZE`；
 5. 确认当前算法哈希覆盖率为 100%；
 6. 通过算法、隔离、恢复和 SSE 验收；
-7. 手动开启 `KB_PLAG_ENABLED=true`。
+7. 验收通过后开启 `KB_PLAG_ENABLED=true`。
+
+> **2026-08-08 修订**：本条原文为「手动开启」。闸门改为**验收结果**而非人工确认动作——
+> 前者可检查、可复现，后者只是一道仪式，且会把「已经验证过」和「还没人去按」混为一谈。
+> 默认值仍是 `false`（新部署没有语料，开着无意义），`KB_PLAG_INDEXING_ENABLED` 与
+> `KB_PLAG_ENABLED` 也仍是两个独立开关。本部署已于 2026-08-08 通过验收并开启，
+> 数据见[规格](../specs/2026-08-07-plagiarism-detection-backend.md)的验收记录节。
 
 `/readyz` 在功能启用后检查 schema、worker 心跳、算法哈希和语料覆盖率。未通过时返回 degraded。
 

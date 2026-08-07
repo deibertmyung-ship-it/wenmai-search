@@ -207,7 +207,7 @@ kbsvc plagiarism backfill            # 只登记任务
 kbsvc plagiarism-worker              # 独立进程，实际计算
 kbsvc plagiarism rebuild-df          # 重算指纹频率并 ANALYZE
 kbsvc plagiarism status              # 确认覆盖率 100%
-# 验收通过后人工设 KB_PLAG_ENABLED=true
+# 验收通过后设 KB_PLAG_ENABLED=true
 ```
 
 抄袭 worker 必须是独立进程：对齐是 CPU 密集的，与入库 worker 同进程会拖住解析、

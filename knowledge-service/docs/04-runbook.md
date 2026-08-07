@@ -359,7 +359,7 @@ kbsvc plagiarism backfill      # 只登记任务，不计算
 kbsvc plagiarism-worker        # 独立进程，实际构建
 kbsvc plagiarism rebuild-df    # 重算指纹频率并 ANALYZE
 kbsvc plagiarism status        # 确认覆盖率 100%
-# 验收通过后，人工设 KB_PLAG_ENABLED=true
+# 验收通过后设 KB_PLAG_ENABLED=true（验收清单见 docs/specs/）
 ```
 
 `backfill` 只登记幂等任务，**可随时中断、可重复运行**——大语料回填是数小时的

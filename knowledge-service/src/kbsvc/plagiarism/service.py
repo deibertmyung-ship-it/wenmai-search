@@ -72,6 +72,12 @@ class CheckNotFoundError(NotFoundError):
     code = "plagiarism_check_not_found"
 
 
+def _acl_allows(document_acl: list | None, allowed: set[str]) -> bool:
+    """Existing ACL semantics: overlap with the caller, or explicitly public."""
+    tags = set(document_acl or ["public"])
+    return bool(tags & allowed) or "public" in tags
+
+
 class PlagiarismService:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
@@ -394,26 +400,32 @@ class PlagiarismService:
     def _visible_document_ids(
         self, session: Session, tenant_id: str, acl: list[str]
     ) -> list[str]:
-        """Documents this caller may compare against, by the existing ACL rules."""
+        """Documents this caller may compare against, by the existing ACL rules.
+
+        One query. The ACL lives on the row, so fetching ids and then re-reading
+        each document to inspect it is an N+1 - and this runs on the create path,
+        which has a 500 ms P95 target. Measured at 201 documents: 815 ms P95 with
+        the per-document read, and it only showed up under a non-empty ACL,
+        which is every real API caller.
+        """
         from sqlalchemy import select
 
-        stmt = select(Document.id).where(
-            Document.tenant_id == tenant_id,
-            Document.deleted_at.is_(None),
-            Document.current_version_id.is_not(None),
-        )
-        documents = list(session.scalars(stmt))
+        rows = session.execute(
+            select(Document.id, Document.acl).where(
+                Document.tenant_id == tenant_id,
+                Document.deleted_at.is_(None),
+                Document.current_version_id.is_not(None),
+            )
+        ).all()
         if not acl:
-            return documents
+            return [document_id for document_id, _ in rows]
 
         allowed = set(acl)
-        visible = []
-        for document_id in documents:
-            document = session.get(Document, document_id)
-            document_acl = set(document.acl or ["public"])
-            if document_acl & allowed or "public" in document_acl:
-                visible.append(document_id)
-        return visible
+        return [
+            document_id
+            for document_id, document_acl in rows
+            if _acl_allows(document_acl, allowed)
+        ]
 
     def _summarise(self, check: PlagCheck) -> CheckSummary:
         return CheckSummary(

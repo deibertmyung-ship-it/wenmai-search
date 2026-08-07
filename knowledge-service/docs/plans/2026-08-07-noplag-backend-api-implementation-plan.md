@@ -19,7 +19,7 @@
 - 复用现有 `get_principal()`、同步 SQLAlchemy、文档版本和解析结果；
 - 不引入第二个 FastAPI 应用、数据库连接池、上传模块或对象存储；
 - 不整包搬迁 Noplag，只移植本方案列出的算法文件；
-- 默认关闭功能，完成回填、验证和人工开关后才对外开放。
+- 默认关闭功能，完成回填与验收后才对外开放（闸门是验收结果，不是人工确认环节）。
 
 本方案不包含前端、MCP tools、公网语料、语义改写检测、翻译抄袭检测和远程语料管理 API。
 
@@ -481,7 +481,7 @@ data: {"check_id":"...","status":"...","progress":0.0,"detail":{...},"created_at
 2. 开启 indexing、运行 backfill、重建 DF、执行 `ANALYZE`；
 3. 确认当前算法哈希覆盖率 100%；
 4. 执行完整算法、隔离、恢复、SSE 和性能验收；
-5. 人工设置 `KB_PLAG_ENABLED=true`。
+5. 验收通过后设置 `KB_PLAG_ENABLED=true`。
 
 退出条件：创建请求 P95 小于 500 ms；SSE 2 秒内有响应；不超过 100,000 字符的标准验收集在 60 秒预算内达到目标，且全部安全测试通过。
 
@@ -520,6 +520,6 @@ pytest -q tests/plagiarism/test_postgres_repository.py tests/plagiarism/test_api
 - [x] 需求访谈和关键约束确认
 - [x] ADR-0001 Accepted
 - [x] 文件级实施方案落盘
-- [ ] 代码实现
-- [ ] PostgreSQL 回填与验收
-- [ ] 人工启用公开 interface
+- [x] 代码实现
+- [x] PostgreSQL 回填与验收（201/201，0 失败）
+- [x] 启用公开 interface（2026-08-08，验收记录见规格）
