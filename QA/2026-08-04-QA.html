@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="文脉检索项目问答整理：2026-08-04 发布与部署，2026-08-05 检索链路核查与 Tantivy 改造，2026-08-06 server profile 部署">
-  <title>文脉检索项目 QA · 2026-08-04 ~ 08-06</title>
+  <meta name="description" content="文脉检索项目问答整理：2026-08-04 发布与部署，2026-08-05 检索链路核查与 Tantivy 改造，2026-08-06 server profile 部署，2026-08-07 精排评估与分词预计算">
+  <title>文脉检索项目 QA · 2026-08-04 ~ 08-07</title>
   <style>
     :root {
       color-scheme: light;
@@ -292,11 +292,13 @@
       <p class="lead">
         <strong>08-04：</strong>GitHub 发布、文档解析、后台任务、Qdrant 与嵌入模型。
         <strong>08-05：</strong>检索链路逐项核查、5.6 秒瓶颈的根因定位、用 Tantivy 替换自研 BM25、繁简归一化。
-        <strong>08-06：</strong>server profile 落地部署，修掉 compose 模板的六处缺陷，实测过滤行为反转。
+        <strong>08-06：</strong>server profile 落地部署，修掉 compose 模板的六处缺陷，实测过滤行为反转；
+        worker 水平扩展方案设计、界面「来源」改称「目录」、按子目录重建分类。
+        <strong>08-07：</strong>否决 bge-reranker-v2-m3 精排（理由是算力不是选型），把分词结果改为 ingest 时预计算。
         所有结论均以对运行中系统的实测为准，推翻的判断也一并保留。
       </p>
       <div class="meta">
-        <span class="pill">日期：2026-08-04 ~ 08-06</span>
+        <span class="pill">日期：2026-08-04 ~ 08-07</span>
         <span class="pill">项目：wenmai-search</span>
         <span class="pill">语料：204 部 / 22,659 段</span>
         <span class="pill">格式：HTML</span>
@@ -330,6 +332,15 @@
       <a href="#measured">server profile 实测</a>
       <a href="#limits">两条硬约束</a>
       <a href="#handover">交付与遗留</a>
+      <a href="#worker-scaling">worker 水平扩展设计</a>
+      <a href="#rename-source">「来源」改称「目录」</a>
+      <a href="#recategorize">目录重建与 id 漂移</a>
+      <strong style="margin-top:18px">08-07 精排与预计算</strong>
+      <a href="#codeindex">代码索引与对象存储</a>
+      <a href="#reranker-eval">bge-reranker-v2-m3 评估</a>
+      <a href="#lexical-impl">lexical 精排的实现</a>
+      <a href="#precompute">分词预计算落地</a>
+      <a href="#handover-0807">交付与遗留</a>
     </aside>
 
     <main>
@@ -1565,19 +1576,482 @@ sparse_search         3.6ms</code></pre>
           </div>
         </article>
       </section>
+
+      <section id="worker-scaling">
+        <h2>二十三、worker 水平扩展方案设计</h2>
+
+        <article class="qa">
+          <h3 class="question">worker 为什么只能跑一个副本？</h3>
+          <div class="answer">
+            <p>两个原因叠加：<strong>Tantivy 是目录级独占写锁</strong>，同一索引目录只允许一个写入者；
+              而词法索引的写入<strong>内联在 ingest 任务里</strong>——每个 worker 处理文档时都要自己写一次倒排。
+              两者相加，worker 副本数的硬上限就是 1。</p>
+            <p>这次的目标经确认是<strong>先拆掉架构天花板，不是追吞吐</strong>。
+              吞吐受限于嵌入计算（08-06 实测 4.4 段/秒），多开 worker 在当前机器上也快不了；
+              但「结构上不允许多副本」和「多副本收益有限」是两件事，前者值得先解决。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">选了什么方案？</h3>
+          <div class="answer">
+            <p>专职 <strong>lexical-writer + 词法任务队列</strong>：ingest worker 不再直接写 Tantivy，
+              改为入队词法任务；单独一个 lexical writer 进程消费队列并独占索引目录。
+              ingest worker 由此可以任意水平扩展。</p>
+            <div class="flow">ingest worker（N 个）→ 入队 lexical_* 任务 → ingest_job 表 → lexical writer（1 个）→ Tantivy</div>
+            <p>几个设计上的取舍：</p>
+            <table>
+              <thead><tr><th>问题</th><th>处理</th></tr></thead>
+              <tbody>
+                <tr><td>新任务类型是否要改表结构</td>
+                  <td>三个新值都 ≤16 字符（<code>lexical_upsert</code> 14、
+                    <code>lexical_del_ver</code> 15、<code>lexical_del_doc</code> 15），
+                    复用现有 <code>job_type</code> 列，<strong>零 schema 变更</strong></td></tr>
+                <tr><td>如何让一个队列服务两类消费者</td>
+                  <td><code>claim_job</code> 增加 <code>job_types</code>（<strong>无默认值</strong>，
+                    强制调用方显式声明要领哪类）与 <code>claim_state</code></td></tr>
+                <tr><td>同文档并发</td>
+                  <td>新增 <code>exclusive_by_document</code>；ingest worker 传 <code>True</code>，
+                    lexical writer 传 <code>False</code></td></tr>
+                <tr><td>代码重复</td>
+                  <td>抽出 <code>ingest/lexical_payload.py</code>，供 <code>rebuild_lexical</code>
+                    与新的 <code>LexicalWriter</code> 共用</td></tr>
+                <tr><td>可观测性</td>
+                  <td><code>/v1/stats</code> 增加 <code>lexical_pending</code>，
+                    否则词法滞后无法从外部看出</td></tr>
+              </tbody>
+            </table>
+            <div class="note">
+              lexical writer 之所以传 <code>exclusive_by_document=False</code>：它只有一个进程，
+              不存在竞争；而且 <code>lexical_upsert</code> 是在 ingest 任务<strong>仍持租约时</strong>入队的，
+              开启排他会把词法可见性推迟到整个 ingest 结束——正好抵消掉这个方案要保住的东西。
+            </div>
+            <p>代价是一个<strong>删除可见性窗口</strong>：文档删除后，词法索引要等 writer 消费到删除任务才生效，
+              期间已删内容仍可能被字面检索命中。经确认接受——词法可见性维持秒级即可，与现状一致。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">设计过程中发现了什么原本不在目标内的问题？</h3>
+          <div class="answer">
+            <div class="warn">
+              <strong>同一文档可被两个 worker 并发处理，两者的 <code>_supersede_older</code> 会互删 chunk。</strong>
+              这不是原本要解决的问题，是「worker 可以多开」之后才成立的新风险——单副本下它根本不会发生。
+              发现于设计阶段而非实施阶段，因此直接并入同一份设计，由
+              <code>exclusive_by_document</code> 解决，而不是留成一个新 issue。
+            </div>
+            <p>状态：<strong>设计完成，未实施</strong>。规格见
+              <code>docs/superpowers/specs/2026-08-06-lexical-writer-worker-scaling-design.md</code>。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="rename-source">
+        <h2>二十四、Web 界面「来源」改称「目录」</h2>
+
+        <article class="qa">
+          <h3 class="question">只改一处按钮文案会有什么问题？</h3>
+          <div class="answer">
+            <p>最初的要求只是把「新建来源」改成「新建目录」。但批量导入表单里
+              <strong>已经有一个叫「目录」的字段</strong>，指的是服务端文件系统路径。
+              只改按钮的话，同一个表单里会出现两个「目录」，指两样完全不同的东西——
+              一个是知识来源，一个是磁盘路径。</p>
+            <p>经确认改为<strong>整个「来源」概念在 UI 上统一改称「目录」</strong>，
+              同时把文件路径的标签改为<strong>「服务端路径」</strong>消除歧义。
+              共 12 处：模板 8 处、flash 消息 4 处。</p>
+            <div class="note">
+              <strong>后端完全不动。</strong><code>source</code> / <code>source_id</code> /
+              <code>/v1/sources</code> 保持原样，URL 参数、API 契约和数据库字段都没变。
+              因此 MCP 的 <code>list_sources</code>、其他 REST 调用方和用户已有的书签链接都不受影响。
+              这是一次纯文案改动，不是重命名重构。
+            </div>
+            <p>提交 <code>10bad4f</code>。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="recategorize">
+        <h2>二十五、目录分类重建与 external_id 漂移</h2>
+
+        <article class="qa">
+          <h3 class="question">把单一来源拆成九个分类，要重新导入吗？</h3>
+          <div class="answer">
+            <p>原本 202 篇全在一个叫 <code>guji</code> 的来源下。要按 <code>book/</code> 下的九个子目录
+              重建分类，先撞上一件事：<strong>没有删除来源的接口</strong>。</p>
+            <p>两条路：</p>
+            <table>
+              <thead><tr><th>方案</th><th>耗时</th><th>代价</th></tr></thead>
+              <tbody>
+                <tr><td>只改归属（元数据重映射）</td><td>几分钟</td><td>需手写脚本，不走既有接口</td></tr>
+                <tr><td>删库重导</td><td><strong>约 2.7 小时</strong></td><td>全量重新嵌入</td></tr>
+              </tbody>
+            </table>
+            <p>选了前者：分类归属只是 <code>document.source_id</code> 的指向，
+              解析结果、切块、向量和倒排索引<strong>都不受影响</strong>——为改一个外键重跑 2.7 小时的嵌入没有道理。
+              同时决定不再索引 <code>book/README.md</code>（它是仓库说明，不是语料）。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">重映射留下了什么隐患？</h3>
+          <div class="answer">
+            <div class="warn">
+              <strong>external_id 漂移。</strong>重映射把 <code>external_id</code> 改成了新的目录路径
+              （如 <code>八字/滴天髓阐微-清-任铁樵.txt</code>），但仓库里的目录名当时还是旧的
+              <code>book/命理</code>。<code>external_id</code> 是 ingest 判断「这篇是不是已经有了」的依据，
+              两边不一致意味着：<strong>谁 clone 仓库后重新导入，这 22 本书会因为 external_id 对不上被当成新文档，
+              产生 22 条重复。</strong>
+            </div>
+            <p>这个隐患直到 08-07 的 <code>37e77cb</code> 把仓库目录改名为 <code>book/八字</code> 才消除。
+              当时的核对结果：线上 22 篇、仓库 22 个文件，数量一致。</p>
+            <p>重建后的分布（九个目录，201 篇在册）：</p>
+            <table>
+              <thead><tr><th>目录</th><th>篇数</th><th>目录</th><th>篇数</th></tr></thead>
+              <tbody>
+                <tr><td>周易</td><td>67</td><td>其他</td><td>13</td></tr>
+                <tr><td>堪舆风水</td><td>31</td><td>相术</td><td>12</td></tr>
+                <tr><td>六壬</td><td>29</td><td>奇门遁甲</td><td>10</td></tr>
+                <tr><td>八字</td><td>22</td><td>現代</td><td>1</td></tr>
+                <tr><td>占卜</td><td>16</td><td></td><td></td></tr>
+              </tbody>
+            </table>
+            <div class="note">
+              <strong>一个顺带的实证。</strong><code>document</code> 表共 202 条：201 在册、1 条软删——
+              正是被撤下的 <code>README.md</code>。而 MinIO 里<strong>仍是 202 个对象</strong>。
+              这是第二十六节「删除不删对象」在真实数据上的一个实例：软删文档留下了一个永不回收的孤儿对象。
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <hr style="margin:56px 0 40px;border:0;border-top:2px solid var(--line)">
+
+      <p class="eyebrow" style="margin-bottom:8px">2026-08-07</p>
+      <h2 style="margin-top:0">精排：一次否决与一次落地</h2>
+      <p style="color:var(--muted);max-width:760px">
+        这一天先给项目建了代码索引，核查了对象存储的真实使用情况，然后评估
+        <code>bge-reranker-v2-m3</code>——结论是否决，理由不是选型而是这台机器的算力。
+        转而把 lexical 精排的分词结果改为 ingest 时预计算。
+        <strong>三次我自己给出的数字被实测推翻</strong>，都记在下面。
+      </p>
+
+      <div class="summary" aria-label="08-07 核心结果">
+        <article>
+          <span>11ms</span>
+          <p>每次查询省下的分词耗时：26.09 → 14.83ms</p>
+        </article>
+        <article>
+          <span>2.6/s</span>
+          <p>本机编码 620 字符的吞吐，cross-encoder 因此出局</p>
+        </article>
+        <article>
+          <span>0</span>
+          <p>预计算与实时分词的打分差异（5 查询 × 400 段）</p>
+        </article>
+      </div>
+
+      <section id="codeindex">
+        <h2>二十六、代码索引与对象存储核查</h2>
+
+        <article class="qa">
+          <h3 class="question">代码索引建成了什么规模？</h3>
+          <div class="answer">
+            <p>1617 个节点 / 6664 条边，<code>full</code> 模式（含语义向量边）。
+              语言分布：Python 97、HTML 17、JS 5、TOML 2、CSS 2。</p>
+            <p>边的构成里两项值得注意：<code>TESTS</code> 214 条说明测试与被测代码的对应关系被识别出来了；
+              <code>HTTP_CALLS</code> 8 条是 kbweb → kbsvc 的跨服务调用，说明前后端的调用链是连通的。</p>
+            <div class="warn">
+              <strong>索引器自动排除了 <code>deploy/</code> 目录。</strong>
+              <code>knowledge-service/deploy/</code> 和 <code>knowledge-web/deploy/</code> 里的
+              Dockerfile、docker-compose.yml 都不在图里。08-06 的工作大量集中在这些文件上，
+              查它们仍然只能用 Read/Grep。
+            </div>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">server 版真的用上对象存储了吗？存储流程是什么？</h3>
+          <div class="answer">
+            <p>用上了。容器内 <code>KB_STORAGE_BACKEND=s3</code>，MinIO 桶 <code>kbsvc</code>
+              里 <strong>202 个对象、29MB</strong>，路径形如
+              <code>default/&lt;document_id&gt;/58795f1a…0909.txt</code>，与
+              <code>ids.object_key()</code> 的格式一致。</p>
+            <p>整个代码库里<strong>只有两个调用点</strong>碰对象存储——一写一读：</p>
+            <div class="flow">上传 → 校验大小/MIME → sha256 → 按 hash 去重 → put → 建 version → 入队（不解析不嵌入）</div>
+            <div class="flow">worker → get 原始字节 → 解析 → 切块 → 嵌入 → Qdrant + Tantivy</div>
+            <table>
+              <thead><tr><th>环节</th><th>位置</th><th>说明</th></tr></thead>
+              <tbody>
+                <tr><td>写</td><td><code>ingest/uploader.py:79</code></td>
+                  <td><code>store.exists(key)</code> 为假才 put，内容寻址天然幂等</td></tr>
+                <tr><td>读</td><td><code>ingest/worker.py:111</code></td>
+                  <td>索引链上只读这一次</td></tr>
+                <tr><td>reindex</td><td><code>documents.py:169</code></td>
+                  <td>复用同一 object_key 重跑，换嵌入模型不需重新上传</td></tr>
+                <tr><td>检索/阅读</td><td>—</td>
+                  <td>完全不碰 MinIO：检索走 Qdrant+Tantivy，正文走 Postgres 的 chunk 表</td></tr>
+              </tbody>
+            </table>
+            <p>key 的构造（<code>ids.py:71</code>）值得单独说：租户名只留
+              <code>[alnum-_]</code> 截 64、后缀只留 <code>[alnum.]</code> 截 16，中间两段是 UUID 和 sha256，
+              <strong>全部由 hash 派生，没有任何用户可控路径段</strong>，有专门的测试
+              <code>test_object_key_strips_user_controlled_path_segments</code> 守着。</p>
+            <div class="warn">
+              <strong>删除时不删对象。</strong><code>ObjectStore.delete()</code> 在 <code>src/</code> 下零调用点。
+              <code>_run_delete</code> 删了 SQL chunks、Qdrant、Tantivy 并软删文档，唯独没删 MinIO 里的对象；
+              版本 supersede 同理。这可能与 <code>deleted_at</code> 的软删语义一致而属有意为之，
+              但代码没有注释说明，也没有任何 GC 或生命周期策略。当前 29MB 无所谓，长期会单调增长。
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="reranker-eval">
+        <h2>二十七、bge-reranker-v2-m3 精排评估</h2>
+
+        <article class="qa">
+          <h3 class="question">接入成本有多高？</h3>
+          <div class="answer">
+            <p>几乎为零。<code>retrieval/rerank.py</code> 里已有 <code>CrossEncoderReranker</code>，
+              <code>rerank_model</code> 的默认值本来就是 <code>BAAI/bge-reranker-base</code>。
+              接入 v2-m3 在代码层面只是两个环境变量，外加把 <code>[rerank]</code> extra 加进 Dockerfile。</p>
+            <div class="warn">
+              一个坑：<code>get_reranker()</code> 只在<strong>构造失败</strong>时回落到 lexical，日志仅
+              <code>logger.warning</code>。当前镜像里没装 <code>sentence_transformers</code>，
+              所以现在就设上这两个变量，服务会静默继续用 lexical——很容易误判成「开了精排但没效果」。
+            </div>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">为什么否决？</h3>
+          <div class="answer">
+            <p>用<strong>现有的</strong> bge-small-zh（24M 参数、ONNX）在 api 容器里实测真实长度的分块：</p>
+            <table>
+              <thead><tr><th>批量</th><th>总耗时</th><th>单文档</th></tr></thead>
+              <tbody>
+                <tr><td>1 篇</td><td>247 ms</td><td>247 ms</td></tr>
+                <tr><td>8 篇</td><td>2472 ms</td><td>309 ms</td></tr>
+                <tr><td>40 篇</td><td>15215 ms</td><td>380 ms</td></tr>
+              </tbody>
+            </table>
+            <p>环境：Docker VM <strong>4 CPU / 7.7GiB</strong>，<code>torch.get_num_threads()</code> = 2，
+              <strong>无 CUDA GPU</strong>（Intel HD 5500 + AMD R5 M330），宿主 16GB。
+              分块均值 626 字符、p95 711，接近 XLM-R 的 512 token 上限。
+              候选数 = <code>top_k × retrieval_overfetch(4)</code> = 40。</p>
+            <div class="note">
+              <strong>关键推论：这台机器编码 620 字符的文本，用 24M 的小模型也只有 2.6 篇/秒。</strong>
+              cross-encoder 必须在查询时把每个候选完整过一遍模型，所以<strong>换哪个模型都救不了</strong>——
+              模型选型不是变量。
+            </div>
+            <table>
+              <thead><tr><th>方案</th><th>相对编码计算量</th><th>40 候选估算</th></tr></thead>
+              <tbody>
+                <tr><td>bge-small 规模的 cross-encoder（假想）</td><td>1×（实测）</td><td>~15 s</td></tr>
+                <tr><td>bge-reranker-base（XLM-R-base）</td><td>~3×（估算）</td><td>~45 s</td></tr>
+                <tr><td><strong>bge-reranker-v2-m3（XLM-R-large）</strong></td><td>~8× × fp32 惩罚（估算）</td><td><strong>~60–180 s</strong></td></tr>
+              </tbody>
+            </table>
+            <p>当前混合检索总耗时 88ms。另有内存问题：v2-m3 fp32 权重 2.27GB，而
+              <code>api</code> 和 <code>mcp</code> 两个容器都实例化 retrieval pipeline，
+              即两份约 4.5GB，VM 只有 7.7GB。</p>
+            <p><strong>公平地说它的好处是真的</strong>：现有 LexicalReranker 结构上无法处理同义与转述，
+              用户用白话检索文言语料时它提供的是噪声。v2-m3 在模型类别上是对的选择。
+              但收益天花板也有限——精排只重排那 40 个候选，<strong>不改变召回</strong>。</p>
+            <p>建议的替代路径：先做零成本的离线收益验证（导出候选，离线重排，人工看前 10 的变化）；
+              若确有收益，在 <code>Reranker</code> Protocol 后加一个约 40 行的 <code>HttpReranker</code>，
+              让模型跑在有 GPU 的机器上，并把 fallback 从「构造期」扩展到「调用期」。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="lexical-impl">
+        <h2>二十八、lexical 精排的实现</h2>
+
+        <article class="qa">
+          <h3 class="question">有没有用 langchain？</h3>
+          <div class="answer">
+            <p><strong>没有，整个项目零 langchain。</strong>三个层面都验证过：源码 grep
+              （含 llama_index / haystack）无匹配、<code>pyproject.toml</code> 无声明、
+              运行中容器 <code>pip list</code> 连传递依赖都没有。检索链路全是直接用底层库自己拼的。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">打分公式是什么？</h3>
+          <div class="answer">
+            <div class="flow">score = 0.7 × coverage + 0.2 × min(density, 1.0) + 0.1 × earliness</div>
+            <table>
+              <thead><tr><th>分量</th><th>计算</th></tr></thead>
+              <tbody>
+                <tr><td>coverage</td><td>命中的不同查询词 / 查询词总数</td></tr>
+                <tr><td>density</td><td>命中总次数 / (√分块长度 + 1)</td></tr>
+                <tr><td>earliness</td><td>1 − 首次命中下标 / 分块长度</td></tr>
+              </tbody>
+            </table>
+            <p><strong>关键在 tokenizer，不在公式。</strong><code>tokenize()</code> 对 CJK 同时产出一元和二元组，
+              <code>贼克如何取用神</code> 展开成 13 个 token（7 个一元 + 6 个二元）。
+              这带来一个不明显的性质：<strong>二元组隐式承担了词序/短语约束</strong>——
+              原文出现完整短语则 coverage 接近 1，只是零散地各处出现这几个字则上限约 7/13 ≈ 0.54。</p>
+            <p>分词前过 <code>normalize()</code>（繁简/异体折叠）和 lowercase，与索引侧共用同一函数，两边不会不一致。</p>
+            <p>在流水线里排序键是 <code>(−精排分, −融合分)</code>，<strong>RRF 分数退化为 tiebreaker</strong>；
+              输入是全部候选而非前 10，所以它能把第 40 名提到第 1 名。</p>
+            <div class="warn">
+              <strong>两处更正。</strong>其一，文件 docstring 写 density 是 “log-damped”，
+              但代码是 <code>len(tokens) ** 0.5</code>——<strong>平方根抑制，不是对数</strong>，注释错了。
+              其二，我此前说改进 lexical 精排「仍是亚毫秒级」，那是引用文件头的 “sub-millisecond” 注释<strong>而未验证</strong>。
+              实测 40 个候选 <strong>17.56ms</strong>，占当时 88ms 总耗时的约 20%。
+              这修正了「改进它是零成本」这个前提，也直接引出了下一节的工作。
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="precompute">
+        <h2>二十九、分词预计算落地</h2>
+
+        <article class="qa">
+          <h3 class="question">存哪里？为什么不是更快的那个方案？</h3>
+          <div class="answer">
+            <p>动手前先测了三条路。分词结果的 analyzed 串是原文的 <strong>3.6 倍</strong>大小：</p>
+            <table>
+              <thead><tr><th>方案</th><th>相对当前</th><th>代价</th></tr></thead>
+              <tbody>
+                <tr><td>预计算 + <code>.split()</code></td><td>7.3×</td><td>约 50MB 新数据，打分<strong>完全等价</strong></td></tr>
+                <tr><td>不物化 token，直接子串扫描</td><td>19.9×</td><td>零存储，但<strong>会改变打分</strong></td></tr>
+              </tbody>
+            </table>
+            <div class="note">
+              子串扫描快得多，但在 Latin 词边界和 earliness 分母上与原分词语义不同，会改变排序。
+              而<strong>项目目前没有评测集</strong>，无法验证排序变化是好是坏。
+              「打分完全等价」因此值钱——选了预计算。存储位置选 Postgres 新增列：
+              向量库和倒排索引都不动，回填是一次纯元数据遍历。
+            </div>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">实际效果如何？</h3>
+          <div class="answer">
+            <p>容器内同进程 A/B，40 个候选、均值 599 字符：</p>
+            <table>
+              <thead><tr><th></th><th>耗时</th></tr></thead>
+              <tbody>
+                <tr><td>旧：每次查询实时分词</td><td><strong>26.09 ms</strong></td></tr>
+                <tr><td>新：查库 9.61 + 打分 5.22</td><td><strong>14.83 ms</strong></td></tr>
+              </tbody>
+            </table>
+            <p>净省约 11ms。分词本身从 26.09 降到 5.22ms（5×），被查库吃掉一部分。
+              正确性：5 个查询 × 400 条真实 chunk，<strong>逐条同分，0 处不一致</strong>。
+              线上 22,345 段回填耗时 42 秒，重跑返回 0（幂等）。</p>
+            <p>三个设计取舍：缺值退回实时分词（回填可随时中断、未回填期间只是慢不会错）；
+              新增 <code>uses_tokens</code> 类属性（cross-encoder 要原文，不为它付这次查库）；
+              查库失败 catch <code>SQLAlchemyError</code> 后降级（精排是质量特性，数据库抖动不该让检索整体挂掉）。</p>
+            <p>另外 <code>create_all</code> 只建表不加列，存量库拿不到新字段，因此加了
+              <code>_apply_additive_columns</code> 做加列迁移——刻意不做成通用迁移框架，
+              只允许可空或带默认值的加列、逐条手写。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">有哪些判断被实测推翻？</h3>
+          <div class="answer">
+            <p>三处，都是我自己先给出数字、后被实测否定的：</p>
+            <table>
+              <thead><tr><th>我的估计</th><th>实测</th><th>原因</th></tr></thead>
+              <tbody>
+                <tr><td>chunk 表 47MB → 约 65MB</td><td><strong>118MB</strong>（+71MB）</td>
+                  <td>analyzed 均值 2121 字节，超过 Postgres 2KB 的 TOAST 阈值，压缩率也不如预期</td></tr>
+                <tr><td>查库 2–5ms</td><td><strong>9.61ms</strong></td>
+                  <td>只查 id 是 1.99ms、查 analyzed 是 8.10ms——<strong>约 6ms 是 TOAST 取出与解压</strong></td></tr>
+                <tr><td>lexical 精排「亚毫秒级」</td><td><strong>17.56ms</strong></td>
+                  <td>照抄了文件注释未验证（见第二十八节）</td></tr>
+              </tbody>
+            </table>
+            <p>已 VACUUM 确认无死元组，118MB 是稳态。<code>session_scope()</code> 本身开销只有 0.25ms，可忽略。</p>
+            <div class="note">
+              <strong>试过并否决的优化：</strong>二元组理论上能从一元序列重建，那样存储只有 1.6 倍、
+              还能落在 TOAST 阈值内省掉那 6ms。但实测重建结果与原分词<strong>不一致</strong>——
+              二元组不能跨标点边界，而拼接后的一元序列丢了分段信息；且重建 CPU（5.18ms）反比直接
+              split（3.37ms）更慢。它会破坏「打分完全等价」这个当初选这条路的前提，故放弃。
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="handover-0807">
+        <h2>三十、交付与遗留</h2>
+
+        <article class="qa">
+          <h3 class="question">提交了什么？</h3>
+          <div class="answer">
+            <table>
+              <thead><tr><th>提交</th><th>内容</th></tr></thead>
+              <tbody>
+                <tr><td><code>a879cca</code></td>
+                  <td>perf: 分词结果在 ingest 时预计算（12 文件，+314/−16）</td></tr>
+                <tr><td><code>881be49</code></td>
+                  <td>feat: 限定章节 → 限定书名，改为下拉选择（10 文件，+283/−34）</td></tr>
+                <tr><td><code>37e77cb</code></td>
+                  <td>chore: 语料目录 <code>book/命理</code> → <code>book/八字</code>（22 文件纯重命名）</td></tr>
+              </tbody>
+            </table>
+            <p>验证：后端 136 项测试 + kbweb 37 项测试通过，两侧 <code>ruff check</code> 均通过；
+              <code>.env</code> 确认被忽略，暂存 diff 的密钥模式扫描无匹配。</p>
+            <div class="note">
+              <code>a879cca</code> 提交后<strong>单独验证过 HEAD 树</strong>：<code>git archive</code>
+              导出到干净目录跑 lint + 134 项测试通过。这一步是必要的——<code>db/repo.py</code>
+              里混着两个功能的改动，按 hunk 拆开只提交了其中一个，得确认该提交单独站得住。
+            </div>
+            <p><code>881be49</code> 的核心是把融合后过滤改成<strong>先解析再下推</strong>：
+              前者 top_k 由前置检索阶段决定，过滤只会让结果变少；后者让两路检索各自在限定范围内取满 top_k。
+              一处必须显式处理的边界——书名解析不到文档时返回空列表，而空列表与「没有筛选」在下游是同一个值，
+              因此短路返回空结果。顺带修掉 <code>GET /v1/documents</code> 的 N+1（1.86s → 0.09s）。</p>
+            <p><code>37e77cb</code> 的理由已核实：线上 <code>external_id</code> 已是
+              <code>八字/滴天髓阐微-清-任铁樵.txt</code> 形式（22 篇，与改名文件数一致），
+              仓库却还是旧目录名，不对齐则 clone 后重新导入会产生 22 条重复文档。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">还剩什么？</h3>
+          <div class="answer">
+            <ol>
+              <li><strong>PR #6 仍开着</strong>，三个新提交未推送。推上去会让该 PR 从单纯的文案改动
+                扩展成含检索重构、性能优化和语料改名。</li>
+              <li><strong>评测集仍然没有。</strong>这是本次最该先做的一件事——
+                reranker 收益、<code>retrieval_overfetch</code> 调参、<code>rewrite</code> 的实际效果、
+                RRF 权重，每一项都只能凭感觉判断，没法量化。</li>
+              <li><strong>MinIO 孤儿对象无 GC</strong>（第二十六节）。</li>
+              <li><strong>chunk 表多付了 71MB</strong>。若成问题，可给 <code>analyzed</code> 设
+                <code>SET STORAGE EXTERNAL</code>，或直接回退该列——回退安全，删列即可，精排自动退回实时分词。</li>
+              <li>08-06 遗留的 <strong>UI 提示待撤销</strong>仍未做。</li>
+            </ol>
+            <div class="warn">
+              一处操作教训：首次重启只带了 <code>api</code> 和 <code>worker</code>，
+              <code>mcp</code> 仍跑旧镜像。三个服务共用同一份 retrieval pipeline，
+              改动后必须一起重建，否则同一套检索逻辑在不同入口下行为不一致。已补做并逐个确认。
+            </div>
+          </div>
+        </article>
+      </section>
     </main>
   </div>
 
   <footer>
     <div class="shell">
-      本文档根据 2026-08-04、08-05 与 08-06 的项目问答整理生成。
+      本文档根据 2026-08-04、08-05、08-06 与 08-07 的项目问答整理生成。
       文中所有性能数字与对照表均来自对运行中系统的实测，推翻的判断一并保留：
       overfetch 优化经实测无效、双写方案被 BM25 的 IDF 否决、
       第十四节对「稠密 396ms 是 numpy 全量扫描」这一错误解释的订正，
       以及 08-06 的两处误判——把构建失败归因于 C: 盘空间（实为内存不足，Docker 数据盘早已在 F: 上），
       和用别的机器的数字推断「嵌入不是瓶颈」（实测相差 200 倍，嵌入正是瓶颈）。
+      08-07 又有三处：把 chunk 表增量估成 18MB（实为 71MB，TOAST 所致）、
+      把预计算的查库开销估成 2–5ms（实为 9.61ms，其中约 6ms 是解压 TOAST）、
+      以及照抄文件注释称 lexical 精排「亚毫秒级」（实测 17.56ms）。
       08-06 的检索延迟测于导入进行中且语料未满库，属上界；Dockerfile 层序修复尚未验证通过。
-      运行状态、依赖版本和部署方式以后续代码变更为准。
+      08-07 中 bge-reranker-v2-m3 的耗时为按参数量推算的估计值，已在正文标明，未实跑；
+      其余数字均为实测。运行状态、依赖版本和部署方式以后续代码变更为准。
     </div>
   </footer>
 </body>
