@@ -16,6 +16,7 @@ from ...config import get_settings
 from ...db.session import get_session_factory, session_scope
 from ...plagiarism import PlagiarismService
 from ...plagiarism.schema import PlagiarismUnavailableError, is_postgres
+from ...plagiarism.service import FeatureDisabledError
 from ...plagiarism.sse import stream_check_events
 from ...plagiarism.types import CreateDocumentCheck, CreateTextCheck
 from ..auth import Principal
@@ -32,15 +33,24 @@ router = APIRouter(prefix="/plagiarism", tags=["plagiarism"])
 
 
 def _service(session: Session) -> PlagiarismService:
-    """Guard the dialect before anything else.
+    """Guard dialect and feature flag before anything else.
 
     The feature is PostgreSQL-only (ADR-0001). A local SQLite install must still
     start and serve every other endpoint, so this fails per-request rather than
     at import or startup.
+
+    The enabled check lives here, covering **every** route, rather than only on
+    the create paths inside the service. `KB_PLAG_ENABLED=false` means the
+    feature is not open, not "you may read but not write" - a disabled install
+    was answering `GET /corpus/status` with real corpus counts, which
+    contradicts both the runbook and the whole point of a release gate.
     """
     if not is_postgres(session.get_bind()):
         raise PlagiarismUnavailableError("plagiarism detection requires PostgreSQL")
-    return PlagiarismService(get_settings())
+    settings = get_settings()
+    if not settings.plag_enabled:
+        raise FeatureDisabledError("plagiarism detection is not enabled")
+    return PlagiarismService(settings)
 
 
 # --- creation -----------------------------------------------------------

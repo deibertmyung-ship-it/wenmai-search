@@ -60,12 +60,30 @@ def test_routes_exist_and_answer(api):
     assert api.get("/v1/plagiarism/corpus/status").status_code != 404
 
 
-def test_disabled_feature_returns_503_not_404(api, monkeypatch):
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", "/v1/plagiarism/checks"),
+        ("GET", "/v1/plagiarism/checks"),
+        ("GET", "/v1/plagiarism/checks/any-id"),
+        ("GET", "/v1/plagiarism/checks/any-id/report"),
+        ("GET", "/v1/plagiarism/checks/any-id/progress"),
+        ("GET", "/v1/plagiarism/corpus/status"),
+        ("DELETE", "/v1/plagiarism/checks/any-id"),
+    ],
+)
+def test_every_endpoint_is_503_while_disabled(api, monkeypatch, method, path):
+    """Disabled means closed, not "readable but not writable".
+
+    An earlier version only guarded the create paths, so a disabled install
+    answered GET /corpus/status with real corpus counts - which defeats the
+    release gate the flag exists to be.
+    """
     from kbsvc.config import get_settings
 
     monkeypatch.setattr(get_settings(), "plag_enabled", False, raising=False)
-    response = create_text(api)
-    assert response.status_code == 503
+    response = api.request(method, path, json={"text": "x" * 50})
+    assert response.status_code == 503, path
     assert response.json()["error"]["code"] == "feature_disabled"
 
 
