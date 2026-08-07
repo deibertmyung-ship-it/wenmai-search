@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -109,6 +110,48 @@ class Settings(BaseSettings):
     api_host: str = "127.0.0.1"
     api_port: int = 8077
 
+    # --- plagiarism (PostgreSQL-only, default-off - see ADR-0001) --------
+    # Two independent switches on purpose: indexing can run and backfill the
+    # historical corpus while the public interface stays shut.
+    plag_enabled: bool = False
+    plag_indexing_enabled: bool = False
+
+    # Algorithm. Changing any of these invalidates every stored projection -
+    # they feed `plagiarism_algorithm_config_hash`, and a check may only run
+    # against projections built with a matching hash.
+    plag_sentences_per_chunk: int = 4
+    plag_chunk_overlap: int = 1
+    plag_kgram: int = 5
+    plag_winnow_window: int = 8
+    plag_min_seed_len: int = 30
+    plag_min_passage_len: int = 50
+    plag_extend_tolerance: float = 0.85
+    plag_df_ratio_threshold: float = 0.25
+    plag_candidate_top_k: int = 50
+
+    # Jobs.
+    plag_poll_interval: float = 1.0
+    plag_lease_seconds: int = 600
+    plag_max_attempts: int = 3
+    plag_backoff_base: float = 5.0
+    plag_backoff_cap: float = 600.0
+    plag_worker_concurrency: int = 1
+
+    # Limits.
+    plag_max_input_chars: int = 500_000
+    plag_budget_reference_chars: int = 100_000
+    plag_budget_seconds: float = 60.0
+    plag_max_active_checks_per_key: int = 2
+    plag_preview_chars: int = 300
+
+    # SSE.
+    plag_sse_poll_interval: float = 0.5
+    plag_sse_keepalive_interval: float = 2.0
+
+    # Retention (days) for submitted text, reports, events and retired
+    # projections.
+    plag_retention_days: int = 30
+
     @field_validator("parser_chain", "allowed_mimes", mode="before")
     @classmethod
     def _split_csv(cls, value: object) -> object:
@@ -148,6 +191,72 @@ class Settings(BaseSettings):
         if self.api_worker_enabled is not None:
             return self.api_worker_enabled
         return self.profile == "local" and self.use_embedded_qdrant
+
+    @field_validator("plag_chunk_overlap")
+    @classmethod
+    def _overlap_must_let_the_window_advance(cls, value: int, info) -> int:
+        per_chunk = info.data.get("plag_sentences_per_chunk")
+        if per_chunk is not None and value >= per_chunk:
+            raise ValueError(
+                f"plag_chunk_overlap ({value}) must be less than "
+                f"plag_sentences_per_chunk ({per_chunk}); otherwise the sliding "
+                f"window cannot advance"
+            )
+        return value
+
+    @field_validator("plag_extend_tolerance", "plag_df_ratio_threshold")
+    @classmethod
+    def _must_be_a_ratio(cls, value: float) -> float:
+        if not 0.0 < value <= 1.0:
+            raise ValueError(f"must be in (0.0, 1.0], got {value}")
+        return value
+
+    @field_validator(
+        "plag_sentences_per_chunk",
+        "plag_kgram",
+        "plag_winnow_window",
+        "plag_min_seed_len",
+        "plag_min_passage_len",
+        "plag_candidate_top_k",
+        "plag_max_input_chars",
+        "plag_budget_reference_chars",
+        "plag_max_active_checks_per_key",
+        "plag_preview_chars",
+        "plag_lease_seconds",
+        "plag_max_attempts",
+        "plag_worker_concurrency",
+        "plag_retention_days",
+    )
+    @classmethod
+    def _must_be_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError(f"must be positive, got {value}")
+        return value
+
+    @property
+    def plagiarism_algorithm_config_hash(self) -> str:
+        """Identifies the projection format a check may run against.
+
+        Only parameters that change what gets *stored* belong here. Retrieval
+        and alignment tuning (`min_seed_len`, `candidate_top_k`, ...) is applied
+        at query time against an unchanged projection, so including it would
+        force a full corpus rebuild for a change that needs none.
+
+        Changing any contributing value invalidates every stored projection:
+        new checks are refused until a rebuild republishes the corpus under the
+        new hash.
+        """
+        payload = "|".join(
+            str(part)
+            for part in (
+                "v1",
+                self.plag_sentences_per_chunk,
+                self.plag_chunk_overlap,
+                self.plag_kgram,
+                self.plag_winnow_window,
+            )
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
 
 
 @lru_cache(maxsize=1)
