@@ -358,6 +358,32 @@ def plagiarism_cleanup_command(verbose: bool = False) -> None:
     typer.echo(f"removed {removed['checks']} check(s), {removed['projections']} projection(s)")
 
 
+@app.command("plagiarism-worker")
+def plagiarism_worker_command(
+    once: bool = typer.Option(False, "--once", help="drain the queues and exit"),
+    max_jobs: int = typer.Option(1000, help="job ceiling for --once"),
+    verbose: bool = False,
+) -> None:
+    """Run the plagiarism worker.
+
+    A separate process from the ingest worker on purpose: alignment is CPU-bound
+    and would otherwise stall parsing, embedding and index writes.
+    """
+    from .plagiarism.worker import PlagiarismWorker
+
+    _setup_logging(verbose)
+    _plagiarism_preflight()
+    worker = PlagiarismWorker()
+    if once:
+        typer.echo(f"processed {worker.drain(max_jobs=max_jobs)} job(s)")
+        return
+    try:
+        worker.run_forever()
+    except KeyboardInterrupt:
+        worker.stop()
+        typer.echo("stopped")
+
+
 @app.command("backfill-analyzed")
 def backfill_analyzed_command(
     batch_size: int = typer.Option(1000, help="chunks per update batch"),
