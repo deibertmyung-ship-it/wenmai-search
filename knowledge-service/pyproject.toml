@@ -32,6 +32,11 @@ postgres = ["psycopg[binary]>=3.2"]
 s3 = ["boto3>=1.35"]
 fastembed = ["fastembed>=0.4"]
 rerank = ["sentence-transformers>=3.3"]
+# Plagiarism detection (PostgreSQL-only, default-off - see ADR-0001).
+# pysbd is imported lazily inside the chunker, so the app starts and every
+# other feature works without this extra installed; only projection building
+# needs it.
+plagiarism = ["pysbd>=0.3.4", "langdetect>=1.0.9"]
 dev = ["pytest>=8.3", "pytest-cov>=6.0", "ruff>=0.8"]
 
 [project.scripts]
