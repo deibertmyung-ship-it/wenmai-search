@@ -136,6 +136,32 @@ def create_version(
     return version
 
 
+def document_ids_by_title(
+    session: Session,
+    *,
+    tenant_id: str,
+    needle: str,
+    source_ids: list[str] | None = None,
+) -> list[str]:
+    """Documents whose title contains `needle`, case-insensitively.
+
+    Retrieval has no title filter, and deliberately so: filtering hits by title
+    after fusion would discard whatever the retrievers happened not to return,
+    and one book among hundreds is usually not in the overfetched candidates at
+    all - the search would look empty rather than narrow. `document_id` has a
+    payload index in Qdrant and a raw term in tantivy, so resolving the title to
+    ids here pushes the filter down into both stores instead.
+    """
+    stmt = select(Document.id).where(
+        Document.tenant_id == tenant_id,
+        Document.deleted_at.is_(None),
+        Document.title.ilike(f"%{needle}%"),
+    )
+    if source_ids:
+        stmt = stmt.where(Document.source_id.in_(source_ids))
+    return list(session.scalars(stmt))
+
+
 def list_versions(session: Session, document_id: str) -> list[DocumentVersion]:
     stmt = (
         select(DocumentVersion)

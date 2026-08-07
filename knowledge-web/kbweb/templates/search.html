@@ -38,9 +38,24 @@
     </div>
 
     <div class="rail__group">
-      <label class="rail__label" for="heading">限定章节</label>
-      <input class="field field--sm" type="text" id="heading" name="heading"
-             value="{{ form.heading }}" placeholder="卷二" autocomplete="off">
+      <label class="rail__label" for="document_id">限定书名</label>
+      {# data-source lets the directory dropdown narrow this list in the browser.
+         Without JS every book stays selectable, which is still correct: the
+         backend intersects the two filters. #}
+      <select class="field field--sm" id="document_id" name="document_id">
+        <option value="">全部</option>
+        {% for source in sources %}
+          {% set books = documents | selectattr('source_id', 'equalto', source.id) | list %}
+          {% if books %}
+            <optgroup label="{{ source.name }}" data-source="{{ source.id }}">
+              {% for book in books %}
+                <option value="{{ book.id }}" data-source="{{ source.id }}"
+                        {% if form.document_id == book.id %}selected{% endif %}>{{ book.title }}</option>
+              {% endfor %}
+            </optgroup>
+          {% endif %}
+        {% endfor %}
+      </select>
     </div>
 
     <div class="rail__group">
@@ -69,7 +84,7 @@
         <span class="empty__mark">卷</span>
         <h2>在典籍中查找</h2>
         <p>混合检索同时走语义与字面两路，结果标注可核对的出处。
-           左栏可按目录、章节收窄范围。</p>
+           左栏可按目录、书名收窄范围。</p>
       </div>
 
     {% elif not payload.results %}
@@ -106,6 +121,7 @@
 {% endblock %}
 
 {% block scripts %}
+  <script src="{{ url_for('static', filename='js/book-filter.js') }}" defer></script>
   {% if payload and payload.debug %}
     <script src="{{ url_for('static', filename='js/drawer.js') }}" defer></script>
   {% endif %}

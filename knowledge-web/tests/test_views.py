@@ -17,8 +17,11 @@ def html(response) -> str:
 
 
 @respx.mock
-def test_landing_page_renders_without_a_query(client, sources_payload):
+def test_landing_page_renders_without_a_query(client, sources_payload, document_payload):
     respx.get(f"{API_BASE}/v1/sources").mock(return_value=httpx.Response(200, json=sources_payload))
+    respx.get(f"{API_BASE}/v1/documents").mock(
+        return_value=httpx.Response(200, json=[document_payload])
+    )
     response = client.get("/")
     assert response.status_code == 200
     body = html(response)
@@ -27,8 +30,13 @@ def test_landing_page_renders_without_a_query(client, sources_payload):
 
 
 @respx.mock
-def test_search_renders_results_with_citations(client, sources_payload, search_payload):
+def test_search_renders_results_with_citations(
+    client, sources_payload, search_payload, document_payload
+):
     respx.get(f"{API_BASE}/v1/sources").mock(return_value=httpx.Response(200, json=sources_payload))
+    respx.get(f"{API_BASE}/v1/documents").mock(
+        return_value=httpx.Response(200, json=[document_payload])
+    )
     respx.post(f"{API_BASE}/v1/search").mock(return_value=httpx.Response(200, json=search_payload))
 
     response = client.get("/?q=贼克如何取用神")
@@ -41,8 +49,13 @@ def test_search_renders_results_with_citations(client, sources_payload, search_p
 
 
 @respx.mock
-def test_hits_are_marked_from_backend_offsets(client, sources_payload, search_payload):
+def test_hits_are_marked_from_backend_offsets(
+    client, sources_payload, search_payload, document_payload
+):
     respx.get(f"{API_BASE}/v1/sources").mock(return_value=httpx.Response(200, json=sources_payload))
+    respx.get(f"{API_BASE}/v1/documents").mock(
+        return_value=httpx.Response(200, json=[document_payload])
+    )
     respx.post(f"{API_BASE}/v1/search").mock(return_value=httpx.Response(200, json=search_payload))
 
     body = html(client.get("/?q=贼克"))
@@ -50,13 +63,18 @@ def test_hits_are_marked_from_backend_offsets(client, sources_payload, search_pa
 
 
 @respx.mock
-def test_search_forwards_filters_and_flags_to_the_backend(client, sources_payload, search_payload):
+def test_search_forwards_filters_and_flags_to_the_backend(
+    client, sources_payload, search_payload, document_payload
+):
     respx.get(f"{API_BASE}/v1/sources").mock(return_value=httpx.Response(200, json=sources_payload))
+    respx.get(f"{API_BASE}/v1/documents").mock(
+        return_value=httpx.Response(200, json=[document_payload])
+    )
     route = respx.post(f"{API_BASE}/v1/search").mock(
         return_value=httpx.Response(200, json=search_payload)
     )
 
-    client.get("/?f=1&q=涉害&mode=sparse&source_id=src-1&heading=卷二&top_k=7&debug=1")
+    client.get("/?f=1&q=涉害&mode=sparse&source_id=src-1&document_id=doc-1&top_k=7&debug=1")
     sent = route.calls.last.request
     import json
 
@@ -65,7 +83,7 @@ def test_search_forwards_filters_and_flags_to_the_backend(client, sources_payloa
     assert body["top_k"] == 7
     assert body["debug"] is True
     assert body["filters"]["source_ids"] == ["src-1"]
-    assert body["filters"]["heading_contains"] == "卷二"
+    assert body["filters"]["document_ids"] == ["doc-1"]
     # unchecked checkboxes must read as false, not as "absent means default"
     assert body["rerank"] is False
     assert body["rewrite"] is False
@@ -73,10 +91,13 @@ def test_search_forwards_filters_and_flags_to_the_backend(client, sources_payloa
 
 @respx.mock
 def test_bare_link_without_the_form_marker_keeps_the_defaults_on(
-    client, sources_payload, search_payload
+    client, sources_payload, search_payload, document_payload
 ):
     """A shared /?q=... URL must still rerank and rewrite."""
     respx.get(f"{API_BASE}/v1/sources").mock(return_value=httpx.Response(200, json=sources_payload))
+    respx.get(f"{API_BASE}/v1/documents").mock(
+        return_value=httpx.Response(200, json=[document_payload])
+    )
     route = respx.post(f"{API_BASE}/v1/search").mock(
         return_value=httpx.Response(200, json=search_payload)
     )
@@ -89,8 +110,13 @@ def test_bare_link_without_the_form_marker_keeps_the_defaults_on(
 
 
 @respx.mock
-def test_invalid_mode_falls_back_to_hybrid(client, sources_payload, search_payload):
+def test_invalid_mode_falls_back_to_hybrid(
+    client, sources_payload, search_payload, document_payload
+):
     respx.get(f"{API_BASE}/v1/sources").mock(return_value=httpx.Response(200, json=sources_payload))
+    respx.get(f"{API_BASE}/v1/documents").mock(
+        return_value=httpx.Response(200, json=[document_payload])
+    )
     route = respx.post(f"{API_BASE}/v1/search").mock(
         return_value=httpx.Response(200, json=search_payload)
     )
@@ -101,8 +127,13 @@ def test_invalid_mode_falls_back_to_hybrid(client, sources_payload, search_paylo
 
 
 @respx.mock
-def test_debug_drawer_shows_both_retriever_runs(client, sources_payload, search_payload):
+def test_debug_drawer_shows_both_retriever_runs(
+    client, sources_payload, search_payload, document_payload
+):
     respx.get(f"{API_BASE}/v1/sources").mock(return_value=httpx.Response(200, json=sources_payload))
+    respx.get(f"{API_BASE}/v1/documents").mock(
+        return_value=httpx.Response(200, json=[document_payload])
+    )
     respx.post(f"{API_BASE}/v1/search").mock(return_value=httpx.Response(200, json=search_payload))
 
     body = html(client.get("/?q=贼克&debug=1"))
@@ -112,9 +143,12 @@ def test_debug_drawer_shows_both_retriever_runs(client, sources_payload, search_
 
 
 @respx.mock
-def test_debug_ui_can_be_disabled(app, config, sources_payload, search_payload):
+def test_debug_ui_can_be_disabled(app, config, sources_payload, search_payload, document_payload):
     config.debug_ui = False
     respx.get(f"{API_BASE}/v1/sources").mock(return_value=httpx.Response(200, json=sources_payload))
+    respx.get(f"{API_BASE}/v1/documents").mock(
+        return_value=httpx.Response(200, json=[document_payload])
+    )
     route = respx.post(f"{API_BASE}/v1/search").mock(
         return_value=httpx.Response(200, json=search_payload)
     )
@@ -125,8 +159,11 @@ def test_debug_ui_can_be_disabled(app, config, sources_payload, search_payload):
 
 
 @respx.mock
-def test_empty_result_set_gets_a_real_empty_state(client, sources_payload):
+def test_empty_result_set_gets_a_real_empty_state(client, sources_payload, document_payload):
     respx.get(f"{API_BASE}/v1/sources").mock(return_value=httpx.Response(200, json=sources_payload))
+    respx.get(f"{API_BASE}/v1/documents").mock(
+        return_value=httpx.Response(200, json=[document_payload])
+    )
     respx.post(f"{API_BASE}/v1/search").mock(
         return_value=httpx.Response(200, json={"query": "x", "results": []})
     )
@@ -138,9 +175,14 @@ def test_empty_result_set_gets_a_real_empty_state(client, sources_payload):
 
 
 @respx.mock
-def test_api_key_is_sent_to_the_backend_but_never_to_the_browser(client, sources_payload):
+def test_api_key_is_sent_to_the_backend_but_never_to_the_browser(
+    client, sources_payload, document_payload
+):
     route = respx.get(f"{API_BASE}/v1/sources").mock(
         return_value=httpx.Response(200, json=sources_payload)
+    )
+    respx.get(f"{API_BASE}/v1/documents").mock(
+        return_value=httpx.Response(200, json=[document_payload])
     )
     response = client.get("/")
     assert route.calls.last.request.headers["authorization"] == "Bearer kb_test_key"
@@ -244,8 +286,11 @@ def test_retry_posts_to_the_backend_and_redirects(client, jobs_payload):
 
 
 @respx.mock
-def test_upload_forwards_the_file_and_redirects_to_jobs(client, sources_payload):
+def test_upload_forwards_the_file_and_redirects_to_jobs(client, sources_payload, document_payload):
     respx.get(f"{API_BASE}/v1/sources").mock(return_value=httpx.Response(200, json=sources_payload))
+    respx.get(f"{API_BASE}/v1/documents").mock(
+        return_value=httpx.Response(200, json=[document_payload])
+    )
     route = respx.post(f"{API_BASE}/v1/ingest/upload").mock(
         return_value=httpx.Response(
             202,
@@ -281,8 +326,11 @@ def test_upload_without_a_file_is_rejected_before_hitting_the_backend(client):
 
 
 @respx.mock
-def test_backend_down_renders_a_degraded_page_without_leaking_the_host(client):
+def test_backend_down_renders_a_degraded_page_without_leaking_the_host(client, document_payload):
     respx.get(f"{API_BASE}/v1/sources").mock(side_effect=httpx.ConnectError("refused"))
+    respx.get(f"{API_BASE}/v1/documents").mock(
+        return_value=httpx.Response(200, json=[document_payload])
+    )
     response = client.get("/")
     body = html(response)
     assert response.status_code == 503
@@ -291,8 +339,13 @@ def test_backend_down_renders_a_degraded_page_without_leaking_the_host(client):
 
 
 @respx.mock
-def test_backend_error_envelope_is_surfaced_to_the_reader(client, sources_payload):
+def test_backend_error_envelope_is_surfaced_to_the_reader(
+    client, sources_payload, document_payload
+):
     respx.get(f"{API_BASE}/v1/sources").mock(return_value=httpx.Response(200, json=sources_payload))
+    respx.get(f"{API_BASE}/v1/documents").mock(
+        return_value=httpx.Response(200, json=[document_payload])
+    )
     respx.post(f"{API_BASE}/v1/search").mock(
         return_value=httpx.Response(
             404, json={"error": {"code": "not_found", "message": "source not found", "detail": {}}}

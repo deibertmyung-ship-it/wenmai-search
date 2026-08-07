@@ -10,6 +10,10 @@ from pydantic import BaseModel, Field
 class SearchFilters(BaseModel):
     source_ids: list[str] | None = None
     document_ids: list[str] | None = None
+    # Resolved to document_ids before retrieval, so the filter is pushed down to
+    # both stores. `heading_contains` cannot be: headings are per chunk, not per
+    # document, so it stays a post-fusion filter.
+    title_contains: str | None = None
     heading_contains: str | None = None
     kinds: list[str] | None = None
     current_only: bool = True

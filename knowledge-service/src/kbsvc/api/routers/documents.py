@@ -52,15 +52,47 @@ def list_documents(
     principal: Principal = Depends(get_principal),
     session: Session = Depends(get_session),
 ) -> list[DocumentOut]:
-    stmt = select(Document).where(
-        Document.tenant_id == principal.tenant_id, Document.deleted_at.is_(None)
+    # Counts come from two grouped subqueries rather than from `_to_out` per row.
+    # Serialising one document at a time costs two queries each, which on a
+    # 200-document listing is 400 round trips and ~1.8s - and this endpoint is on
+    # the load path of both the library page and the search page's book filter.
+    versions = (
+        select(DocumentVersion.document_id, func.count().label("n"))
+        .group_by(DocumentVersion.document_id)
+        .subquery()
+    )
+    chunks = (
+        select(Chunk.document_id, func.count().label("n"))
+        .group_by(Chunk.document_id)
+        .subquery()
+    )
+    stmt = (
+        select(Document, versions.c.n, chunks.c.n)
+        .outerjoin(versions, versions.c.document_id == Document.id)
+        .outerjoin(chunks, chunks.c.document_id == Document.id)
+        .where(Document.tenant_id == principal.tenant_id, Document.deleted_at.is_(None))
     )
     if source_id:
         stmt = stmt.where(Document.source_id == source_id)
     if q:
         stmt = stmt.where(Document.title.ilike(f"%{q}%"))
     stmt = stmt.order_by(Document.title).limit(limit).offset(offset)
-    return [_to_out(session, document) for document in session.scalars(stmt)]
+
+    return [
+        DocumentOut(
+            id=document.id,
+            source_id=document.source_id,
+            external_id=document.external_id,
+            title=document.title,
+            acl=list(document.acl or []),
+            current_version_id=document.current_version_id,
+            version_count=int(version_count or 0),
+            chunk_count=int(chunk_count or 0),
+            created_at=document.created_at.isoformat(),
+            updated_at=document.updated_at.isoformat(),
+        )
+        for document, version_count, chunk_count in session.execute(stmt)
+    ]
 
 
 @router.get("/{document_id}")

@@ -11,6 +11,11 @@ bp = Blueprint("search", __name__)
 
 MODES = ("hybrid", "dense", "sparse")
 
+# The whole shelf goes into the book dropdown. 500 is the backend's own page
+# ceiling; past that the control stops being a usable way to pick a book and
+# should become a search box instead.
+DOCUMENT_CHOICE_LIMIT = 500
+
 
 @bp.get("/")
 def index():
@@ -21,7 +26,7 @@ def index():
         mode = "hybrid"
     top_k = as_int(request.args.get("top_k"), config.page_size, low=1, high=50)
     source_id = (request.args.get("source_id") or "").strip()
-    heading = (request.args.get("heading") or "").strip()
+    document_id = (request.args.get("document_id") or "").strip()
     # An unchecked checkbox is simply absent from the query string, which is
     # indistinguishable from "the form was never submitted". The hidden `f`
     # marker disambiguates: once it is present, absence means the user turned
@@ -37,32 +42,37 @@ def index():
         "mode": mode,
         "top_k": top_k,
         "source_id": source_id,
-        "heading": heading,
+        "document_id": document_id,
         "rerank": rerank,
         "rewrite": rewrite,
         "debug": want_debug,
     }
 
-    # Sources populate the filter dropdown; a missing backend must not break the
-    # page before the user has even searched.
+    # Sources and documents populate the two filter dropdowns; a missing backend
+    # must not break the page before the user has even searched.
     try:
         sources = client().list_sources()
+        # Every book, not just the selected directory's: the directory dropdown
+        # narrows the list in the browser, so switching it must not need a round
+        # trip. `document_id` is grouped by source client-side.
+        documents = client().list_documents(limit=DOCUMENT_CHOICE_LIMIT)
     except BackendUnavailable:
         if not query:
             raise
-        sources = []
+        sources, documents = [], []
 
+    template_args = {"form": form, "sources": sources, "documents": documents}
     if not query:
-        return render_template("search.html", form=form, sources=sources, payload=None)
+        return render_template("search.html", payload=None, **template_args)
 
     payload = client().search(
         query,
         top_k=top_k,
         mode=mode,
         source_ids=[source_id] if source_id else None,
-        heading_contains=heading or None,
+        document_ids=[document_id] if document_id else None,
         rerank=rerank,
         rewrite=rewrite,
         debug=want_debug,
     )
-    return render_template("search.html", form=form, sources=sources, payload=payload)
+    return render_template("search.html", payload=payload, **template_args)

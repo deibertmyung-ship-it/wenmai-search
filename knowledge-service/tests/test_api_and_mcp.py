@@ -179,6 +179,34 @@ def test_heading_filter_selects_a_single_chapter(api_client, indexed_corpus):
     assert all("卷二" in " ".join(r["heading_path"]) for r in payload["results"])
 
 
+def test_title_filter_restricts_retrieval_to_the_matching_book(api_client, indexed_corpus):
+    all_hits = api_client.post("/v1/search", json={"query": "涉害"}).json()
+    assert all_hits["results"]
+    title = all_hits["results"][0]["title"]
+
+    payload = api_client.post(
+        "/v1/search", json={"query": "涉害", "filters": {"title_contains": title}}
+    ).json()
+    assert payload["results"]
+    assert all(hit["title"] == title for hit in payload["results"])
+
+
+def test_a_title_matching_nothing_returns_nothing_rather_than_the_whole_corpus(
+    api_client, indexed_corpus
+):
+    """The failure mode worth guarding: an unmatched title must not drop the filter.
+
+    Resolving the title to an empty id list and passing that along as "no
+    document filter" would answer a request for one book with hits from every
+    other one - wrong in a way the caller cannot see.
+    """
+    payload = api_client.post(
+        "/v1/search",
+        json={"query": "涉害", "filters": {"title_contains": "这本书不存在于语料中"}},
+    ).json()
+    assert payload["results"] == []
+
+
 def test_empty_query_is_rejected_by_validation(api_client):
     assert api_client.post("/v1/search", json={"query": ""}).status_code == 422
 

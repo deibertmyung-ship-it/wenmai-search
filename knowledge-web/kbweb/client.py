@@ -56,6 +56,7 @@ class KbClient:
         mode: str = "hybrid",
         source_ids: list[str] | None = None,
         document_ids: list[str] | None = None,
+        title_contains: str | None = None,
         heading_contains: str | None = None,
         rerank: bool = True,
         rewrite: bool = True,
@@ -71,6 +72,7 @@ class KbClient:
             "filters": {
                 "source_ids": source_ids or None,
                 "document_ids": document_ids or None,
+                "title_contains": title_contains or None,
                 "heading_contains": heading_contains or None,
                 "current_only": True,
             },
