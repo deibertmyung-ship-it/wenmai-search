@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>kbweb 前端选型调研</title>
+<style>
+:root{color-scheme:light dark;
+--paper:oklch(97.5% .012 85);--paper-raised:oklch(99% .008 85);--paper-sunk:oklch(94.5% .018 82);
+--paper-edge:oklch(89% .022 80);--ink:oklch(22% .012 60);--ink-strong:oklch(14% .014 60);
+--ink-soft:oklch(46% .010 60);--ink-faint:oklch(63% .008 60);
+--seal:oklch(48% .17 25);--seal-wash:oklch(92% .045 30);
+--indigo:oklch(42% .09 250);--indigo-wash:oklch(93% .03 250);
+--jade:oklch(48% .09 155);--jade-wash:oklch(93% .035 155);
+--font-serif:"Songti SC","SimSun","Noto Serif CJK SC","Source Han Serif SC",Georgia,serif;
+--font-sans:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",-apple-system,"Segoe UI",system-ui,sans-serif;
+--font-mono:"Cascadia Mono","SFMono-Regular",Consolas,monospace;
+--rule:1px solid var(--paper-edge)}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){
+--paper:oklch(19% .022 65);--paper-raised:oklch(23% .024 65);--paper-sunk:oklch(16% .02 65);
+--paper-edge:oklch(34% .028 65);--ink:oklch(90% .01 80);--ink-strong:oklch(97% .008 80);
+--ink-soft:oklch(70% .01 70);--ink-faint:oklch(54% .01 70);
+--seal:oklch(70% .14 30);--seal-wash:oklch(30% .07 28);
+--indigo:oklch(74% .09 250);--indigo-wash:oklch(28% .05 250);
+--jade:oklch(72% .08 155);--jade-wash:oklch(27% .045 155)}}
+:root[data-theme=dark]{
+--paper:oklch(19% .022 65);--paper-raised:oklch(23% .024 65);--paper-sunk:oklch(16% .02 65);
+--paper-edge:oklch(34% .028 65);--ink:oklch(90% .01 80);--ink-strong:oklch(97% .008 80);
+--ink-soft:oklch(70% .01 70);--ink-faint:oklch(54% .01 70);
+--seal:oklch(70% .14 30);--seal-wash:oklch(30% .07 28);
+--indigo:oklch(74% .09 250);--indigo-wash:oklch(28% .05 250);
+--jade:oklch(72% .08 155);--jade-wash:oklch(27% .045 155)}
+:root[data-theme=light]{color-scheme:light}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font-sans);
+line-height:1.75;font-size:16px}
+.wrap{display:grid;grid-template-columns:minmax(0,1fr);max-width:1180px;margin:0 auto;padding:0 1.5rem 6rem}
+@media(min-width:1000px){.wrap{grid-template-columns:230px minmax(0,1fr);gap:3.5rem}}
+header.top{border-bottom:2px solid var(--ink-strong);padding:2.5rem 1.5rem 1.25rem;
+max-width:1180px;margin:0 auto;display:flex;align-items:baseline;gap:1.5rem;flex-wrap:wrap}
+h1{font-family:var(--font-serif);font-size:clamp(1.8rem,1.3rem+2vw,2.6rem);margin:0;
+color:var(--ink-strong);line-height:1.25}
+h1::first-letter{color:var(--seal)}
+.top .meta{font-family:var(--font-mono);font-size:.75rem;color:var(--ink-faint);margin-left:auto}
+.theme{background:none;border:var(--rule);color:var(--ink-soft);font:inherit;font-size:.72rem;
+padding:.2rem .7rem;border-radius:3px;cursor:pointer}
+.theme:hover{background:var(--paper-sunk);color:var(--ink-strong)}
+nav.toc{font-size:.82rem;align-self:start}
+@media(min-width:1000px){nav.toc{position:sticky;top:1.5rem;padding-top:2.5rem;
+max-height:calc(100vh - 3rem);overflow-y:auto}}
+nav.toc ol{list-style:none;margin:0;padding:0}
+nav.toc li{margin:.35rem 0}
+nav.toc a{color:var(--ink-soft);text-decoration:none;border-left:2px solid transparent;padding-left:.7rem;display:block}
+nav.toc a:hover{color:var(--seal);border-left-color:var(--seal)}
+main{min-width:0;padding-top:2.5rem}
+h2{font-family:var(--font-serif);font-size:1.5rem;color:var(--ink-strong);
+margin:3rem 0 1rem;padding-bottom:.4rem;border-bottom:2px solid var(--ink-strong);scroll-margin-top:1rem}
+h2:first-child{margin-top:0}
+h3{font-family:var(--font-serif);font-size:1.15rem;color:var(--ink-strong);margin:2rem 0 .6rem;
+scroll-margin-top:1rem}
+p{margin:0 0 1rem;max-width:72ch}
+strong{color:var(--ink-strong);font-weight:600}
+a{color:var(--seal);text-underline-offset:.2em}
+ul,ol{max-width:72ch;padding-left:1.4rem}li{margin:.35rem 0}
+code{font-family:var(--font-mono);font-size:.86em;background:var(--paper-sunk);
+padding:.12em .35em;border-radius:2px;color:var(--ink-strong);
+/* long identifiers must wrap; a single unbreakable token otherwise sets the
+   min-content width of its table cell and pushes the whole page wide */
+overflow-wrap:anywhere;word-break:break-word}
+pre{background:var(--paper-sunk);border:var(--rule);border-radius:4px;padding:1rem 1.1rem;
+overflow-x:auto;margin:1.2rem 0;line-height:1.55}
+pre code{background:none;padding:0;font-size:.8rem;color:var(--ink-soft);
+white-space:pre;overflow-wrap:normal;word-break:normal}
+blockquote{margin:0 0 1.6rem;padding:.8rem 1.1rem;border-left:3px solid var(--indigo);
+background:var(--indigo-wash);color:var(--indigo);font-size:.88rem;border-radius:0 4px 4px 0}
+blockquote p{margin:0;max-width:none}
+blockquote p+p{margin-top:.3rem}
+/* Cinnabar is the semantic warning colour here, consistent with the app: it
+   marks things you must not copy, the same way it marks citations in the UI. */
+blockquote.warn{border-left-color:var(--seal);background:var(--seal-wash);color:var(--seal)}
+blockquote.ok{border-left-color:var(--jade);background:var(--jade-wash);color:var(--jade)}
+.tbl{overflow-x:auto;max-width:100%;margin:1.2rem 0}
+table{border-collapse:collapse;width:100%;font-size:.86rem}
+th{text-align:left;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;
+color:var(--ink-faint);font-weight:500;padding:.5rem .7rem;border-bottom:2px solid var(--ink-strong);
+white-space:nowrap}
+td{padding:.55rem .7rem;border-bottom:var(--rule);vertical-align:top}
+tbody tr:hover{background:var(--paper-sunk)}
+td code{font-size:.82em}
+hr{border:none;border-top:var(--rule);margin:2.5rem 0}
+footer{max-width:1180px;margin:0 auto;padding:2rem 1.5rem 3rem;border-top:var(--rule);
+font-size:.76rem;color:var(--ink-faint);font-family:var(--font-mono)}
+@media print{nav.toc,.theme{display:none}.wrap{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>kbweb 前端选型调研</h1>
+  <div class="meta">gh api 实测 · 2026-08-07
+    <button class="theme" type="button" data-theme-toggle>明/暗</button>
+  </div>
+</header>
+<div class="wrap">
+  <nav class="toc" aria-label="目录"><ol>
+    <li><a href="#s0">0. 定位：补漏而非换方案</a></li>
+    <li><a href="#s1">1. 对标物：whoogle-search</a></li>
+    <li><a href="#s2">2. 最硬的缺口：字体</a></li>
+    <li><a href="#s3">3. CJK 排版：heti</a></li>
+    <li><a href="#s4">4. 调试抽屉：没有先例</a></li>
+    <li><a href="#s5">5. 搜索 UI：抄契约</a></li>
+    <li><a href="#s6">6. RAG 系统前端</a></li>
+    <li><a href="#s7">7. 阅读器与锚定</a></li>
+    <li><a href="#s8">8. CSS 基础层</a></li>
+    <li><a href="#s9">9. htmx / Jinja 组件化</a></li>
+    <li><a href="#s10">10. 明确跳过</a></li>
+    <li><a href="#s11">11. License 红线</a></li>
+    <li><a href="#s12">12. 两个诚实的判断</a></li>
+    <li><a href="#s13">13. 行动清单</a></li>
+  </ol></nav>
+  <main>
+
+<blockquote>
+<p>调研目标：为已成型的 kbweb 前端寻找可借鉴的开源项目与模板。</p>
+<p>所有候选均经 <code>gh api repos/OWNER/NAME</code> 实测验证（star / license / 最后 push / archived 状态），验证日期 <strong>2026-08-07</strong>。</p>
+<p>未验证或无法定性授权的项目已在文中标注。</p>
+</blockquote>
+
+<h2 id="s0">0. 定位：这次调研是补漏，不是换方案</h2>
+
+<p>kbweb 不是待填的骨架，而是一套已做完取舍的成品：135 行 <code>tokens.css</code> + 511 行 <code>app.css</code>，语义色分工（朱砂只给引用与命中、靛青只给度量）、双字体家族、6:1 排名字号比、<code>--measure-read: 42em</code> 都已定下；<code>search.html</code> 里连「复选框未勾选时浏览器不提交」这种坑都用隐藏 <code>f=1</code> 标记处理并有测试守着。</p>
+
+<p>因此本文<strong>不推荐任何「整体套用」的模板</strong>。三路独立调研得出同一结论——</p>
+
+<ul>
+<li><strong>Flask boilerplate 这一类基本死绝</strong>：主流模板三个已归档、四个停更两年以上</li>
+<li><strong>Astro / Hugo editorial 主题生态</strong>：<code>--topic=astro-theme</code> 排序前 20 全是 Tailwind 落地页模板</li>
+<li><strong>RAG 系统自带前端</strong>：不是 license 有雷就是体量失控</li>
+</ul>
+
+<p>kbweb 已有的 create_app 工厂 + <code>views / templates / static / client.py</code> 分层，比清单里任何模板都更贴合它自己的形态。</p>
+
+<h2 id="s1">1. 唯一真正的对标物：whoogle-search</h2>
+
+<p>模板全军覆没，但有一个<strong>同构的活体应用</strong>比任何模板都贴合。</p>
+
+<div class="tbl"><table><thead><tr><th>项目</th><th>star</th><th>license</th><th>最后 push</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/benbusby/whoogle-search"><code>benbusby/whoogle-search</code></a></td><td>11594</td><td>MIT</td><td>2026-08-04</td></tr>
+</tbody></table></div>
+
+<p>自托管元搜索引擎：Flask SSR + httpx 打上游 + 自己不存数据，把结果渲染成 HTML。与 kbweb 的形态几乎一一对应。</p>
+
+<h3 id="s1-1">逐文件对应关系</h3>
+
+<div class="tbl"><table><thead><tr><th>whoogle 文件</th><th>kbweb 对应</th><th>可借鉴什么</th></tr></thead><tbody>
+<tr><td><code>app/services/http_client.py</code></td><td><code>client.py</code></td><td><code>httpx.Client</code> 薄封装：跨请求复用连接、重试、TTLCache、HTTP/2 可降级</td></tr>
+<tr><td><code>app/services/provider.py</code></td><td>—</td><td><code>close_all_clients()</code>，Flask teardown 时统一收敛客户端生命周期</td></tr>
+<tr><td><code>app/models/config.py</code> + <code>test/conftest.py</code></td><td><code>config.py</code> + <code>tests/</code></td><td><strong>把 <code>nojs</code> 做成一等配置维度，并在 conftest 里随机成 0/1 跑测试</strong></td></tr>
+<tr><td><code>test/mock_google.py</code></td><td><code>tests/</code></td><td>把上游响应做成可参数化的 fixture 工厂</td></tr>
+</tbody></table></div>
+
+<p><strong>最该抄的是 <code>nojs</code> 那条。</strong> kbweb 的「JS 全挂时页面仍可检索/翻页/上传」目前是硬性要求，但只有 e2e 里一个降级测试守着。whoogle 的做法能把它变成全套单元测试的一个维度，从人工验收变成 pytest 断言。</p>
+
+<blockquote class="warn"><p><strong>别学的地方</strong>：whoogle 是模块级 <code>app = Flask(__name__)</code>，非工厂模式。kbweb 现有写法更好。另外它的 <code>filter.py</code> 是 BeautifulSoup 洗上游 HTML，与 kbweb 的 Jinja <code>filters.py</code> 名字撞车但完全不是一回事。</p></blockquote>
+
+<p><strong>其余活体参考</strong>（仅参考级，不建议逐行借鉴）：</p>
+
+<div class="tbl"><table><thead><tr><th>项目</th><th>star</th><th>license</th><th>最后 push</th><th>说明</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/CTFd/CTFd"><code>CTFd/CTFd</code></a></td><td>6776</td><td>Apache-2.0</td><td>2026-08-07</td><td>插件化 Flask + Jinja 主题系统</td></tr>
+<tr><td><a href="https://github.com/miguelgrinberg/microblog"><code>miguelgrinberg/microblog</code></a></td><td>4775</td><td>MIT</td><td>2025-04-06</td><td>工厂 + blueprint 规范写法，但是数据库驱动的 CRUD</td></tr>
+<tr><td><a href="https://github.com/simple-login/app"><code>simple-login/app</code></a></td><td>6892</td><td><strong>AGPL-3.0</strong></td><td>2026-07-31</td><td>只能看不能抄</td></tr>
+</tbody></table></div>
+
+<h3 id="s1-2">1.1 已排除的 Flask 模板</h3>
+
+<div class="tbl"><table><thead><tr><th>项目</th><th>排除原因</th></tr></thead><tbody>
+<tr><td><code>hack4impact/flask-base</code></td><td><strong>archived</strong>，最后 push 2024-03-21</td></tr>
+<tr><td><code>nuvic/flask_for_startups</code></td><td><strong>archived</strong></td></tr>
+<tr><td><code>MaxHalford/flask-boilerplate</code></td><td><strong>archived</strong>，最后 push 2018-01-15</td></tr>
+<tr><td><code>realpython/flask-boilerplate</code></td><td>1579★，push 2023-11-03（33 个月）</td></tr>
+<tr><td><code>karec/cookiecutter-flask-restful</code></td><td>812★，push 2023-04-27（40 个月）</td></tr>
+<tr><td><code>realpython/cookiecutter-flask-skeleton</code></td><td>437★，push 2021-08-05</td></tr>
+<tr><td><code>cookiecutter-flask/cookiecutter-flask</code></td><td>4724★ / MIT / 活跃，但核心卖点是 webpack 资产打包——正是 kbweb 拒绝的</td></tr>
+</tbody></table></div>
+
+<h2 id="s2">2. 最硬的缺口：字体是设备彩票</h2>
+
+<p>这一条是白盒验证的结论，不依赖外部佐证。</p>
+
+<p><code>kbweb/static/css/tokens.css:33</code> 的字体栈是纯本地依赖：</p>
+
+<pre><code>--font-serif: "Songti SC", "SimSun", "Noto Serif CJK SC",
+              "Source Han Serif SC", "STSong", Georgia, serif;</code></pre>
+
+<ul>
+<li>macOS 落 Songti SC</li>
+<li>Windows 落 SimSun（点阵感重，与「善本」意象相悖）</li>
+<li>Linux 大概率一路 fallback 到 Georgia，再由浏览器兜底任意 CJK 字体</li>
+</ul>
+
+<p><strong>整个「古籍善本」方向建立在字体上，而字体现在不受控。</strong> 子集化后自托管是唯一确定解。</p>
+
+<div class="tbl"><table><thead><tr><th>组件</th><th>项目</th><th>star</th><th>license</th><th>最后 push</th></tr></thead><tbody>
+<tr><td>字体切割</td><td><a href="https://github.com/KonghaYao/cn-font-split"><code>KonghaYao/cn-font-split</code></a></td><td>1227</td><td>Apache-2.0</td><td>2026-06-12</td></tr>
+<tr><td>楷体</td><td><a href="https://github.com/lxgw/LxgwWenKai"><code>lxgw/LxgwWenKai</code></a> 霞鹜文楷</td><td>25413</td><td><strong>OFL-1.1</strong></td><td>2026-07-30</td></tr>
+<tr><td>宋体</td><td>Noto Serif CJK SC</td><td>—</td><td>OFL</td><td>—</td></tr>
+</tbody></table></div>
+
+<p><code>cn-font-split</code> 把 CJK 字体按 unicode range 切成上百片 woff2，浏览器只下载页面实际用到的分片。是<strong>构建期一次性成本</strong>，不是运行时依赖，可接进 <code>deploy/</code>。现成分片产物可参考 <code>SunsetMkt/HarmonyOS_Sans_SC_Webfont_Splitted</code>。</p>
+
+<blockquote class="ok"><p><strong>顺带兑现一个只做了一半的取向。</strong> 设计文档写的是「字体对比而非字号对比」，但目前只有 serif / sans 一层对比。宋楷分工是古籍排版的刚需——正文宋、标题与注文楷。</p></blockquote>
+
+<pre><code>--font-song: /* 正文 */
+--font-kai:  /* 标题、注文 */</code></pre>
+
+<p>霞鹜文楷是 OFL-1.1，可自由嵌入商用；而系统楷体（KaiTi / STKai）授权不清且跨平台缺失。配合 Noto Serif CJK SC（OFL）就有了确定的宋 + 楷双家族。繁体版：<a href="https://github.com/lxgw/LxgwWenkaiTC"><code>lxgw/LxgwWenkaiTC</code></a>（816★ / OFL-1.1 / 2026-07-31）。</p>
+
+<h2 id="s3">3. CJK 排版：唯一能直接拿 CSS 的是 heti</h2>
+
+<div class="tbl"><table><thead><tr><th>项目</th><th>star</th><th>license</th><th>最后 push</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/sivan/heti"><code>sivan/heti</code></a></td><td>6714</td><td>MIT</td><td>2025-08-31</td></tr>
+</tbody></table></div>
+
+<p>「赫蹏」，中文内容展示排版增强。README 明写「暂时没什么想做的了」——是功能完成，不是弃坑。</p>
+
+<p><strong>按文件挑规则抄进 <code>app.css</code>，不要整包引</strong>（它是 SCSS + BEM <code>.heti--x</code> 修饰类体系，全量引入会覆盖你的 reset 与字号体系）：</p>
+
+<div class="tbl"><table><thead><tr><th>文件</th><th>内容</th></tr></thead><tbody>
+<tr><td><code>lib/modifiers/ancient.scss</code></td><td>古文/诗词版式。古文段落首行缩进 2em、诗节不缩进居中；<code>heti-meta</code>（作者/朝代）桌面端<strong>悬挂且不占空间</strong>，不破坏标题视觉居中</td></tr>
+<tr><td><code>lib/modifiers/annotation.scss</code></td><td>行间注版式。着重号 <code>text-emphasis: filled circle</code> + <code>text-emphasis-position: under right</code>，<code>non-cjk-block</code> 内关闭</td></tr>
+<tr><td><code>lib/modifiers/writing-mode.scss</code></td><td>竖排</td></tr>
+<tr><td><code>lib/modifiers/column.scss</code></td><td>多栏（双行小注的基础）</td></tr>
+<tr><td><code>lib/fonts/_song.scss</code> / <code>_kai.scss</code> / <code>_hei.scss</code></td><td>分家族字体栈，比单一 <code>--font-serif</code> 分得细</td></tr>
+</tbody></table></div>
+
+<blockquote class="ok"><p><strong>一个可直接采纳的实测约束</strong>：<code>annotation.scss</code> 注释里留了数字——<strong>着重号最小可用行高 1.7，ruby 最小可用行高 2.0</strong>。kbweb 现在 <code>--leading-read: 1.95</code>，正好卡在能上着重号、ruby 会挤的位置。</p></blockquote>
+
+<blockquote class="warn"><p><strong>不要引 <code>heti-addon.js</code></strong>。它做中西文加空格与全角标点挤压，是 DOM 改写，会与命中高亮 <code>&lt;mark&gt;</code> 的渲染打架。</p></blockquote>
+
+<h3 id="s3-1">3.1 标点挤压改用 CSS 原生特性</h3>
+
+<p><a href="https://github.com/sofish/typo.css"><code>sofish/typo.css</code></a>（4542★ / NOASSERTION / 2026-06-25）的 <code>docs/modern-chinese-typography.md</code> 在跟进 <code>text-spacing-trim</code>——CSS 原生标点挤压，Chrome 已发布。配 <code>@supports</code> 降级即可，零运行时成本，也不碰 DOM。比 heti 的 JS 方案干净。</p>
+
+<blockquote class="warn"><p>typo.css 的 license GitHub 未识别（NOASSERTION），用前需读 LICENSE 原文。建议只取 <code>docs/</code> 里的排版结论与用法，不引代码。</p></blockquote>
+
+<h3 id="s3-2">3.2 标点禁则：一条被下调的判断</h3>
+
+<blockquote class="warn"><p><strong>更正</strong>：本文初稿写的是「kbweb 现在的 CSS 没有任何标点禁则处理」。这句话不成立。浏览器默认就按 UAX #14 断行，「。」「，」本来就不会出现在行首；<code>app.css</code> 的 <code>.result__snippet</code> 与 <code>.chunk__text</code> 也早已带了 <code>hanging-punctuation: allow-end</code>，那正是行尾悬挂标点。真实的增量比初稿声称的小得多。</p></blockquote>
+
+<p>CSS 侧还能补的只有 <code>line-break: strict</code>——它收紧 <code>auto</code> 仍然允许、而禁则不允许的剩余情形（小假名、〜、‐ 等）。<strong>是收紧，不是修复。</strong></p>
+
+<div class="tbl"><table><thead><tr><th>项目</th><th>star</th><th>license</th><th>最后 push</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/w3c/clreq"><code>w3c/clreq</code></a></td><td>800</td><td>W3C 文档许可</td><td>2026-07-29</td></tr>
+</tbody></table></div>
+
+<p>《中文排版需求》官方规范，中英简繁三语。<strong>这是规范查询，不是依赖引入。</strong> 需要它来定：标点避头尾、行首行尾标点处理、中西文混排四分之一空、着重号位置、竖排标点旋转与位移、夹注与双行小注的排法。</p>
+
+<h3 id="s3-3">3.3 Han.css：与 heti 二选一，选 heti</h3>
+
+<p><a href="https://github.com/ethantw/Han"><code>ethantw/Han</code></a>（2536★ / MIT / 2026-06-23）竖排与繁体分流比 heti 更完整（大量 <code>:lang()</code> 驱动的简繁分流），但设计极强势——会接管你的字号、行高、字体全部，且 <code>han.js</code> 把标点包成 <code>&lt;h-char&gt;</code> 大改 DOM。<strong>只有在要做繁体竖排时才回头看它。</strong></p>
+
+<h2 id="s4">4. 检索调试抽屉：确实没有先例</h2>
+
+<p>README 称调试抽屉是「整个前端最不像模板的地方」。这不是自我感觉良好。</p>
+
+<p>针对性代码搜索（<code>"reciprocal rank fusion"</code> in tsx、<code>rrf_score</code> in ts、<code>denseScore sparseScore</code>、<code>sparse_rank dense_rank</code>、<code>bm25_rank vector_rank</code>、<code>semantic_rank keyword_rank</code>、<code>vectorRank keywordRank</code>）<strong>全部零命中，或只命中后端算法实现与营销官网文案</strong>。</p>
+
+<p>没有任何现成项目同时做到「左右并列 dense/sparse 两路原始命中 + 每条显示各路名次 + RRF 融合后名次与各自贡献」。</p>
+
+<p>原因不难理解：会做 RRF 的项目要么把它藏在后端（<code>rrf.ts</code> 之类工具文件遍地都是），要么前端只暴露融合后的最终分。把融合过程摊开给人看，只有做检索平台的人才有动机，而这些人的 UI 通常是 Kibana / Dashboards 插件，不面向终端用户。</p>
+
+<p><strong>但它由三块已有实现拼成，license 全部可安全移植：</strong></p>
+
+<div class="tbl"><table><thead><tr><th>kbweb 需要的部分</th><th>抄哪里</th><th>star</th><th>license</th><th>最后 push</th><th>差在哪</th></tr></thead><tbody>
+<tr><td>左右并列两组结果 + 同一条目 SVG 连线 + 名次差着色</td><td><a href="https://github.com/opensearch-project/dashboards-search-relevance"><code>opensearch-project/dashboards-search-relevance</code></a> → <code>public/components/query_compare/search_result/visual_comparison/</code></td><td>28</td><td>Apache-2.0</td><td>2026-08-06</td><td>对比的是「查询配置 A vs B」而非「dense 路 vs sparse 路」；EUI + OSD 平台绑定，必须移植</td></tr>
+<tr><td><code>trace: true</code> 请求 flag + 分阶段响应契约</td><td><a href="https://github.com/Shadow-Weave/HMS"><code>Shadow-Weave/HMS</code></a> → <code>interface/console/src/components/search-debug-view.tsx</code></td><td>549</td><td>MIT</td><td>2026-08-05</td><td>纵向堆叠非左右并列；只给融合后分数，<strong>不回溯各路原始名次</strong>；50KB 单文件</td></tr>
+<tr><td>每条命中并排显示 融合分 / 词法分 / 向量分</td><td><a href="https://github.com/infiniflow/ragflow"><code>infiniflow/ragflow</code></a> → <code>web/src/pages/dataset/testing/testing-result.tsx</code></td><td>87022</td><td>Apache-2.0</td><td>2026-08-07</td><td>显示的是<strong>相似度分数</strong>不是<strong>名次</strong>；单栏列表；无融合过程展开</td></tr>
+<tr><td>把最终分拆解成加权项</td><td><a href="https://github.com/o19s/splainer-search"><code>o19s/splainer-search</code></a></td><td>28</td><td>Apache-2.0</td><td>2026-04-24</td><td>只懂 Lucene <code>explain</code> 树，完全不懂 RRF；AngularJS</td></tr>
+</tbody></table></div>
+
+<h3 id="s4-1">4.1 建议的移植路径</h3>
+
+<p><strong>OpenSearch 那个只有 28 星，但它把最难的部分已经写好且有单测。</strong> 具体文件：</p>
+
+<ul>
+<li><code>visual_comparison.tsx</code>（24KB）——左右两栏并列，每条带 <code>rank: index + 1</code>；<code>calculateStatistics()</code> 算 <code>inBoth / onlyInResult1 / onlyInResult2 / unchanged / improved / worsened</code>；按 <code>item1.rank &gt; item2.rank</code> 给条目上色</li>
+<li><code>connection_lines.tsx</code> + <code>result1ItemsRef</code> / <code>result2ItemsRef</code>——用 ref 测量两栏中同一文档的 DOM 位置，<strong>画 SVG 连线</strong>，线色编码名次变化</li>
+<li><code>item_detail_hover_pane.tsx</code>、<code>highlight_text.tsx</code></li>
+<li><code>__tests__/</code> 五个测试文件（含 <code>connection_lines.test.tsx</code>），可当行为规格读</li>
+</ul>
+
+<p>把「配置 A vs 配置 B」换成「dense 路 vs sparse 路」，把 rank delta 换成 RRF 贡献即可。</p>
+
+<p><strong>数据契约抄 HMS</strong>：请求侧只在 payload 加 <code>trace: true</code>，响应带 <code>data.trace</code>，分 <code>PARALLEL RETRIEVAL → RRF Fusion → Reranked</code> 三阶段。它的 <code>viewMode: "results" | "trace" | "json"</code> 三态切换也值得参考。注意其单文件 50KB <strong>严重违反项目 800 行上限，移植时必须拆</strong>。</p>
+
+<p><strong>结果卡片元信息行抄 RAGFlow</strong>：<code>testing-result.tsx</code> 顶部把三个分数以斜体小字并排：</p>
+
+<pre><code>{ field: 'similarity',        label: 'Hybrid Similarity' },
+{ field: 'term_similarity',   label: 'Term Similarity' },
+{ field: 'vector_similarity', label: 'Vector Similarity' },</code></pre>
+
+<p>配套 <code>web/src/components/similarity-slider/index.tsx</code> 是 <code>vector_similarity_weight</code> 调参滑块。</p>
+
+<blockquote class="warn"><p>RAGFlow 的高亮是<strong>关键词回填</strong>，与 kbweb 的偏移量契约冲突，这块别抄。</p></blockquote>
+
+<h3 id="s4-2">4.2 其他调参与可视化参考</h3>
+
+<div class="tbl"><table><thead><tr><th>项目</th><th>star</th><th>license</th><th>最后 push</th><th>价值</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/qdrant/qdrant-web-ui"><code>qdrant/qdrant-web-ui</code></a></td><td>419</td><td>Apache-2.0</td><td>2026-08-04</td><td>后端就是 Qdrant，栈天然对齐。<code>SearchQualityPanel.jsx</code> + <code>check-index-precision.js</code> 量化 HNSW 近似检索的精度损失；<code>VisualizeChart/</code> 用 PCA + WebGL 散点摊开命中集合。<strong>纯 dense 视角，无 sparse 路</strong></td></tr>
+<tr><td><a href="https://github.com/o19s/quepid"><code>o19s/quepid</code></a></td><td>343</td><td>Apache-2.0</td><td>2026-08-07</td><td>相关性评测工业标准。抄<strong>概念模型</strong>（case / query / rating / snapshot / diff）而非代码——把调参从肉眼观察变成可回归流程。Rails + AngularJS 老栈</td></tr>
+<tr><td><a href="https://github.com/langfuse/langfuse"><code>langfuse/langfuse</code></a></td><td>32691</td><td>⚠️ MIT + <code>ee/</code> 企业许可</td><td>2026-08-07</td><td>trace 详情页的「时间轴 + 可折叠嵌套 span」布局。抄前须确认目标文件不在 <code>web/src/ee/</code></td></tr>
+<tr><td><a href="https://github.com/Arize-ai/phoenix"><code>Arize-ai/phoenix</code></a></td><td>10929</td><td>⚠️ <strong>Elastic License 2.0（非 OSI）</strong></td><td>2026-08-07</td><td>retrieval evaluation 视图值得看，<strong>只看不抄</strong></td></tr>
+<tr><td><a href="https://github.com/explodinggradients/ragas"><code>explodinggradients/ragas</code></a></td><td>15173</td><td>Apache-2.0</td><td>2026-02-24</td><td>纯评测库，<strong>基本没有 UI</strong>（pandas/notebook 输出）。对界面诉求帮助有限</td></tr>
+</tbody></table></div>
+
+<h2 id="s5">5. 搜索 UI 组件库：抄契约，不抄组件</h2>
+
+<p>这一类全是受控 React/Vue 组件，与 Flask SSR 正面冲突。价值在<strong>设计契约</strong>。</p>
+
+<div class="tbl"><table><thead><tr><th>项目</th><th>star</th><th>license</th><th>最后 push</th><th>值得抄什么</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/algolia/instantsearch"><code>algolia/instantsearch</code></a></td><td>4055</td><td>MIT</td><td>2026-08-07</td><td><code>Highlight</code> / <code>Snippet</code> widget 的契约：组件只接收后端已标注的片段，前端零匹配逻辑——<strong>与 kbweb「后端给偏移、前端只切分」同一哲学</strong>。<code>CurrentRefinements</code> + <code>ClearRefinements</code> 是多维 facet 的可撤销 chip 标准模式</td></tr>
+<tr><td><a href="https://github.com/elastic/search-ui"><code>elastic/search-ui</code></a></td><td>1979</td><td>Apache-2.0</td><td>2026-08-05</td><td><strong>URL 状态同步</strong>（<code>trackUrlState</code>）：检索词、模式、过滤器、分页全落 query string。kbweb 的「模式切换 + 来源/章节过滤」正需要，且是可分享链接的前提</td></tr>
+<tr><td><a href="https://github.com/searchkit/searchkit"><code>searchkit/searchkit</code></a></td><td>4859</td><td>Apache-2.0</td><td>2026-04-04</td><td>adapter 层范本：如何把自家 REST 响应映射成 InstantSearch 数据结构</td></tr>
+<tr><td><a href="https://github.com/typesense/typesense-instantsearch-adapter"><code>typesense/typesense-instantsearch-adapter</code></a></td><td>525</td><td>MIT</td><td>2026-07-08</td><td>约 200 行的<strong>最小 adapter 实现</strong>，演示 highlight 字段 / facet counts / 分页参数三者对齐。想写 shim 抄这个比抄 Searchkit 快</td></tr>
+<tr><td><a href="https://github.com/meilisearch/meilisearch-js-plugins"><code>meilisearch/meilisearch-js-plugins</code></a></td><td>532</td><td>MIT</td><td>2026-08-01</td><td>Meilisearch 本身做 hybrid search，可看 <code>semanticRatio</code> 之类混合参数如何暴露给 UI</td></tr>
+</tbody></table></div>
+
+<h2 id="s6">6. RAG 系统自带前端</h2>
+
+<div class="tbl"><table><thead><tr><th>项目</th><th>star</th><th>license</th><th>最后 push</th><th>结论</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/infiniflow/ragflow"><code>infiniflow/ragflow</code></a></td><td>87022</td><td><strong>Apache-2.0</strong></td><td>2026-08-07</td><td>本类最值得看且 license 最干净。见 §4</td></tr>
+<tr><td><a href="https://github.com/Mintplex-Labs/anything-llm"><code>Mintplex-Labs/anything-llm</code></a></td><td>64456</td><td><strong>MIT</strong></td><td>2026-08-06</td><td>引用折叠卡交互（默认收起、展开显示原文片段 + 文档名 + 相似度）可直接用。但无独立检索页，一切在 chat 语境</td></tr>
+<tr><td><a href="https://github.com/onyx-dot-app/onyx"><code>onyx-dot-app/onyx</code></a></td><td>31480</td><td>⚠️ MIT + Onyx Enterprise</td><td>2026-08-07</td><td><strong>license 恰好卡在要看的地方</strong>：<code>web/src/ee/sections/SearchUI.tsx</code>、<code>SearchCard.tsx</code>、<code>ee/lib/search/svc.ts</code> 全在 ee 下，<strong>不可借鉴</strong>。MIT 侧可看 <code>components/search/DocumentDisplay.tsx</code>、<code>components/filters/SourceSelector.tsx</code></td></tr>
+<tr><td><a href="https://github.com/langgenius/dify"><code>langgenius/dify</code></a></td><td>151690</td><td>⚠️ 改版 Apache-2.0</td><td>2026-08-07</td><td>LICENSE 明确禁止移除或修改<strong>前端 LOGO 与版权信息</strong>，且「前端」定义为 <code>web/</code> 目录全部内容。<strong><code>web/</code> 下任何东西都不建议移植</strong></td></tr>
+<tr><td><a href="https://github.com/khoj-ai/khoj"><code>khoj-ai/khoj</code></a></td><td>36369</td><td>⚠️ <strong>AGPL-3.0</strong></td><td>2026-08-02</td><td>传染性，只看不抄</td></tr>
+<tr><td><a href="https://github.com/xr843/fojin"><code>xr843/fojin</code></a></td><td>327</td><td>Apache-2.0</td><td>2026-08-07</td><td><strong>和 kbweb 最像的同类系统</strong>：佛教数字文本平台，10500+ 文本、613 来源、三语跨藏检索 + AI 问答。看它的检索结果呈现与跨藏对照的信息架构</td></tr>
+<tr><td><a href="https://github.com/linagora/openrag"><code>linagora/openrag</code></a></td><td>237</td><td>⚠️ AGPL-3.0</td><td>2026-08-02</td><td><code>ui/src/pages/admin/presets.tsx</code> 有 RRF 检索预设配置界面。AGPL + 社区薄，仅视觉参考</td></tr>
+<tr><td><a href="https://github.com/morphik-org/morphik-core"><code>morphik-org/morphik-core</code></a></td><td>3704</td><td>⚠️ <strong>BSL 1.1</strong></td><td>2026-07-23</td><td>非 OSI 开源（Change Date 2029-06-18）。排除</td></tr>
+</tbody></table></div>
+
+<p><strong>已排除</strong>：<code>weaviate/Verba</code>（7713★ 但<strong>已 archived</strong>）、<code>QuivrHQ/quivr</code>（39392★，push 2025-07-09，已转型 SDK、前端弃管）、<code>SciPhi-AI/R2R-Application</code>（176★，push 2025-05-02，15 个月停更）。</p>
+
+<h2 id="s7">7. 阅读器与锚定</h2>
+
+<h3 id="s7-1">7.1 一条被下调的建议</h3>
+
+<p>第三路调研提出「偏移量锚点很脆，切块变了就全断」，建议引入 Hypothesis 的多重 selector 降级链。<strong>白盒验证后这条对检索结果高亮不成立。</strong></p>
+
+<p><code>kbweb/filters.py:33-39</code> 的 <code>highlight_segments</code> 已经做了防御：</p>
+
+<pre><code>if isinstance(start, int) and isinstance(end, int) and 0 &lt;= start &lt; end &lt;= len(text)</code></pre>
+
+<p>span 越界或重叠一律丢弃，坏负载<strong>退化成纯文本</strong>而不是打乱正文。而且 <code>text</code> 与 <code>spans</code> 来自同一次响应，天然自洽，不存在漂移。</p>
+
+<blockquote><p>真正有漂移风险的只是 <code>/read/&lt;id&gt;</code> 的深链锚定——重建索引后 chunk id 变了，分享出去的链接会失准。这是个小得多的问题。</p></blockquote>
+
+<div class="tbl"><table><thead><tr><th>项目</th><th>star</th><th>license</th><th>最后 push</th><th>价值</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/hypothesis/client"><code>hypothesis/client</code></a></td><td>717</td><td>BSD-2-Clause</td><td>2026-08-05</td><td><code>src/annotator/anchoring/</code> 的多重 selector 降级链：<code>TextPositionSelector</code>（偏移，快但脆）→ <code>TextQuoteSelector</code>（引文 + 前后缀，慢但抗漂移）→ <code>RangeSelector</code>。<strong>对深链锚定有价值，对结果高亮无必要</strong></td></tr>
+</tbody></table></div>
+
+<h3 id="s7-2">7.2 阅读器技术底座</h3>
+
+<div class="tbl"><table><thead><tr><th>项目</th><th>star</th><th>license</th><th>最后 push</th><th>价值</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/johnfactotum/foliate-js"><code>johnfactotum/foliate-js</code></a></td><td>1056</td><td><strong>MIT</strong></td><td>2026-05-01</td><td><strong>最干净的底座</strong>：无框架无依赖。核心价值是<strong>定位模型</strong>——CFI 与 <code>getTarget()</code> / <code>select()</code> API，「给我一个位置标识，滚到那儿并标出来」正是 kbweb「锚定到命中段」需要的抽象。把 CFI 换成「文档 id + 段 id + 字符偏移」即可</td></tr>
+<tr><td><a href="https://github.com/futurepress/epub.js"><code>futurepress/epub.js</code></a></td><td>6941</td><td>BSD-3 类</td><td>2026-03-24</td><td><code>Rendition</code> / <code>Location</code> / <code>Annotation</code> 三层分离。<strong>关键</strong>：高亮用绝对定位 SVG rect 叠加层而非 wrap <code>&lt;mark&gt;</code>，不破坏原文 DOM 与偏移量的对应关系——正好契合 kbweb 的契约</td></tr>
+<tr><td><a href="https://github.com/GoogleChromeLabs/text-fragments-polyfill"><code>GoogleChromeLabs/text-fragments-polyfill</code></a></td><td>128</td><td>Apache-2.0</td><td>2026-06-22</td><td>URL Text Fragments（<code>#:~:text=</code>）。「可分享的深链直达某段」的浏览器原生语义参考，可作降级兜底</td></tr>
+<tr><td><a href="https://github.com/readest/readest"><code>readest/readest</code></a></td><td>23179</td><td>⚠️ <strong>AGPL-3.0</strong></td><td>2026-08-07</td><td>连续滚动 + 分页双模式、批注锚定、进度记忆做得完整。<strong>只作交互参考，别拷代码</strong>（其内部渲染用的正是 foliate-js）</td></tr>
+<tr><td><a href="https://github.com/ambuda-org/ambuda"><code>ambuda-org/ambuda</code></a></td><td>120</td><td>MIT</td><td>2026-05-11</td><td>梵语数字图书馆。<strong>做得最好的「古典语言阅读界面」参考</strong>：长篇古典文本单栏阅读、逐词注释联动、扫描页与转写对照。看布局不看色彩</td></tr>
+</tbody></table></div>
+
+<p><strong>已排除</strong>：<code>agentcooper/react-pdf-highlighter</code>（1402★，push 2024-11-22，超 18 个月红线）及其分支 <code>DanielArnould/react-pdf-highlighter-extended</code>（同日停更）。<code>zotero/reader</code>（202★）license 文件为 <code>COPYING</code>，GitHub 标 Other，未定性，不推荐作移植源。</p>
+
+<h2 id="s8">8. CSS 基础层：只做两件小事</h2>
+
+<div class="tbl"><table><thead><tr><th>项目</th><th>star</th><th>license</th><th>最后 push</th><th>建议</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/sindresorhus/modern-normalize"><code>sindresorhus/modern-normalize</code></a></td><td>7379</td><td>MIT</td><td>2026-06-25</td><td><strong>成本最低、收益最确定的一条</strong>：若 <code>app.css</code> 顶部仍手写 reset，直接 vendor 这一个文件替换</td></tr>
+<tr><td><a href="https://github.com/argyleink/open-props"><code>argyleink/open-props</code></a></td><td>5490</td><td>MIT</td><td>2026-01-31</td><td>有现成的 <code>src/props.colors-oklch.css</code> 与 <code>props.gray-oklch.css</code>，正对 kbweb 的 oklch 取向。<strong>抄色阶命名法与 easing/shadow 组，不整包引</strong>（最后 release 是 2023-09 的 v1.6.0，节奏很慢）</td></tr>
+</tbody></table></div>
+
+<blockquote class="warn"><p><strong>不要整包引入任何 classless 框架。</strong> 它们的价值恰恰在于「你还没有设计取向」，kbweb 已有明确立场，引进来只会打架。</p></blockquote>
+
+<div class="tbl"><table><thead><tr><th>项目</th><th>star</th><th>license</th><th>最后 push</th><th>为何不引</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/picocss/pico"><code>picocss/pico</code></a></td><td>16766</td><td>MIT</td><td>2026-05-09</td><td>变量三层分法（原始值 → 语义变量 → 组件变量）值得看，表单元素样式可对照。但<strong>色彩体系是 HSL，无 oklch</strong>，与 kbweb 方向不一致</td></tr>
+<tr><td><a href="https://github.com/bigskysoftware/missing"><code>bigskysoftware/missing</code></a></td><td>797</td><td>BSD-2</td><td>2026-06-13</td><td>哲学最贴近（承认纯 classless 不够，给克制的类名扩展）。但生态小，风格偏工程感</td></tr>
+<tr><td><a href="https://github.com/kevquirk/simple.css"><code>kevquirk/simple.css</code></a></td><td>4967</td><td>MIT</td><td>2026-07-19</td><td>阅读器排版基线可对照。classless 无法表达结果卡片、任务状态等结构组件</td></tr>
+<tr><td><a href="https://github.com/dbohdan/classless-css"><code>dbohdan/classless-css</code></a></td><td>2368</td><td>无 license</td><td>2026-04-03</td><td>69 个主题的带截图目录，<strong>纯查找工具</strong>，别当依赖</td></tr>
+</tbody></table></div>
+
+<p><strong>已停更</strong>：<code>kognise/water.css</code>（8648★，2024-02）、<code>xz/new.css</code>（4038★，2024-03）、<code>vladocar/Basic.css</code>（688★，2021-01）、<code>elad2412/the-new-css-reset</code>（2342★，2024-08）。<strong>因构建链排除</strong>：<code>hunvreus/basecoat</code>（4223★ / MIT / 活跃，但基于 Tailwind）。</p>
+
+<h2 id="s9">9. htmx / Jinja 组件化：要么两个一起上，要么都不上</h2>
+
+<h3 id="s9-1">9.1 Flask + htmx 没有值得推荐的模板</h3>
+
+<div class="tbl"><table><thead><tr><th>项目</th><th>排除原因</th></tr></thead><tbody>
+<tr><td><code>edmondchuc/flask-htmx</code></td><td>156★，push 2024-09-22（23 个月）。且只是把 <code>HX-Request</code> 头包一层，20 行的事</td></tr>
+<tr><td><code>testdrivenio/flask-htmx-tailwind</code></td><td>87★，push 2024-01-31</td></tr>
+<tr><td>其余 flask-htmx 搜索结果</td><td>全部 ≤37★，多为教程 / hello-world</td></tr>
+</tbody></table></div>
+
+<h3 id="s9-2">9.2 库本体才是实际会用的</h3>
+
+<div class="tbl"><table><thead><tr><th>项目</th><th>star</th><th>license</th><th>最后 push</th><th>说明</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/bigskysoftware/htmx"><code>bigskysoftware/htmx</code></a></td><td>48901</td><td>BSD-2（GitHub 标 NOASSERTION）</td><td>2026-08-05</td><td>单文件约 14KB，<code>static/vendor/htmx.min.js</code> 一放即用，零构建零 npm。<strong>kbweb 唯一真正符合约束的「SPA 级交互」路径</strong>，且渐进增强模型天生服务「JS 挂了仍能用」</td></tr>
+<tr><td><a href="https://github.com/alpinejs/alpine"><code>alpinejs/alpine</code></a></td><td>31845</td><td>MIT</td><td>2026-07-28</td><td>同样单文件可 vendor。但对 6 个页面很可能过度工程</td></tr>
+<tr><td><a href="https://github.com/starfederation/datastar"><code>starfederation/datastar</code></a></td><td>4815</td><td>MIT</td><td>2026-08-05</td><td>htmx + Alpine 的 SSE 驱动替代品。对任务轮询页有意义，但生态远不如 htmx 成熟。<strong>可以看，别现在押注</strong></td></tr>
+</tbody></table></div>
+
+<blockquote class="warn"><p><strong>关键判断</strong>：若引 htmx，就应连带引 <a href="https://github.com/sponsfreixes/jinja2-fragments"><code>sponsfreixes/jinja2-fragments</code></a>（366★ / MIT / 2026-04-16），否则分页与任务轮询会被迫为每个片段单开模板文件。这是<strong>要么两个一起上、要么都不上</strong>的决定。</p></blockquote>
+
+<p>而 kbweb 目前 4 个原生 JS 文件（<code>theme.js</code> / <code>drawer.js</code> / <code>reader.js</code> / <code>jobs.js</code>）还没到撑不住的规模。</p>
+
+<blockquote><p><code>hunvreus/devpush</code>（4739★ / MIT / 2026-03-03）虽因依赖 npm 构建链而不适配，但它的 <code>cp node_modules/.../dist/*.min.js ./assets/</code> 脚本揭示了一个可用做法：<strong>htmx / Alpine 的分发产物就是单文件，vendored 进 <code>static/</code> 即可，完全不需要 npm。</strong></p></blockquote>
+
+<h3 id="s9-3">9.3 Jinja 组件化：现在什么都不做</h3>
+
+<div class="tbl"><table><thead><tr><th>项目</th><th>star</th><th>license</th><th>最后 push</th><th>判断</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/jpsca/jinjax"><code>jpsca/jinjax</code></a></td><td>430</td><td>MIT</td><td>2026-06-18</td><td>唯一够格的候选（<code>&lt;Card title="x"&gt;</code> 组件语法、props + slot、零构建纯 Python 侧）。<strong>但作者已在推后继项目 <code>jx</code>（有 <code>jpsca/jx-migrate</code> 迁移工具），是真实押注风险</strong>；且引入非标准 Jinja 语法会退化编辑器高亮与 <code>jinja-lsp</code></td></tr>
+<tr><td><a href="https://github.com/mikeckennedy/jinja_partials"><code>mikeckennedy/jinja_partials</code></a></td><td>237</td><td>MIT</td><td>2026-07-22</td><td>几十行代码，解决 <code>{% include %}</code> 依赖外层变量名的耦合。<strong>真到重复难忍时，看一眼实现自己写个 Jinja global 即可，比引依赖划算</strong></td></tr>
+<tr><td><a href="https://github.com/volfpeter/htmy"><code>volfpeter/htmy</code></a></td><td>399</td><td>MIT</td><td>2026-07-22</td><td><strong>跳过</strong>。它是 Jinja 的替代品而非补强，采用意味着放弃全部现有 <code>templates/</code></td></tr>
+</tbody></table></div>
+
+<p>6 个页面的规模大概率还没到 <code>{% macro %}</code> 撑不住的临界点。</p>
+
+<h2 id="s10">10. 明确跳过</h2>
+
+<div class="tbl"><table><thead><tr><th>方向</th><th>理由</th></tr></thead><tbody>
+<tr><td><strong>TEI Publisher 全链</strong></td><td>eXist-db + XQuery 后端，且 <code>eeditiones/tei-publisher-components</code> 是 <strong>GPL-3.0 传染</strong>（主应用 <code>tei-publisher-app</code> 更无 license 声明）。若日后语料有 TEI 标注，走 <a href="https://github.com/TEIC/CETEIcean"><code>TEIC/CETEIcean</code></a>（183★ / <strong>BSD-2</strong> / 2026-06-25）——只把 XML 变成 custom elements，样式仍归你写，与手写 CSS 取向兼容</td></tr>
+<tr><td><strong>Omeka S / Islandora</strong></td><td>PHP / Drupal，主题层无任何可迁移 CSS。Islandora 主题生态实质已死（<code>islandora-deprecated/carapace</code> 明标 DEPRECATED，其余停在 2015-2016）</td></tr>
+<tr><td><strong>Vivliostyle</strong></td><td>776★ / <strong>AGPL-3.0</strong> / 活跃。CJK 竖排 + 分页最完整，但解决的是<strong>分页印刷</strong>，kbweb 是连续滚动。除非将来做「导出古籍版式 PDF」</td></tr>
+<tr><td><strong>LaTeX.css / Gutenberg</strong></td><td><code>vincentdoerig/latex-css</code>（3472★）气质是学术论文不是善本；<code>matejlatin/Gutenberg</code>（2845★，2022-11 停更）纯拉丁排版。都是「另一种 opinionated 外观」，混进来只会稀释已有立场</td></tr>
+<tr><td><strong>IIIF 全家桶</strong></td><td>除非接书影扫描页，完全用不上。真要接时选 <a href="https://github.com/samvera-labs/clover-iiif"><code>samvera-labs/clover-iiif</code></a>（86★ / MIT / 2026-07-07，React 组件、易主题化），<strong>别选 Mirador</strong>（613★ / Apache-2.0，Material-UI 会整块进来，与「灯下绢本」正面冲突）。注意 samvera-labs 是实验室命名空间，同组织的 <code>nectar-iiif</code>、<code>bloom-iiif</code> 已停更。<code>digirati-co-uk/canvas-panel</code>（34★，2023-11）事实停更</td></tr>
+<tr><td><strong>Astro / Hugo 通用主题生态</strong></td><td><code>--topic=astro-theme</code> 前 20 全是 AstroWind / AstroPaper / Astroship 这类 Tailwind 落地页模板，正是要避开的。唯一例外见下</td></tr>
+<tr><td><code>garywill/vert-cjk-web</code></td><td>78★ / AGPL-3.0 / 2022-10 停更、作者自标 alpha。竖排走 heti 的 <code>writing-mode.scss</code> 或 Han.css</td></tr>
+<tr><td><code>zmmbreeze/Entry.css</code> / <code>lining.js</code></td><td>2015 / 2020 停更，无 license。思路已被 <code>text-spacing-trim</code> 等原生特性取代，仅作历史阅读</td></tr>
+</tbody></table></div>
+
+<p><strong>唯一例外的参数来源</strong>：<a href="https://github.com/radishzzz/astro-theme-retypeset"><code>radishzzz/astro-theme-retypeset</code></a>（684★ / MIT / 2026-04-12）「重新编排」，明确以纸质书阅读体验为目标，六语支持、中文一等公民。<strong>单独看它的 CSS 变量表</strong>——中文正文测量宽度、段间距、行高的取值组合，以及中英混排字体切换策略。当第二意见校准 <code>--leading-read</code> / <code>--measure-read</code>，<strong>不当代码来源</strong>（Astro + UnoCSS 架构无交集）。同类的 <code>moeyua/astro-theme-typography</code>（618★，2026-02-17）是其灵感来源，取其一即可。</p>
+
+<h3 id="s10-1">10.1 视觉参考（非代码）</h3>
+
+<div class="tbl"><table><thead><tr><th>项目</th><th>star</th><th>license</th><th>最后 push</th><th>用途</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/shanleiguang/vRain"><code>shanleiguang/vRain</code></a></td><td>1644</td><td>MIT</td><td>2026-06-14</td><td>中文古籍<strong>刻本风格直排</strong>电子书生成器（Perl → PDF）。价值在其背景图配置：栏线、鱼尾、版心、天头地脚的比例关系，以及纸张墨色取值。想让 <code>--paper-edge</code> / <code>--shadow-page</code> 更像善本时的最佳比例来源。<strong>技术栈零重叠，别试图移植</strong></td></tr>
+<tr><td><a href="https://github.com/edwardtufte/tufte-css"><code>edwardtufte/tufte-css</code></a></td><td>6539</td><td>MIT</td><td>2026-06-24</td><td>只有一样值得抄：<strong>边注（sidenote）的纯 CSS 实现</strong>——<code>&lt;label&gt;</code> + 隐藏 checkbox + <code>float</code>，桌面端浮在正文右侧，窄屏塌陷为可展开内联注。<strong>无 JS</strong>，是「左侧 ordinal 刻度 + 右侧注疏」的自然延伸。⚠️ 字体 / 配色 / 1400px 双栏总宽都是拉丁语境，<strong>CJK 下它的 1.5rem 行高完全不够</strong>，kbweb 的 1.9/1.95 是对的</td></tr>
+<tr><td><a href="https://github.com/programminghistorian/jekyll"><code>programminghistorian/jekyll</code></a></td><td>548</td><td>无 license 声明</td><td>2026-08-07</td><td>真实运行多年的多语言学术长文站，正文版式与目录导航经实战检验。<strong>看渲染结果，不看 Jekyll 代码</strong></td></tr>
+</tbody></table></div>
+
+<h2 id="s11">11. License 红线汇总</h2>
+
+<p>自托管开源项目需回避或谨慎：</p>
+
+<div class="tbl"><table><thead><tr><th>授权</th><th>项目</th><th>影响</th></tr></thead><tbody>
+<tr><td><strong>AGPL-3.0</strong></td><td><code>khoj-ai/khoj</code>、<code>readest/readest</code>、<code>linagora/openrag</code>、<code>vivliostyle/vivliostyle.js</code>、<code>simple-login/app</code>、<code>garywill/vert-cjk-web</code></td><td>传染性，只看不抄</td></tr>
+<tr><td><strong>MIT + <code>ee/</code> 企业许可</strong></td><td><code>onyx-dot-app/onyx</code>（搜索 UI 恰好全在 <code>web/src/ee/</code>）、<code>langfuse/langfuse</code></td><td>抄前须确认目标文件不在 ee 下</td></tr>
+<tr><td><strong>改版 Apache-2.0</strong></td><td><code>langgenius/dify</code></td><td>LICENSE 明确禁止修改 <code>web/</code> 目录的 LOGO 与版权信息，条款直接针对前端</td></tr>
+<tr><td><strong>BSL 1.1</strong></td><td><code>morphik-org/morphik-core</code></td><td>非 OSI 开源，Change Date 2029-06-18</td></tr>
+<tr><td><strong>Elastic License 2.0</strong></td><td><code>Arize-ai/phoenix</code></td><td>非 OSI 开源，禁止作为托管服务提供给第三方</td></tr>
+<tr><td><strong>GPL-3.0</strong></td><td><code>eeditiones/tei-publisher-components</code>、<code>omeka/omeka-s</code></td><td>传染性</td></tr>
+<tr><td><strong>无 license / NOASSERTION</strong></td><td><code>sofish/typo.css</code>、<code>dbohdan/classless-css</code>、<code>programminghistorian/jekyll</code>、<code>tonyhuan/GuanKiapTsingKhai</code>、<code>zotero/reader</code>、<code>hoveychen/guwen-reader</code>、<code>lhw828/GuWen</code></td><td>无授权声明 = 默认保留所有权利，不可拷贝</td></tr>
+</tbody></table></div>
+
+<h2 id="s12">12. 两个诚实的判断</h2>
+
+<p><strong>一、中文古籍前端生态基本是空的。</strong> ctext.org / 殆知阁 / 中国哲学书电子化计划<strong>都没有开源前端</strong>——<code>ctext</code> 关键词命中的全是同名无关项目，<code>dsturgeon</code> 名下无公开仓库。<strong>Kanripo 生态已死</strong>：<code>kanripo/krp-docs</code>（1★）、<code>DHSinology/Kanripo-data</code>（4★ / 2024）、<code>kanripox/kanripox-dev</code>（0★ / 2022）全是数据仓库，无前端。<code>hoveychen/guwen-reader</code>（1★，无 license）与 <code>lhw828/GuWen</code>（45★，无 license，2025-02 停更）只有语料价值。<strong>这一类里能真正用的只有 heti 一个，这就是全部。</strong></p>
+
+<p><strong>二、检索调试抽屉在 GitHub 上确实没有先例。</strong> 见 §4 的搜索证据。kbweb 在这一点上不是自我感觉良好——它是真的空白。</p>
+
+<h2 id="s13">13. 行动清单</h2>
+
+<p>按投入产出排序。</p>
+
+<h3 id="s13-1">必做 — 已于 2026-08-08 全部落地</h3>
+
+<ol>
+<li>✅ <strong>字体自托管 + 子集化</strong>（§2）——<code>deploy/build-fonts.py</code>：抓取 Noto Serif SC 与霞鹜文楷（均 OFL-1.1），经 <code>cn-font-split</code> 切成 382 + 313 个 unicode-range 分片。<code>tokens.css</code> 拆出 <code>--font-song</code> / <code>--font-kai</code>，<code>--font-serif</code> 保留为别名。脚本没跑过时 <code>base.html</code> 不 link 字体样式表，回落本机字体栈</li>
+<li>✅ <strong>宋楷分工</strong>（§3）——楷体用于 <code>.reader__title</code> 与 <code>.chunk__heading</code>；heti 的行高下限（着重号 1.7 / ruby 2.0）作为约束写进 <code>tokens.css</code> 注释。未引 <code>heti-addon.js</code></li>
+<li>✅ <strong>把 no-JS 做成 pytest 维度</strong>（§1）——<code>KBWEB_NOJS</code> 配置项 + <code>conftest.config</code> 参数化，测试数 44 → 87。<strong>这个维度当场抓到一个真 bug</strong>：调试抽屉带 <code>hidden</code> 属性且只有 <code>drawer.js</code> 能揭开，无脚本时轨迹在 DOM 里却永不显示；现改为内联渲染</li>
+<li>⚠️ <strong>标点禁则</strong>（§3.2）——见该节更正。实际只加了 <code>line-break: strict</code>，因为初稿判断有误</li>
+<li>✅ <strong>标点挤压</strong>（§3.1）——<code>text-spacing-trim</code> + <code>text-autospace</code>，均以 <code>@supports</code> 包裹，零运行时成本</li>
+</ol>
+
+<blockquote class="warn"><p><strong>刻意未做</strong>：古文段首缩进 2em。<code>.chunk__text</code> 用 <code>white-space: pre-wrap</code>，块级 <code>text-indent</code> 只作用于首行，多段落切块会得到不一致的缩进——这不是移植 heti 规则，是引入排版 bug。等切块粒度确定后再单独处理。</p></blockquote>
+
+<h3 id="s13-2">可做（工作量最大，但独特价值最高）</h3>
+
+<ol start="6">
+<li><strong>调试抽屉三合一移植</strong>（§4）——布局与连线抄 OpenSearch <code>visual_comparison/</code>，数据契约抄 HMS 的 <code>trace: true</code>，分数元信息行抄 RAGFlow。三者 license 均可安全移植</li>
+</ol>
+
+<h3 id="s13-3">有明确场景才做</h3>
+
+<ol start="7">
+<li><strong>边注</strong>：抄 tufte-css 的 sidenote 纯 CSS 机制，配色字体全用自己的（§10.1）</li>
+<li><strong>URL 状态同步</strong>：参考 elastic/search-ui 的 <code>trackUrlState</code>（§5）</li>
+<li><strong>深链锚定加兜底</strong>：参考 hypothesis/client 的 quote + prefix/suffix selector（§7.1）</li>
+<li><strong>参数校准</strong>：对照 retypeset 的 CSS 变量表复核 <code>--leading-read</code> / <code>--measure-read</code>（§10）</li>
+<li><strong>CSS 基础层</strong>：vendor <code>modern-normalize</code>；从 open-props 抄 oklch 色阶命名法（§8）</li>
+</ol>
+
+</main>
+</div>
+<footer>调研方法：gh search repos / gh search code / gh api repos 三路并行 · 与 03-frontend-research.md 同源 · 自包含单文件，无外部依赖</footer>
+<script>(function(){var r=document.documentElement;try{var t=localStorage.getItem('kbdoc-theme');
+if(t)r.setAttribute('data-theme',t)}catch(e){}
+document.querySelectorAll('[data-theme-toggle]').forEach(function(b){b.addEventListener('click',function(){
+var cur=r.getAttribute('data-theme')||(window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+var next=cur==='dark'?'light':'dark';r.setAttribute('data-theme',next);
+try{localStorage.setItem('kbdoc-theme',next)}catch(e){}})})})();</script>
+</body>
+</html>
