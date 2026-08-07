@@ -389,12 +389,15 @@ def test_chunks_endpoint_clamps_hostile_parameters(client, chunks_payload):
 
 @pytest.mark.parametrize("path", ["/", "/library", "/ingest/", "/jobs/"])
 @respx.mock
-def test_every_page_declares_both_themes(client, path, sources_payload):
+def test_every_page_declares_both_themes(client, config, path, sources_payload):
     respx.get(f"{API_BASE}/v1/sources").mock(return_value=httpx.Response(200, json=sources_payload))
     respx.get(f"{API_BASE}/v1/documents").mock(return_value=httpx.Response(200, json=[]))
     respx.get(f"{API_BASE}/v1/stats").mock(return_value=httpx.Response(500, json={}))
     respx.get(f"{API_BASE}/v1/jobs").mock(return_value=httpx.Response(200, json=[]))
 
     body = html(client.get(path))
-    assert "data-theme-toggle" in body
     assert "tokens.css" in body
+    # The toggle is script-driven. Under KBWEB_NOJS both themes still resolve
+    # from prefers-color-scheme, so dropping the control is the correct
+    # degradation - a button that does nothing would not be.
+    assert ("data-theme-toggle" in body) is not config.nojs

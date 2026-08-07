@@ -100,7 +100,11 @@
         <div class="results__timing">
           {% if payload.debug %}
             {{ payload.debug.timings_ms.total | ms }}
-            <button class="btn btn--ghost btn--sm" type="button" data-drawer-open>调试</button>
+            {# Only drawer.js can act on this; without it the trace renders
+               inline further down and the button would be a dead control. #}
+            {% if not nojs %}
+              <button class="btn btn--ghost btn--sm" type="button" data-drawer-open>调试</button>
+            {% endif %}
           {% endif %}
         </div>
       </div>

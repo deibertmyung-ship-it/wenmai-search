@@ -5,8 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}文脉检索{% endblock %} · Wenmai Search</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
+{# Self-hosted subset CJK faces, built by deploy/build-fonts.py. Linked only
+   when the shards exist; without them the stacks in tokens.css fall through
+   to whatever the machine has, which is how kbweb rendered before. #}
+{% if webfonts %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/fonts.css') }}">
+{% endif %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📜</text></svg>">
+{% if not nojs %}
 <script>
   // Apply the stored theme before first paint so the page never flashes.
   (function () {
@@ -16,6 +23,7 @@
     } catch (e) { /* private mode: fall back to the media query */ }
   })();
 </script>
+{% endif %}
 </head>
 <body>
 <header class="masthead">
@@ -32,7 +40,12 @@
   </nav>
   <div class="masthead__meta">
     <span>v{{ kbweb_version }}</span>
-    <button class="theme-toggle" type="button" data-theme-toggle aria-label="切换明暗主题">明/暗</button>
+    {# theme.js is what makes this button do anything; without it the theme
+       still follows prefers-color-scheme, so drop the control rather than
+       leave one that does nothing when clicked. #}
+    {% if not nojs %}
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="切换明暗主题">明/暗</button>
+    {% endif %}
   </div>
 </header>
 
@@ -47,7 +60,12 @@
   {% block content %}{% endblock %}
 </main>
 
+{# One gate for every script on the site: child templates put their own tags in
+   the `scripts` block, so suppressing it here suppresses theirs too. Nothing
+   below this line may carry behaviour the page depends on. #}
+{% if not nojs %}
 <script src="{{ url_for('static', filename='js/theme.js') }}" defer></script>
 {% block scripts %}{% endblock %}
+{% endif %}
 </body>
 </html>

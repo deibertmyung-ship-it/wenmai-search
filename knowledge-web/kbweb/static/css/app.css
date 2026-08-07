@@ -302,6 +302,20 @@ mark {
 }
 .drawer[data-open="true"] { transform: translateX(0); }
 
+/* KBWEB_NOJS: nothing can open an overlay, so the trace sits in the flow
+   instead. Same interior styling, none of the overlay machinery. */
+.drawer--inline {
+  position: static;
+  width: auto;
+  max-width: var(--measure);
+  transform: none;
+  overflow: visible;
+  box-shadow: none;
+  border: var(--rule);
+  border-radius: var(--radius-lg);
+  margin-top: var(--space-6);
+}
+
 .drawer__head {
   display: flex; align-items: center; justify-content: space-between;
   gap: var(--space-4); padding-bottom: var(--space-3);

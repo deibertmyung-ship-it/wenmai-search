@@ -28,6 +28,11 @@ class Config:
         default_factory=lambda: int(os.environ.get("KBWEB_READER_PAGE_SIZE", "12"))
     )
     debug_ui: bool = field(default_factory=lambda: _flag("KBWEB_DEBUG_UI", True))
+    # Ship no <script> at all. Every page is server-rendered and every control
+    # is a form or a link, so this is a supported way to run kbweb - not a
+    # degraded one. Making it a config flag rather than a browser setting is
+    # what lets the unit suite assert the no-JS contract on every route.
+    nojs: bool = field(default_factory=lambda: _flag("KBWEB_NOJS", False))
     secret_key: str = field(
         default_factory=lambda: os.environ.get("KBWEB_SECRET_KEY") or secrets.token_hex(32)
     )

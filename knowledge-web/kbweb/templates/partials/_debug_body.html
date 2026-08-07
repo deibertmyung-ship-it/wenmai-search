@@ -1,0 +1,60 @@
+{# The retrieval trace itself. Shared by both presentations in _debug.html -
+   an overlay drawer when scripts can open it, an inline panel when they
+   cannot - so the trace never depends on JavaScript to be readable. #}
+<section class="drawer__section">
+  <h3>耗时</h3>
+  <div class="timings">
+    {% for name, value in payload.debug.timings_ms.items() %}
+      <span class="timing">{{ name }} <strong>{{ value | ms }}</strong></span>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="drawer__section">
+  <h3>查询改写</h3>
+  <div class="timings">
+    {% for variant in payload.debug.rewritten_queries %}
+      <span class="timing">{{ variant }}</span>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="drawer__section">
+  <h3>两路召回（融合前）</h3>
+  <div class="runs">
+    {% for name, hits in payload.debug.retrievers.items() %}
+      <div class="run">
+        <div class="run__head">{{ name }} · {{ hits|length }}</div>
+        {% for hit in hits[:12] %}
+          <div class="run__row">
+            <span class="run__id" title="{{ hit.id }}">{{ hit.rank }}. {{ hit.id | short_id }}</span>
+            <span>{{ hit.score | score(3) }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="drawer__section">
+  <h3>融合后（{{ payload.debug.fusion.method | upper }}, k={{ payload.debug.fusion.k }}）</h3>
+  <div class="run">
+    <div class="run__head">
+      dense×{{ payload.debug.fusion.weights.dense }} · sparse×{{ payload.debug.fusion.weights.sparse }}
+    </div>
+    {% for row in payload.debug.fusion.order %}
+      <div class="run__row run__row--fused">
+        <span class="run__id" title="{{ row.id }}">{{ loop.index }}. {{ row.id | short_id }}</span>
+        <span>
+          {% for retriever, rank in row['from'].items() %}{{ retriever[:1] }}#{{ rank }} {% endfor %}
+          → {{ row.score | score(5) }}
+        </span>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="drawer__section">
+  <h3>下发过滤条件</h3>
+  <pre class="code">{{ payload.debug.filter | tojson(indent=2) }}</pre>
+</section>

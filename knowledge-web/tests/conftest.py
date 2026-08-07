@@ -10,8 +10,15 @@ from kbweb.config import Config
 API_BASE = "http://kbsvc.test"
 
 
-@pytest.fixture
-def config() -> Config:
+@pytest.fixture(params=[False, True], ids=["js", "nojs"])
+def config(request) -> Config:
+    """Every view test runs twice: once normally, once under KBWEB_NOJS.
+
+    kbweb promises the whole site works with no JavaScript. A promise that
+    broad is only worth something if every route carries it, so it is a
+    dimension of the suite rather than one spot-check in the e2e tests -
+    that is how the debug drawer's `hidden` attribute got caught.
+    """
     return Config(
         api_base=API_BASE,
         api_key="kb_test_key",
@@ -21,6 +28,7 @@ def config() -> Config:
         debug_ui=True,
         secret_key="test-secret",
         max_content_length=1024 * 1024,
+        nojs=request.param,
     )
 
 
