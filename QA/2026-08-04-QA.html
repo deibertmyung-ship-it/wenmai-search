@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="文脉检索项目问答整理：2026-08-04 发布与部署，2026-08-05 检索链路核查与 Tantivy 改造，2026-08-06 server profile 部署，2026-08-07 精排评估与分词预计算">
-  <title>文脉检索项目 QA · 2026-08-04 ~ 08-07</title>
+  <meta name="description" content="文脉检索项目问答整理：2026-08-04 发布与部署，2026-08-05 检索链路核查与 Tantivy 改造，2026-08-06 server profile 部署，2026-08-07 精排评估与分词预计算，2026-08-08 前端选型调研与字体、无脚本模式落地">
+  <title>文脉检索项目 QA · 2026-08-04 ~ 08-08</title>
   <style>
     :root {
       color-scheme: light;
@@ -295,10 +295,12 @@
         <strong>08-06：</strong>server profile 落地部署，修掉 compose 模板的六处缺陷，实测过滤行为反转；
         worker 水平扩展方案设计、界面「来源」改称「目录」、按子目录重建分类。
         <strong>08-07：</strong>否决 bge-reranker-v2-m3 精排（理由是算力不是选型），把分词结果改为 ingest 时预计算。
+        <strong>08-08：</strong>调研 GitHub 上的同类前端并否决全部模板，把字体从「设备彩票」改为自托管子集化，
+        把无脚本承诺做成测试维度——它当场抓到一个真 bug。
         所有结论均以对运行中系统的实测为准，推翻的判断也一并保留。
       </p>
       <div class="meta">
-        <span class="pill">日期：2026-08-04 ~ 08-07</span>
+        <span class="pill">日期：2026-08-04 ~ 08-08</span>
         <span class="pill">项目：wenmai-search</span>
         <span class="pill">语料：204 部 / 22,659 段</span>
         <span class="pill">格式：HTML</span>
@@ -341,6 +343,12 @@
       <a href="#lexical-impl">lexical 精排的实现</a>
       <a href="#precompute">分词预计算落地</a>
       <a href="#handover-0807">交付与遗留</a>
+      <strong style="margin-top:18px">08-08 前端调研与落地</strong>
+      <a href="#frontend-survey">前端选型调研</a>
+      <a href="#webfonts">字体是设备彩票</a>
+      <a href="#nojs">无脚本承诺与它抓到的 bug</a>
+      <a href="#cjk-typography">CJK 排版与一次自我推翻</a>
+      <a href="#handover-0808">交付与遗留</a>
     </aside>
 
     <main>
@@ -2035,12 +2043,338 @@ sparse_search         3.6ms</code></pre>
           </div>
         </article>
       </section>
+
+      <hr style="margin:56px 0 40px;border:0;border-top:2px solid var(--line)">
+
+      <p class="eyebrow" style="margin-bottom:8px">2026-08-08</p>
+      <h2 style="margin-top:0">前端：一次调研与三件落地</h2>
+      <p style="color:var(--muted);max-width:760px">
+        这一天先在 GitHub 上调研 kbweb 的同类前端，结论是<strong>不套任何模板</strong>——
+        Flask boilerplate 那一类基本死绝，而 kbweb 早已是有明确取向的成品。
+        调研因此转为补漏，落地了三件：字体自托管、无脚本模式做成测试维度、CJK 排版设定。
+        <strong>其中一条是我自己给出的判断被自己推翻</strong>，一条是先怀疑错了对象，都记在下面。
+      </p>
+
+      <div class="summary" aria-label="08-08 核心结果">
+        <article>
+          <span>87</span>
+          <p>单元测试数，从 37 翻上来——无脚本成为一个维度</p>
+        </article>
+        <article>
+          <span>695</span>
+          <p>unicode-range 字体分片：正文 382 + 楷体 313</p>
+        </article>
+        <article>
+          <span>1</span>
+          <p>新测试维度当场抓到的真 bug：调试轨迹永不显示</p>
+        </article>
+      </div>
+
+      <section id="frontend-survey">
+        <h2>三十一、前端选型调研</h2>
+
+        <article class="qa">
+          <h3 class="question">调研了什么？怎么保证候选不是编出来的？</h3>
+          <div class="answer">
+            <p>三路并行，按「Flask/SSR 脚手架」「搜索与 RAG 前端」「古籍 editorial 界面」分工。
+              每个候选都要求跑 <code>gh api repos/OWNER/NAME</code> 实测 star、license、
+              最后 push、archived 状态，而不是凭印象列名字。</p>
+            <p>这条约束当场淘汰了一大批：<code>hack4impact/flask-base</code>、
+              <code>nuvic/flask_for_startups</code>、<code>MaxHalford/flask-boilerplate</code>
+              三个已归档；<code>realpython/flask-boilerplate</code>（33 个月）、
+              <code>karec/cookiecutter-flask-restful</code>（40 个月）等四个停更两年以上。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">结论为什么是「不套任何模板」？</h3>
+          <div class="answer">
+            <p>唯一还活跃的通用脚手架 <code>cookiecutter-flask</code>（4724★）核心卖点是 webpack
+              资产打包，<strong>正是 kbweb 明确拒绝的东西</strong>。Astro/Hugo 的 editorial 主题
+              生态里 <code>--topic=astro-theme</code> 排序前 20 全是 Tailwind 落地页模板。</p>
+            <p>更关键的是 kbweb 本身：135 行 <code>tokens.css</code> 里每个值都带理由注释，
+              <code>search.html</code> 连「复选框未勾选时浏览器不提交」这种坑都用隐藏
+              <code>f=1</code> 标记处理并有测试守着。这不是待填的骨架，套模板只会稀释已有立场。</p>
+            <p>真正有价值的不是模板，是一个<strong>同构的活体应用</strong>：
+              <code>benbusby/whoogle-search</code>（11594★ / MIT / 三天前还在推）——
+              自托管元搜索引擎，Flask SSR + httpx 打上游 + 自己不存数据，与 kbweb 形态几乎一一对应。
+              当天落地的无脚本测试维度就是从它抄的。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">检索调试抽屉真的没有先例吗？</h3>
+          <div class="answer">
+            <p>是。针对性代码搜索（<code>"reciprocal rank fusion"</code> in tsx、
+              <code>rrf_score</code>、<code>denseScore sparseScore</code>、
+              <code>sparse_rank dense_rank</code>、<code>bm25_rank vector_rank</code> 等）
+              全部零命中，或只命中后端算法实现与营销官网文案。</p>
+            <p>没有任何现成项目同时做到「左右并列 dense/sparse 两路原始命中 + 每条显示各路名次
+              + RRF 融合后名次与各自贡献」。原因不难理解：会做 RRF 的项目要么把它藏在后端，
+              要么前端只暴露融合后的最终分。</p>
+            <p>但它可由三处拼成，license 均可安全移植：布局与 SVG 连线抄
+              <code>opensearch-project/dashboards-search-relevance</code>（Apache-2.0，含单测），
+              <code>trace: true</code> 的请求/响应契约抄 <code>Shadow-Weave/HMS</code>（MIT），
+              结果卡的三分数并排抄 <code>infiniflow/ragflow</code>（Apache-2.0）。<strong>本次未实施。</strong></p>
+            <div class="note">
+              中文古籍前端生态基本是空的：ctext.org、殆知阁、中国哲学书电子化计划都没有开源前端，
+              Kanripo 生态相关仓库全是 1–4★ 的数据仓。能直接拿 CSS 的只有
+              <code>sivan/heti</code>（6714★ / MIT）一个。
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="webfonts">
+        <h2>三十二、字体是设备彩票</h2>
+
+        <article class="qa">
+          <h3 class="question">问题是什么？</h3>
+          <div class="answer">
+            <p><code>tokens.css</code> 的字体栈是纯本机依赖：</p>
+            <pre><code>--font-serif: "Songti SC", "SimSun", "Noto Serif CJK SC",
+              "Source Han Serif SC", "STSong", Georgia, serif;</code></pre>
+            <p>macOS 命中 Songti SC；Windows 落 SimSun（点阵感重，与「善本」意象相悖）；
+              Linux 大概率一路 fallback 到 Georgia，再由浏览器兜底任意 CJK 字体。</p>
+            <p><strong>整个「古籍善本」方向建立在字体上，而字体此前不受控。</strong>
+              这条是读代码直接证实的，不依赖外部佐证。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">怎么解的？</h3>
+          <div class="answer">
+            <p><code>deploy/build-fonts.py</code> 在部署期抓取两套 OFL-1.1 字体，
+              经 <code>cn-font-split</code> 切成 unicode-range 分片：</p>
+            <table>
+              <thead><tr><th>用途</th><th>字体</th><th>分片数</th><th>总大小</th></tr></thead>
+              <tbody>
+                <tr><td>正文</td><td>Noto Serif SC</td><td>382</td><td>17.0MB</td></tr>
+                <tr><td>标题与注文</td><td>霞鹜文楷 LXGW WenKai</td><td>313</td><td>12.2MB</td></tr>
+              </tbody>
+            </table>
+            <p>浏览器只下载页面实际用到的那几片——整套 CJK 衬线 25MB，一页文言文只要几十 KB。
+              每个 <code>@font-face</code> 的 <code>src</code> 里 <code>local()</code> 排在前面，
+              本机已装则完全不下载。</p>
+            <p>字体栈相应拆成 <code>--font-song</code> / <code>--font-kai</code>，
+              <code>--font-serif</code> 保留为前者的别名，现有规则一行未改。
+              刻本用宋体排正文、楷体排题注，据此把 <code>.reader__title</code> 与
+              <code>.chunk__heading</code> 改用楷体——「字体对比而非字号对比」此前只兑现了一半。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">不跑这个脚本会怎样？</h3>
+          <div class="answer">
+            <p>页面回落本机字体栈，即加这套之前的行为。<code>base.html</code> 只在分片确实存在时
+              才 link 字体样式表，所以不会出现一堆 404。</p>
+            <p>判断依据是<strong>分片清单而非 <code>fonts.css</code></strong>——后者是生成物，
+              可能在有人删掉分片目录后留在工作区，那时若照它判断就会 link 一个每个
+              <code>@import</code> 都 404 的样式表。这个「陈旧样式表」分支有专门的测试守着。</p>
+            <p>产物（分片 + <code>fonts.css</code>）已 gitignore，不进版本库。
+              整件事是部署期一次性成本，<strong>不是运行时依赖</strong>；
+              <code>npx</code> 只在这个脚本里用一次，应用本身不引入任何 npm 依赖。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">cn-font-split 报了个崩溃，为什么还继续？</h3>
+          <div class="answer">
+            <p>它在 Windows 上以 <code>3221225477</code>（<code>0xC0000005</code>，访问违例）退出，
+              但<strong>全部分片与清单都已写出</strong>——崩在 wasm 运行时收尾阶段，工作已经做完。</p>
+            <p>处理方式不是忽略退出码，而是<strong>改为以产物为准</strong>：校验清单存在、
+              每个 URL 引用可解析、每个目标文件确实以 <code>wOF2</code> 开头（而非截断的下载）。
+              真失败仍然失败——清单缺失或引用悬空就抛错并打印 cn-font-split 的输出尾部。</p>
+            <div class="note">
+              过程中还踩了一次自己造成的坑：先前为核查产物 <code>cd</code> 进了分片目录，
+              而 shell 的工作目录跨调用保持，于是清理时 <code>rmtree</code> 撞上
+              WinError 32。脚本因此加了带退避的重试，且重试耗尽仍会明确报错而不是静默跳过。
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="nojs">
+        <h2>三十三、无脚本承诺与它抓到的 bug</h2>
+
+        <article class="qa">
+          <h3 class="question">原来是怎么保证的？</h3>
+          <div class="answer">
+            <p>kbweb 一直承诺「JS 全部失效时页面仍可检索、翻页、上传」，但此前<strong>只有
+              e2e 里一个降级测试守着</strong>（关掉 JS 后阅读器仍可翻页），其余全靠人工验收。</p>
+            <p>照 whoogle-search 的做法改成配置维度：新增 <code>KBWEB_NOJS</code>，为 true 时
+              服务端一个 <code>&lt;script&gt;</code> 都不发；<code>tests/conftest.py</code> 的
+              <code>config</code> fixture 参数化，整个视图测试套件在 <code>js</code> /
+              <code>nojs</code> 两个维度下各跑一遍。测试数 37 → 87，覆盖率 85%。</p>
+            <p>whoogle 用的是随机化，这里改成参数化——<strong>确定性比随机覆盖更适合当回归门禁</strong>。</p>
+            <p>模板侧只需一处：<code>base.html</code> 用一个 <code>{% if not nojs %}</code>
+              同时门控自身脚本与子模板的 <code>scripts</code> 块，所以新增页面无法绕过这道门。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">抓到了什么？</h3>
+          <div class="answer">
+            <p>一个真 bug，而且 README 里对它的描述是错的。</p>
+            <p><code>partials/_debug.html</code> 的抽屉带 <code>hidden</code> 属性，
+              且只有 <code>drawer.js</code> 能揭开它。README 写的是「抽屉内容仍在 DOM 中，可滚动查看」——
+              <strong>不成立</strong>：<code>hidden</code> 让它完全不可见。无脚本时检索轨迹在 DOM 里，
+              却永远不显示。</p>
+            <p>这比不发轨迹更糟：页面声称给了调试负载，实际从不展示。</p>
+            <p>改法是把面板体抽到 <code>_debug_body.html</code>，两种形态共用同一份内容——
+              有脚本时是覆盖抽屉，无脚本时以 <code>.drawer--inline</code> 内联渲染在结果之后。
+              同时移除两个无脚本下点了没反应的死控件：主题切换按钮（主题仍跟随
+              <code>prefers-color-scheme</code>）与调试抽屉开关。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">这些测试真的有牙齿吗？</h3>
+          <div class="answer">
+            <p>做了变异测试验证：把 <code>_debug.html</code> 改回「永远渲染覆盖抽屉」，
+              <code>test_retrieval_trace_is_readable_without_scripts[nojs]</code> 立刻失败；
+              还原后 18 个全过。</p>
+            <p>断言写成在两个维度下都成立的形式，而不是在某个维度下 skip，
+              例如 <code>assert ("&lt;script" in body) is not config.nojs</code>——
+              这样两个方向的回归都会失败。</p>
+            <div class="note">
+              一处需要小心的地方：<code>assert "hidden" not in body</code> 会误伤，
+              因为检索表单本来就有一个合法的 <code>&lt;input type="hidden"&gt;</code> 标记位（即 08-05 那个
+              <code>f=1</code>）。改为断言覆盖层标记 <code>data-drawer</code> / <code>data-scrim</code> 不存在。
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="cjk-typography">
+        <h2>三十四、CJK 排版与一次自我推翻</h2>
+
+        <article class="qa">
+          <h3 class="question">加了什么？</h3>
+          <div class="answer">
+            <p>三条，只作用于语料实际渲染的两处（检索片段与阅读器切块），
+              界面 chrome 是短句无衬线标签，无收益：</p>
+            <ul>
+              <li><code>line-break: strict</code>——收紧 <code>auto</code> 仍允许而禁则不允许的
+                剩余情形（小假名、〜、‐ 等）</li>
+              <li><code>text-spacing-trim</code>——收掉连续全角标点（」「、。）内部叠加的字身空隙</li>
+              <li><code>text-autospace</code>——中西文之间补四分之一空</li>
+            </ul>
+            <p>后两者均以 <code>@supports</code> 包裹，不支持时按现状排版，零运行时成本。
+              heti 用改写 DOM 成 <code>&lt;h-char&gt;</code> 的方式做同样两件事，
+              <strong>会与命中高亮产生的 <code>&lt;mark&gt;</code> 打架</strong>，故不引入。</p>
+            <p>另从 heti 取了一个实测约束写进 <code>tokens.css</code> 注释：着重号最小可用行高 1.7、
+              ruby 最小 2.0。<code>--leading-read: 1.95</code> 正好卡在能上着重号、ruby 会挤的位置——
+              以后有人想调低会看到理由。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">哪条判断被自己推翻了？</h3>
+          <div class="answer">
+            <p>调研文档初稿里我断言「kbweb 现在的 CSS <strong>没有任何标点避头尾处理</strong>，
+              长文里『。』『，』跑到行首会立刻露怯」。<strong>这句话是错的。</strong></p>
+            <p>浏览器默认就按 UAX #14 断行，句读本来就不会出现在行首；而
+              <code>.result__snippet</code> 与 <code>.chunk__text</code> 早已带了
+              <code>hanging-punctuation: allow-end</code>，那正是行尾悬挂标点。</p>
+            <p>真实增量比初稿声称的小得多——只剩 <code>line-break: strict</code>，
+              <strong>是收紧，不是修复</strong>。调研文档的 md 与 HTML 两版都已加更正说明，
+              没有把错误判断悄悄删掉。</p>
+            <p>另有一条来自调研的建议被白盒核查下调：有人提出「偏移量锚点很脆，切块变了就全断」，
+              建议引入 Hypothesis 的多重 selector 降级链。但
+              <code>filters.py</code> 的 <code>highlight_segments</code> 已有防御——span 越界或重叠
+              一律丢弃，坏负载退化为纯文本而非打乱正文；且 <code>text</code> 与 <code>spans</code>
+              来自同一次响应，天然自洽。真正有漂移风险的只是 <code>/read/</code> 的深链锚定，
+              是个小得多的问题。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">为什么不做古文段首缩进？</h3>
+          <div class="answer">
+            <p>调研结论里列了 heti 的 <code>ancient.scss</code>（古文段落首行缩进 2em），
+              但实际没做。</p>
+            <p><code>.chunk__text</code> 用 <code>white-space: pre-wrap</code>，
+              块级 <code>text-indent</code> 只作用于<strong>首行</strong>——若一个切块内含多个段落
+              （由 <code>\n</code> 分隔），只有第一段会缩进，其余不会。</p>
+            <p>那不是移植 heti 规则，是引入排版 bug。已记进文档，等切块粒度确定后再单独处理。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="handover-0808">
+        <h2>三十五、交付与遗留</h2>
+
+        <article class="qa">
+          <h3 class="question">提交了什么？</h3>
+          <div class="answer">
+            <p>新分支 <code>feat/web-typography-and-nojs</code>，四个提交，已推送 origin：</p>
+            <table>
+              <thead><tr><th>提交</th><th>内容</th><th>测试</th></tr></thead>
+              <tbody>
+                <tr><td><code>27047ea</code></td><td>docs: kbweb 前端选型调研（md + HTML）</td><td>37</td></tr>
+                <tr><td><code>fd62117</code></td><td>feat(web): 无脚本模式做成配置与测试维度</td><td>82</td></tr>
+                <tr><td><code>8af2c35</code></td><td>feat(web): 自托管子集化 CJK 字体</td><td>87</td></tr>
+                <tr><td><code>341dcf7</code></td><td>style(web): CJK 排版设定与宋楷分工</td><td>87</td></tr>
+              </tbody>
+            </table>
+            <p><strong>四个提交逐个切出来跑过测试与 lint，全绿</strong>——不只验证最终状态。
+              测试数的爬升正好印证分工：37（原有）→ 82（无脚本维度把视图测试翻倍）→ 87（字体门控测试）。</p>
+            <p>三个文件横跨主题，而 <code>git add -p</code> 是交互式的用不了。<code>app.css</code>
+              真拆了（不拆的话内联调试面板会继承 <code>.drawer</code> 的 <code>position: fixed</code>
+              跑到屏幕外），做法是从 HEAD 版本重建中间态——比零上下文补丁可靠，后者试了两轮都因
+              尾随空白与偏移重算失败。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">e2e 那个失败是怎么回事？</h3>
+          <div class="answer">
+            <p>50 个 Playwright 测试跑了 49 过 1 failed。失败的是
+              <code>test_appended_chunks_follow_the_same_running_head_rule</code>：期望 24 个
+              chunk，实际 30。</p>
+            <p><strong>我先怀疑是自己引入的</strong>——给 <code>.chunk__text</code> 加的
+              <code>line-break</code> / <code>text-autospace</code> 会改变换行，
+              进而改变元素高度和滚动触发次数，这个链条是成立的。</p>
+            <p>于是做了对照：把两个 CSS 文件回退到 HEAD 版本跑 3 次 →
+              <strong>失败 2 次</strong>；换回改动后再跑 3 次 → <strong>同样失败 2 次</strong>。
+              同一比例，<strong>与本次改动无关，是既有 flaky</strong>。</p>
+            <p>根因是测试本身：滚动触发的续读断言精确数量，而滚动位置与布局、时序相关，
+              多触发一批就超。这是 08-08 之前就存在的问题，未在本次修复。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">还剩什么？</h3>
+          <div class="answer">
+            <ol>
+              <li><strong>PR 未开。</strong>分支基点在 <code>feat/plagiarism-backend</code> 上，
+                而后者从未推送，且 main 落后 20 个提交。对 main 开 PR 会混进 20 个无关提交；
+                要让 diff 干净就得先公开抄袭检测那条分支——这个仓库是公开的。
+                已决定<strong>只推分支不开 PR</strong>，等 plagiarism 合并进 main 后再 rebase。</li>
+              <li><strong>视觉未经浏览器确认。</strong>字体、楷体标题、内联调试面板的实际观感
+                只验证了「文件能被 Flask 正确发出」（HTTP 200 + <code>wOF2</code> 魔数），
+                没有人眼或截图核对。e2e 的截图组覆盖的是改动前的版式。</li>
+              <li><strong>e2e flaky 未修</strong>（见上）。</li>
+              <li><strong>检索调试抽屉的三合一移植未做</strong>——本次只做了调研与拼装路径，
+                见第三十一节。这是四条「可做」里工作量最大、独特价值最高的一条。</li>
+              <li><strong>本 QA 文档有 11 处 <code>class="warn"</code> 无对应 CSS 定义</strong>，
+                目前渲染为无样式块。本次新增内容改用已定义的 <code>.note</code>，未擅自改动既有块的观感。</li>
+            </ol>
+            <div class="note">
+              一处环境事实：<code>knowledge-web/.venv</code> 在这个检出里不存在（被 gitignore），
+              按 README 的 <code>uv venv --python 3.11</code> 重建后测试才能跑。
+              另外 <code>-m e2e</code> 需要额外装 <code>.[e2e]</code>，默认套件会 skip 掉。
+            </div>
+          </div>
+        </article>
+      </section>
     </main>
   </div>
 
   <footer>
     <div class="shell">
-      本文档根据 2026-08-04、08-05、08-06 与 08-07 的项目问答整理生成。
+      本文档根据 2026-08-04、08-05、08-06、08-07 与 08-08 的项目问答整理生成。
       文中所有性能数字与对照表均来自对运行中系统的实测，推翻的判断一并保留：
       overfetch 优化经实测无效、双写方案被 BM25 的 IDF 否决、
       第十四节对「稠密 396ms 是 numpy 全量扫描」这一错误解释的订正，
@@ -2051,6 +2385,11 @@ sparse_search         3.6ms</code></pre>
       以及照抄文件注释称 lexical 精排「亚毫秒级」（实测 17.56ms）。
       08-06 的检索延迟测于导入进行中且语料未满库，属上界；Dockerfile 层序修复尚未验证通过。
       08-07 中 bge-reranker-v2-m3 的耗时为按参数量推算的估计值，已在正文标明，未实跑；
+      08-08 有两处：断言「kbweb 的 CSS 没有任何标点避头尾处理」为误（浏览器按 UAX #14 默认即做，
+      且 <code>hanging-punctuation: allow-end</code> 早已存在，实际增量仅 <code>line-break: strict</code>），
+      以及先把一个 e2e 失败怀疑成本次 CSS 改动所致（回退 CSS 三轮对照后证明是既有 flaky）。
+      08-08 的字体分片数、测试数与提交状态均为实测；但新版式<strong>未经浏览器人眼确认</strong>，
+      只验证了资源可被正确发出。
       其余数字均为实测。运行状态、依赖版本和部署方式以后续代码变更为准。
     </div>
   </footer>
