@@ -248,6 +248,116 @@ def rebuild_lexical_command(
     typer.echo(f"indexed {count} chunks into {settings.resolved_lexical_dir}")
 
 
+plagiarism_app = typer.Typer(
+    help="Plagiarism corpus lifecycle (PostgreSQL only, default-off)", no_args_is_help=True
+)
+app.add_typer(plagiarism_app, name="plagiarism")
+
+
+def _plagiarism_preflight():
+    """Fail fast, and never hint that SQLite might work.
+
+    Also ensures the knowledge-base schema exists: every plagiarism command
+    reads the document table, and `status` on a database that has never been
+    initialised should say so rather than surface a raw SQL error.
+    """
+    from .db.session import get_engine, init_db
+    from .plagiarism.schema import ensure_postgres
+
+    engine = get_engine()
+    ensure_postgres(engine)
+    init_db()
+    return engine
+
+
+@plagiarism_app.command("init")
+def plagiarism_init_command(verbose: bool = False) -> None:
+    """Create the plag_* tables and indexes. Idempotent."""
+    from .plagiarism.schema import init_plagiarism_schema
+
+    _setup_logging(verbose)
+    engine = _plagiarism_preflight()
+    created = init_plagiarism_schema(engine)
+    typer.echo(f"created {len(created)} table(s)" + (f": {', '.join(created)}" if created else ""))
+
+
+@plagiarism_app.command("backfill")
+def plagiarism_backfill_command(
+    rebuild: bool = typer.Option(False, "--rebuild", help="re-register documents already built"),
+    verbose: bool = False,
+) -> None:
+    """Register a projection build for every current document version.
+
+    Only registers work; the plagiarism worker does the computing. Safe to
+    interrupt and safe to re-run - registration is idempotent.
+    """
+    from .plagiarism.corpus_ops import register_backfill
+
+    _setup_logging(verbose)
+    _plagiarism_preflight()
+    settings = get_settings()
+    registered, skipped = register_backfill(settings.default_tenant, rebuild=rebuild)
+    typer.echo(f"registered {registered} job(s), skipped {skipped} already built")
+
+
+@plagiarism_app.command("rebuild")
+def plagiarism_rebuild_command(verbose: bool = False) -> None:
+    """Re-register every document, e.g. after an algorithm parameter change."""
+    from .plagiarism.corpus_ops import register_backfill
+
+    _setup_logging(verbose)
+    _plagiarism_preflight()
+    settings = get_settings()
+    registered, _ = register_backfill(settings.default_tenant, rebuild=True)
+    typer.echo(f"registered {registered} job(s) under config hash "
+               f"{settings.plagiarism_algorithm_config_hash}")
+
+
+@plagiarism_app.command("status")
+def plagiarism_status_command() -> None:
+    """Schema, worker liveness, corpus coverage and the current config hash."""
+    from .plagiarism.corpus_ops import corpus_report
+
+    _plagiarism_preflight()
+    settings = get_settings()
+    report = corpus_report(settings.default_tenant)
+    typer.echo(f"config hash     {report['algorithm_config_hash']}")
+    typer.echo(f"schema ready    {report['schema']['ready']}")
+    if report["schema"]["missing_tables"]:
+        typer.echo(f"  missing       {', '.join(report['schema']['missing_tables'])}")
+    typer.echo(f"  gin index     {report['schema']['gin_index']}")
+    typer.echo(f"live workers    {report['live_workers']}")
+    coverage = report["coverage"]
+    typer.echo(
+        f"corpus          {coverage['ready']}/{coverage['total']} ready, "
+        f"{coverage['pending']} pending, {coverage['failed']} failed"
+    )
+    typer.echo(f"pending jobs    {report['pending_jobs']}")
+
+
+@plagiarism_app.command("rebuild-df")
+def plagiarism_rebuild_df_command(verbose: bool = False) -> None:
+    """Recompute fingerprint document frequencies and ANALYZE the corpus."""
+    from .plagiarism.corpus_ops import rebuild_document_frequencies
+
+    _setup_logging(verbose)
+    _plagiarism_preflight()
+    settings = get_settings()
+    count = rebuild_document_frequencies(settings.default_tenant)
+    typer.echo(f"recomputed {count} fingerprint frequencies")
+
+
+@plagiarism_app.command("cleanup")
+def plagiarism_cleanup_command(verbose: bool = False) -> None:
+    """Delete aged-out checks and retired projections."""
+    from .plagiarism.corpus_ops import run_cleanup
+
+    _setup_logging(verbose)
+    _plagiarism_preflight()
+    removed = run_cleanup()
+    typer.echo(f"removed {removed['checks']} check(s), {removed['projections']} projection(s)")
+
+
 @app.command("backfill-analyzed")
 def backfill_analyzed_command(
     batch_size: int = typer.Option(1000, help="chunks per update batch"),

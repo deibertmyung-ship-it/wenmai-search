@@ -349,6 +349,88 @@ def find_candidate_chunks(
     return [tuple(row) for row in session.execute(stmt)]
 
 
+def rebuild_fingerprint_df(
+    session: Session, *, tenant_id: str, algorithm_config_hash: str
+) -> int:
+    """Recompute document frequency for every fingerprint in the live corpus.
+
+    DF is *document* frequency, not chunk frequency: a phrase repeated twenty
+    times inside one book is still one document's worth of evidence, and
+    counting chunks would let a single repetitive source stop-list a term for
+    everyone.
+
+    Recomputed wholesale rather than incrementally. Incremental maintenance
+    means every projection activation and retirement has to adjust counts, and a
+    single missed decrement silently biases retrieval from then on. A full pass
+    over the corpus is cheap next to a wrong stop list.
+
+    Upstream shipped this as a standalone script (`scripts/` is on the
+    do-not-port list) and read DF asynchronously; this is the kbsvc equivalent
+    on the write side. The read side is `high_frequency_fingerprints`.
+    """
+    session.execute(
+        delete(PlagFingerprintDf).where(
+            PlagFingerprintDf.tenant_id == tenant_id,
+            PlagFingerprintDf.algorithm_config_hash == algorithm_config_hash,
+        )
+    )
+
+    live_projections = select(PlagCorpusProjection.id).where(
+        PlagCorpusProjection.tenant_id == tenant_id,
+        PlagCorpusProjection.algorithm_config_hash == algorithm_config_hash,
+        PlagCorpusProjection.active_from.is_not(None),
+        PlagCorpusProjection.active_until.is_(None),
+    )
+
+    # DISTINCT over (fingerprint, projection) collapses within-document repeats
+    # before the count.
+    per_document = (
+        select(
+            func.unnest(PlagCorpusChunk.fingerprints).label("fp"),
+            PlagCorpusChunk.projection_id.label("pid"),
+        )
+        .where(PlagCorpusChunk.projection_id.in_(live_projections))
+        .distinct()
+        .subquery()
+    )
+    counts = session.execute(
+        select(per_document.c.fp, func.count()).group_by(per_document.c.fp)
+    ).all()
+
+    now = utcnow()
+    session.add_all(
+        [
+            PlagFingerprintDf(
+                tenant_id=tenant_id,
+                algorithm_config_hash=algorithm_config_hash,
+                fingerprint=int(fingerprint),
+                document_count=int(count),
+                updated_at=now,
+            )
+            for fingerprint, count in counts
+        ]
+    )
+    session.flush()
+    return len(counts)
+
+
+def live_projection_count(
+    session: Session, *, tenant_id: str, algorithm_config_hash: str
+) -> int:
+    """Documents currently in the corpus - the denominator for the DF ratio."""
+    return int(
+        session.scalar(
+            select(func.count(PlagCorpusProjection.id)).where(
+                PlagCorpusProjection.tenant_id == tenant_id,
+                PlagCorpusProjection.algorithm_config_hash == algorithm_config_hash,
+                PlagCorpusProjection.active_from.is_not(None),
+                PlagCorpusProjection.active_until.is_(None),
+            )
+        )
+        or 0
+    )
+
+
 def high_frequency_fingerprints(
     session: Session,
     *,

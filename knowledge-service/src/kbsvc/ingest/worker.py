@@ -162,6 +162,31 @@ class IngestWorker:
         )
 
         superseded = self._supersede_older(session, document, version)
+
+        # Plagiarism corpus registration. Deliberately last, after the document
+        # is fully indexed and its current version is settled.
+        #
+        # The bare `except` is intentional and belongs here rather than only
+        # inside the hook: the guarantee is "plagiarism can never fail an
+        # ingest", and a guarantee that depends on the plagiarism module
+        # catching every one of its own bugs is not a guarantee. A document that
+        # indexed correctly stays indexed no matter what happens below.
+        try:
+            from ..plagiarism.ingest_hook import enqueue_projection_if_enabled
+
+            enqueue_projection_if_enabled(
+                session,
+                tenant_id=document.tenant_id,
+                document_id=document.id,
+                version_id=version.id,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "plagiarism registration failed for version %s; ingest unaffected",
+                version.id,
+                exc_info=True,
+            )
+
         return {"chunks": len(rows), "superseded_versions": superseded}
 
     def _run_delete(self, session: Session, job: IngestJob) -> dict:
@@ -173,6 +198,21 @@ class IngestWorker:
         removed = repo.delete_chunks_for_versions(session, version_ids)
         get_vector_store().delete_by_document(document.tenant_id, document.id)
         get_lexical_store().delete_by_document(document.tenant_id, document.id)
+
+        # Same containment as the ingest path: a document delete succeeds
+        # whether or not the plagiarism corpus can be updated.
+        try:
+            from ..plagiarism.ingest_hook import retire_document_if_enabled
+
+            retire_document_if_enabled(
+                session, tenant_id=document.tenant_id, document_id=document.id
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "plagiarism retirement failed for document %s; delete unaffected",
+                document.id,
+                exc_info=True,
+            )
 
         document.deleted_at = utcnow()
         document.current_version_id = None

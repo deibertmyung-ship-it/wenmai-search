@@ -214,6 +214,12 @@ def analyzed_by_ids(session: Session, *, tenant_id: str, chunk_ids: list[str]) -
     return {chunk_id: analyzed for chunk_id, analyzed in session.execute(stmt) if analyzed}
 
 
+def chunks_for_version(session: Session, version_id: str) -> list[Chunk]:
+    """Every chunk of one version, in document order."""
+    stmt = select(Chunk).where(Chunk.version_id == version_id).order_by(Chunk.ordinal)
+    return list(session.scalars(stmt))
+
+
 def delete_chunks_for_versions(session: Session, version_ids: list[str]) -> int:
     if not version_ids:
         return 0
