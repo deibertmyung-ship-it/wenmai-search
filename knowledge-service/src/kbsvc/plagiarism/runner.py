@@ -284,7 +284,15 @@ class CheckRunner:
             # The real ordinal, not a placeholder: Task 7 fetches source
             # excerpts against this exact frozen version rather than whatever
             # the document looks like today, and `0` is never a real version.
+            # `projection.version_id` is a straight primary-key lookup - the
+            # projection itself already carries the reference, so there is no
+            # need to add a column or backfill anything to answer this.
             version = session.get(DocumentVersion, projection.version_id)
+            if version is None:
+                raise RuntimeError(
+                    f"projection {projection.id} references missing version "
+                    f"{projection.version_id}"
+                )
 
             spans = [(p.query_start, p.query_end) for p in passages]
             merged = merge_intervals(spans)
@@ -297,7 +305,7 @@ class CheckRunner:
                 tenant_id=check.tenant_id,
                 document_id=projection.document_id,
                 version_id=projection.version_id,
-                version=version.version if version is not None else 0,
+                version=version.version,
                 content_hash=projection.content_hash,
                 title=(document.title if document else "")[:512],
                 matched_chars=matched_chars,

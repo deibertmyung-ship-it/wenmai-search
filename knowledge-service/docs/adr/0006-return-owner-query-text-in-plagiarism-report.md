@@ -1,13 +1,17 @@
 # ADR-0006：报告接口向检测创建者回显查询侧原文（`ReportOut.query_text`）
 
 - 状态：Accepted
-- 日期：2026-08-08（文本模式决策）／2026-08-08 修订（文档模式改为快照，取代同名旧版 ADR）
+- 日期：2026-08-08（文本模式决策）／2026-08-08 二次修订（文档模式改为快照，
+  取代同名旧版 ADR）／2026-08-08 三次修订（收窄范围：去掉读时兼容回读，
+  旧记录直接降级为空串）
 - 决策者：项目维护者
 - 影响范围：`plagiarism/types.py`、`plagiarism/models.py`、`plagiarism/service.py`、
   `plagiarism/runner.py`、`api/plagiarism_schemas.py`
 - 触发事件：前端判定导向的全文高亮（把重复片段标在稿件上）需要在完整稿件上渲染，
   而报告契约当前不提供底稿；随后 Codex 复核发现文档模式留空的原设计会让
-  Task 6 的高亮视图在文档模式下整体失效，据此修订
+  Task 6 的高亮视图在文档模式下整体失效，据此二次修订；三次修订是用户认为
+  二次修订版把一个小契约改动过度扩大成了历史数据兼容 + 新错误码设计，要求
+  收窄到最小实现
 
 ## 背景
 
@@ -58,12 +62,13 @@
 - 文档模式：`CheckRunner.run()` 在解析出待检测正文（`_resolve_query_text`，按
   冻结的 `source_version_id` 从已入库的 chunk 重建文本，复用知识库自己的解析
   结果而不是重新解析原始文件）之后，把这份**检测时刻的快照**写回同一个
-  `check.query_text` 字段——写入时机是 `CheckRunner._persist()` 落库findings的
-  同一次运行里，随其余检测结果一起提交，不是另开一次写。
+  `check.query_text` 字段——写入时机在 `run()` 内部、`_persist()` 落库
+  findings 的同一次事务里，随其余检测结果一起提交或一起回滚，不是另开一次写。
 
 `ReportOut.query_text` 因此对两种模式都一致返回「这次检测实际比对的正文」。
-`get_report()` 读取时**不重新解析对象存储**——它只读已经落在 `PlagCheck.query_text`
-列上的值；重新解析属于检测时该做一次的事，不是每次读报告都要重复付出的成本。
+`get_report()` 读取时**不重新解析对象存储、不做任何按版本回读**——它只是
+`check.query_text or ""`，一行表达式，读的就是 `CheckRunner` 当初写在这一行上
+的值，不多做任何事。
 
 **只有报告详情接口（`ReportOut`）返回这个字段。`CheckOut`（列表 `GET
 /v1/plagiarism/checks` 与详情 `GET /v1/plagiarism/checks/{id}`）继续不返回**，
@@ -90,17 +95,30 @@
    不完整」这个问题一直拖到某次不确定的 `GET` 才暴露出来，而那次 `GET` 可能
    发生在检测完成很久之后，届时问题定位会更难。
 
-### 旧记录的读时兼容路径
+### 旧记录：不回填，直接降级为空串
 
 在这次修订之前落库的文档模式检测，`query_text` 已经写成了空字符串（旧版
-`CheckRunner` 就是这么实现的），无法回溯重跑。`PlagiarismService.
-_resolve_report_query_text()` 为这批旧记录提供唯一一次读时兼容：`query_text`
-为空但 `query_chars > 0` 且 `source_version_id` 非空时，按冻结版本重新读一次
-正文；读不到（`DocumentVersion` 行已不存在，或该版本下已没有可重建的 chunk）
-时**必须抛出明确错误**（`SourceVersionUnavailableError`，409），不能把空串
-当作合法结果悄悄返回——空串意味着「检测的是空文档」，与非零的 `query_chars`
-矛盾，会被前端误判成合法状态。新记录不会走到这条路径：`query_text` 在检测时
-就已经写好。
+`CheckRunner` 就是这么实现的）。**新完成的检查必须满足 `len(query_text) ==
+query_chars`**——这是 `CheckRunner.run()` 的不变量，写快照与写 `query_chars`
+在同一次调用里发生，不存在两者不一致的中间态。但旧记录不受这条不变量约束，
+`get_report()` 对它们如实返回 `check.query_text or ""`，也就是空串，
+`query_chars` 仍然是非零的历史值——调用方看到的是「这条报告没有可用的
+全文快照」，而不是一个需要额外错误码去解释的失败状态。
+
+这是本次三修有意选择的降级路径，而不是二修版本里"按冻结版本回读一次，读不到
+就抛错"的兼容层：
+
+- 不做全库 backfill——没有必要为了让历史记录"看起来和新记录一样"去反向重建
+  数据，那批检测的原始意图从一开始就是"文档模式不存问题上文"，现在只是让新
+  记录不再继承这个决定，旧记录保持原样即可；
+- 不新增公开错误码——`get_report()` 的错误面只在真正需要时才扩大（比如 ACL
+  变化触发的 `report_visibility_changed`）；一条可能为空的字符串不构成需要
+  409 的"错误"，前端按空值处理即可；
+- Task 6 现有模板已经会在 `query_text` 为空时显示"原文已按保留策略清理，
+  无法显示全文高亮"，文档模式的旧记录复用这条既有的降级路径，不需要为它
+  专门设计新的错误页或对象生命周期规则；
+- 如果以后确实需要恢复这批历史记录的全文，那是一个独立的、非阻塞的任务
+  （惰性回读或后台 backfill），不属于这条 ADR、也不应该跟这次的读路径耦合。
 
 ## 被否决的方案
 
@@ -127,6 +145,20 @@ _resolve_report_query_text()` 为这批旧记录提供唯一一次读时兼容�
 错位的正文，且把本该一次性完成的重建工作摊到每次 `GET` 上重复执行，两个
 问题都不是可以接受的权衡。
 
+### 旧记录的读时兼容回读（二修版本采用过，三修否决）
+
+二修版本给 `get_report()` 加过一条兼容路径：`query_text` 为空但 `query_chars`
+非零时，判定为"这次修订之前落库的旧文档模式记录"，按冻结的 `source_version_id`
+重新读一次正文；读不到就抛一个新的 409 错误码
+（`plagiarism_source_version_unavailable`）。用户复核后指出这把一个本该很小
+的契约改动拖出了三块新增复杂度：历史数据兼容判定逻辑（还要专门排除
+`CANCELLED` 状态，因为取消检测清空 `query_text` 但保留 `query_chars` 的形状
+和"旧记录"完全一样，二者必须能区分，否则会把故意做的隐私擦除又读回来）、
+一个新的公开错误码、以及"哪些客户端要处理这个 409"这一层新的前后端契约。
+这些代价换来的收益只是"少数历史文档模式记录能在读报告时看到全文"，而这批
+记录本来就是在"文档模式故意不存全文"的旧设计下产生的，产品上完全可以接受
+它们保持原样。三修否决了这条路径，改为上文"不回填，直接降级为空串"。
+
 ## 后果
 
 ### 正面后果
@@ -143,25 +175,33 @@ _resolve_report_query_text()` 为这批旧记录提供唯一一次读时兼容�
   随之增大；调用方如果只需要偏移量和来源信息，会多传一份不需要的数据；
 - 文档模式的检测运行多了一次「正文必须能解析出来，否则整次检测失败」的硬
   约束——这是有意的（见上文「失败模式更诚实」），但确实让 `source_version_id`
-  对应的 chunk 缺失从「报告字段悄悄为空」变成了「检测直接进入 failed」，调用方
-  的重试/告警逻辑需要能处理这种新出现的失败原因；
-- 旧记录的读时兼容路径给 `get_report()` 带来了一条新的失败分支
-  （`SourceVersionUnavailableError`），调用这批历史报告的客户端需要能处理
-  409，而不是假设报告接口只在 ACL 变化时才会 409。
+  对应的版本或 chunk 缺失从「报告字段悄悄为空」变成了「检测直接进入 failed」，
+  调用方的重试/告警逻辑需要能处理这种新出现的失败原因；这条约束只发生在
+  **检测运行期间**（`CheckRunner`），不影响 `get_report()` 的错误面——
+  报告接口本身没有新增任何错误码；
+- 这次修订之前落库的文档模式记录，`query_text` 会一直是空串，不会被追溯
+  修复；如果产品后续需要把这批历史记录也补上全文，需要另立一个不阻塞当前
+  发布的任务去做。
 
 ## 验证要求
 
 - 文本模式检测完成后，报告里的 `query_text` 与提交时的原文逐字一致；
 - 文档模式检测完成后，报告里的 `query_text` 与检测时源文档版本的正文逐字
-  一致，且与 `query_chars` 在长度上一致；
-- 旧格式记录（`query_text` 为空、`query_chars` 非零）在冻结版本仍可读时，
-  报告能正确回填正文；冻结版本已不存在时，`get_report()` 抛出
-  `SourceVersionUnavailableError`（409），而不是返回空串；
+  一致，且 `len(query_text) == query_chars`；
+- 这次修订之前落库的旧文档模式记录，`get_report()` 如实返回
+  `check.query_text or ""`（即空串），不做任何按版本回读，也不因此报错；
+- 文档模式检测在其冻结的 `source_version_id` 对应的 `DocumentVersion` 已不
+  存在时，`CheckRunner.run()` 必须失败（抛出 `SourceVersionUnavailableError`，
+  由 worker 按已有的重试/`failed` 语义处理），不能以 `total_chunks=0`、
+  `matched_chars=0` 的方式"成功"完成——那样会和一份真正的空文档无法区分；
+- `PlagCheckSource.version` 落的是真实的 `DocumentVersion.version` 整数，
+  不是常量 `0`；这个引用的 `DocumentVersion` 行在 `_persist()` 里已不存在时
+  同样要让检测失败，不能静默退化为 `0`；
 - `CheckOut`（列表与详情）响应体里不出现 `query_text`（沿用既有的
   `test_get_check_and_list_never_expose_the_submitted_text`）；
 - 在 `get_report()` 之前已被撤权的来源，依旧返回 `report_visibility_changed`
-  （409）——本次修订新增的 `query_text` 兼容读取逻辑排在 ACL 校验循环之后，
-  不改变、不绕开这条已有语义。
+  （409）——`query_text` 简化为 `check.query_text or ""` 之后，这条 ACL
+  校验循环的位置和判断逻辑都没有变化。
 
 ## 后续决策
 
@@ -171,6 +211,12 @@ _resolve_report_query_text()` 为这批旧记录提供唯一一次读时兼容�
   （例如 `?include=query_text`）；当前 50 万字上限下未观察到实际问题，暂不
   处理；
 - `knowledge-web` 侧如何用 `query_text` 渲染全文高亮，属于前端实现范围；
+  Task 6 已有的模板降级文案（`query_text` 为空时显示"原文已按保留策略清理，
+  无法显示全文高亮"）在这次修订之后依然适用，不需要新的前端分支；
 - `PlagCheckSource.version` 从常量 `0` 改为持久化真实的 `DocumentVersion.version`
   是同一次改动里顺带修的相关缺陷（Task 7 依赖它按冻结版本取来源摘录），
-  但它是独立的数据正确性修复，不属于本 ADR 决策的范围，不在此展开论证。
+  是一次主键点查（`session.get(DocumentVersion, projection.version_id)`），
+  不需要给 `PlagCorpusProjection` 加列或回填——但它是独立的数据正确性修复，
+  不属于本 ADR 决策的范围，不在此展开论证；
+- 是否要把这次修订之前落库的文档模式记录也补上全文快照（惰性回读或后台
+  backfill）：本 ADR 明确不做，留给一个独立的、非阻塞的后续任务。

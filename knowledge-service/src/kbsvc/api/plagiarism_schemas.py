@@ -109,7 +109,9 @@ class ReportOut(BaseModel):
     unique_passages: list[tuple[int, int]] = Field(default_factory=list)
     # The detection-time snapshot of what was checked: the submitted text in
     # text mode, or the text resolved from the frozen source document version
-    # in document mode. Populated for both modes.
+    # in document mode. Always populated for checks run after this field was
+    # added; document-mode checks that predate it return "" here rather than
+    # being backfilled.
     query_text: str = ""
 
     @classmethod

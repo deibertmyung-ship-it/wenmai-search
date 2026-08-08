@@ -417,41 +417,12 @@ def test_persisted_source_carries_the_real_document_version(
     assert sources[0].version == 3
 
 
-def test_report_falls_back_to_the_frozen_version_for_legacy_document_checks(
+def test_a_missing_source_version_fails_the_check_rather_than_completing_empty(
     kb_session, enabled, build_corpus
 ):
-    """Compatibility path: a check row persisted before the runner started
-    writing the snapshot (empty `query_text` despite a non-zero `query_chars`)
-    must still resolve at read time, from the frozen `source_version_id`."""
-    document_id = build_corpus(text=REUSED)
-    kb_session.commit()
-
-    svc = service(enabled)
-    summary = svc.create_document_check(
-        kb_session,
-        CreateDocumentCheck(tenant_id=TENANT, creator_key_id="k1", document_id=document_id),
-    )
-    kb_session.commit()
-    CheckRunner(enabled).run(kb_session, summary.check_id)
-    kb_session.flush()
-
-    # Simulate a pre-fix row: the old runner left `query_text` empty.
-    check = kb_session.get(PlagCheck, summary.check_id)
-    check.query_text = ""
-    kb_session.flush()
-
-    report = svc.get_report(
-        kb_session, check_id=summary.check_id, tenant_id=TENANT, creator_key_id="k1"
-    )
-    assert report.query_text == REUSED
-
-
-def test_report_raises_a_clear_error_when_the_frozen_version_is_gone(
-    kb_session, enabled, build_corpus
-):
-    """A legacy row whose frozen version can no longer be read must surface a
-    clear error, never a `""` that would silently contradict a non-zero
-    `query_chars`."""
+    """A document-mode check whose frozen `source_version_id` can no longer be
+    read must fail the run, not silently produce an empty "successful" report
+    that reads exactly like a legitimately empty document."""
     from kbsvc.db.models import DocumentVersion
     from kbsvc.plagiarism.service import SourceVersionUnavailableError
 
@@ -464,61 +435,21 @@ def test_report_raises_a_clear_error_when_the_frozen_version_is_gone(
         CreateDocumentCheck(tenant_id=TENANT, creator_key_id="k1", document_id=document_id),
     )
     kb_session.commit()
-    CheckRunner(enabled).run(kb_session, summary.check_id)
-    kb_session.flush()
 
     check = kb_session.get(PlagCheck, summary.check_id)
-    check.query_text = ""  # simulate a pre-fix row
-    version_id = check.source_version_id
-    kb_session.flush()
-
-    kb_session.query(DocumentVersion).filter_by(id=version_id).delete()
+    kb_session.query(DocumentVersion).filter_by(id=check.source_version_id).delete()
     kb_session.flush()
 
     with pytest.raises(SourceVersionUnavailableError):
-        svc.get_report(
-            kb_session, check_id=summary.check_id, tenant_id=TENANT, creator_key_id="k1"
-        )
-
-
-def test_report_never_restores_purged_text_for_a_cancelled_check(
-    kb_session, enabled, build_corpus
-):
-    """Cancellation purges `query_text` on purpose (`repo.purge_sensitive_content`)
-    but leaves `query_chars` as a numeric trace - the same shape a genuine
-    pre-fix legacy row has. The read-time fallback must not mistake one for
-    the other and re-derive the erased text right back from the frozen source
-    version."""
-    document_id = build_corpus(text=REUSED)
-    kb_session.commit()
-
-    svc = service(enabled)
-    summary = svc.create_document_check(
-        kb_session,
-        CreateDocumentCheck(tenant_id=TENANT, creator_key_id="k1", document_id=document_id),
-    )
-    kb_session.commit()
-    CheckRunner(enabled).run(kb_session, summary.check_id)
-    kb_session.flush()
-
-    check = kb_session.get(PlagCheck, summary.check_id)
-    assert check.query_chars > 0  # sanity: something was actually checked
-    check.status = str(CheckStatus.CANCELLED)
-    repo.purge_sensitive_content(kb_session, check_id=check.id)
-    kb_session.flush()
-
-    report = svc.get_report(
-        kb_session, check_id=summary.check_id, tenant_id=TENANT, creator_key_id="k1"
-    )
-    assert report.query_text == ""
+        CheckRunner(enabled).run(kb_session, summary.check_id)
 
 
 def test_report_still_flags_revoked_access_after_the_query_text_change(
     kb_session, enabled, build_corpus
 ):
     """A source revoked before `get_report` runs must still surface as
-    `report_visibility_changed` - the query_text compatibility fallback added
-    alongside it must not run before, or instead of, this ACL check."""
+    `report_visibility_changed` - simplifying `query_text` to a plain
+    `check.query_text or ""` must not have disturbed this ACL check."""
     from kbsvc.db.models import Document
     from kbsvc.plagiarism.service import ReportVisibilityChangedError
 
