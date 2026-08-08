@@ -129,7 +129,7 @@ Base: `/v1`。认证：`Authorization: Bearer <api_key>`（`KB_AUTH_REQUIRED=fal
                    "score": 0.98, "preview": "……（≤300 字符）" }]
   }],
   "unique_passages": [[3, 61]],
-  "query_text": "……（提交的原文；文档模式下为空串）"
+  "query_text": "……（这次检测实际比对的正文）"
 }
 ```
 
@@ -139,8 +139,9 @@ Base: `/v1`。认证：`Authorization: Bearer <api_key>`（`KB_AUTH_REQUIRED=fal
 `coverage_reason` 非空表示**没有查完**（`time_cap` / `cancelled`），
 此时结果不可作为「无抄袭」结论。
 
-`query_text` 是提交检测的原文：文本模式下与提交内容逐字一致；文档模式下恒为
-空串，因为原文已经在文档表里有一份，不重复存储（见 ADR-0006）。
+`query_text` 是这次检测实际检查的正文，两种模式都会返回：文本模式下与提交
+内容逐字一致；文档模式下是检测那一刻按冻结的来源版本解析出的快照，由
+`CheckRunner` 在检测时写入，报告读取时不会重新解析（见 ADR-0006）。
 `GET /v1/plagiarism/checks` 与 `GET /v1/plagiarism/checks/{id}` 不受影响，
 继续不返回提交的原文。
 
@@ -183,6 +184,7 @@ data: {"check_id":"…","status":"…","progress":0.35,"detail":{},"created_at":
 | `plagiarism_corpus_not_ready` | 409 | 语料仍在构建；不对不完整语料检测 |
 | `idempotency_conflict` | 409 | 同一幂等键用于了不同请求 |
 | `report_visibility_changed` | 409 | 报告中的来源已不可见 |
+| `plagiarism_source_version_unavailable` | 409 | 仅影响本次修订前落库的旧文档模式检测：`query_text` 需要按冻结版本回读，但该版本或其正文已不存在 |
 | `plagiarism_concurrency_limit` | 429 | 该凭据活动任务超限（默认 2） |
 | `plagiarism_input_too_large` | 413 | 超过 `KB_PLAG_MAX_INPUT_CHARS`（默认 50 万） |
 | `plagiarism_check_not_found` | 404 | 不存在，或不属于调用方 |
