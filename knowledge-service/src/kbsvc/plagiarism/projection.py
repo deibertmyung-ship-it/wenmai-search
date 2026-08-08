@@ -21,11 +21,32 @@ from ..db.models import Document, DocumentVersion
 from . import repository as repo
 from .chunking.sliding import chunk_document
 from .fingerprinting import fingerprint
-from .language import detect_language, pysbd_language
+from .language import pysbd_language
+from .matching_policy import resolve_match_policy
 from .models import PlagCorpusChunk, PlagCorpusProjection
 from .types import CorpusJobStatus
 
 logger = logging.getLogger(__name__)
+
+
+def _has_han(text: str) -> bool:
+    return any("\u3400" <= char <= "\u9fff" for char in text)
+
+
+def _chunk_fingerprints(text: str, settings: Settings) -> list[int]:
+    """Store both profiles for mixed-script chunks so either query can recall."""
+    profiles = ("generic", "zh") if _has_han(text) else ("generic",)
+    fingerprints: set[int] = set()
+    for profile in profiles:
+        fingerprints.update(
+            fingerprint(
+                text,
+                k=settings.plag_kgram,
+                w=settings.plag_winnow_window,
+                profile=profile,
+            )
+        )
+    return sorted(fingerprints)
 
 
 class ProjectionBuilder:
@@ -61,7 +82,8 @@ class ProjectionBuilder:
             # the document permanently "pending".
             logger.info("document %s has no extractable text", document.id)
 
-        language = detect_language(text)
+        policy = resolve_match_policy(text, "auto", self.settings)
+        language = policy.resolved_language
         chunks = (
             chunk_document(
                 text,
@@ -98,11 +120,7 @@ class ProjectionBuilder:
                 char_end=chunk.char_end,
                 sentence_count=chunk.sentence_count,
                 text=chunk.text,
-                fingerprints=fingerprint(
-                    chunk.text,
-                    k=self.settings.plag_kgram,
-                    w=self.settings.plag_winnow_window,
-                ),
+                fingerprints=_chunk_fingerprints(chunk.text, self.settings),
             )
             for chunk in chunks
         ]

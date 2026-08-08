@@ -17,6 +17,7 @@ from ..db.models import Document
 from ..errors import KbError, NotFoundError, ValidationError
 from . import repository as repo
 from .intervals import dedupe_passage_indexes, merge_intervals
+from .matching_policy import resolve_match_policy
 from .models import PlagCheck, PlagCheckPassage, PlagCheckSource, utcnow
 from .types import (
     CheckReport,
@@ -83,6 +84,11 @@ class InputTooLargeError(KbError):
     http_status = 413
 
 
+class InputTooShortError(ValidationError):
+    code = "plagiarism_text_too_short"
+    http_status = 422
+
+
 class CheckNotFoundError(NotFoundError):
     code = "plagiarism_check_not_found"
 
@@ -108,6 +114,12 @@ class PlagiarismService:
             )
         if not command.text.strip():
             raise ValidationError("submitted text is empty")
+        policy = resolve_match_policy(command.text, command.language, self.settings)
+        if policy.effective_chars < policy.min_effective_chars:
+            raise InputTooShortError(
+                "有效文本少于 12 个字符，无法可靠查重",
+                {"effective_chars": policy.effective_chars, "minimum": policy.min_effective_chars},
+            )
 
         digest = repo.request_digest("text", ids.hash_text(command.text))
         return self._create(
@@ -120,6 +132,8 @@ class PlagiarismService:
             acl=command.acl,
             query_text=command.text,
             language=command.language,
+            matcher_version=policy.matcher_version,
+            matcher_config=policy.to_config(),
         )
 
     def create_document_check(
@@ -166,6 +180,8 @@ class PlagiarismService:
         acl: list[str],
         query_text: str = "",
         language: str = "auto",
+        matcher_version: str = "",
+        matcher_config: dict | None = None,
         source_document_id: str = "",
         source_version_id: str = "",
         excluded_document_id: str = "",
@@ -229,6 +245,8 @@ class PlagiarismService:
             acl=acl or ["public"],
             snapshot_at=utcnow(),
             algorithm_config_hash=config_hash,
+            matcher_version=matcher_version,
+            matcher_config=matcher_config or {},
             status=str(CheckStatus.PENDING),
             max_attempts=self.settings.plag_max_attempts,
         )
@@ -332,6 +350,8 @@ class PlagiarismService:
             status=CheckStatus(check.status),
             snapshot_at=check.snapshot_at,
             algorithm_config_hash=check.algorithm_config_hash,
+            matcher_version=check.matcher_version or "",
+            matcher_config=dict(check.matcher_config or {}),
             query_chars=check.query_chars,
             matched_chars=check.matched_chars,
             checked_chunks=check.checked_chunks,

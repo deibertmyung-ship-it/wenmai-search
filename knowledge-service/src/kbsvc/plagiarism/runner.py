@@ -27,6 +27,7 @@ from .chunking.sliding import chunk_document
 from .fingerprinting import fingerprint
 from .intervals import dedupe_passage_indexes, merge_intervals
 from .language import pysbd_language
+from .matching_policy import MatchPolicy, resolve_match_policy
 from .models import PlagCheck, PlagCheckPassage, PlagCheckSource
 from .retrieval import stop_list
 from .types import CheckStage, CheckStatus, CoverageReason
@@ -82,11 +83,21 @@ class CheckRunner:
         repo.clear_results(session, check_id=check.id)
 
         query_text = self._resolve_query_text(session, check)
+        policy = self._policy_for_check(check, query_text)
+        if policy.effective_chars < policy.min_effective_chars:
+            from .service import InputTooShortError
+
+            raise InputTooShortError(
+                "有效文本少于 12 个字符，无法可靠查重",
+                {"effective_chars": policy.effective_chars, "minimum": policy.min_effective_chars},
+            )
         # Write the detection-time snapshot back onto the row for both modes.
         # Text mode already carries it (set at creation); document mode has
         # never had it until now - this is what lets `get_report` return it
         # without ever re-parsing object storage at read time.
         check.query_text = query_text
+        check.matcher_version = policy.matcher_version
+        check.matcher_config = policy.to_config()
         budget = _Budget.for_input(self.settings, len(query_text))
 
         self._emit(session, check, CheckStage.STARTED, progress=0.0)
@@ -148,14 +159,16 @@ class CheckRunner:
                 checked += 1
                 continue
 
-            probe = stop_list.apply(
-                fingerprint(
-                    chunk.text,
-                    k=self.settings.plag_kgram,
-                    w=self.settings.plag_winnow_window,
-                ),
-                stopped,
+            raw_probe = fingerprint(
+                chunk.text,
+                k=self.settings.plag_kgram,
+                w=self.settings.plag_winnow_window,
+                profile=policy.profile,
             )
+            # A 12–19-character Chinese query has only one strict exact
+            # opportunity; removing its sole fingerprints via DF stop-list
+            # would turn a real match into a misleading clean report.
+            probe = raw_probe if policy.short_exact_enabled else stop_list.apply(raw_probe, stopped)
             candidates = repo.find_candidate_chunks(
                 session,
                 tenant_id=check.tenant_id,
@@ -171,10 +184,11 @@ class CheckRunner:
                 str(chunk.chunk_index),
                 chunk.text,
                 [(cid, ctext) for cid, ctext, _, _ in candidates],
-                min_seed_len=self.settings.plag_min_seed_len,
-                min_passage_len=self.settings.plag_min_passage_len,
+                min_seed_len=policy.min_seed_len,
+                min_passage_len=policy.min_passage_len,
                 extend_tolerance=self.settings.plag_extend_tolerance,
                 should_stop=budget.should_stop,
+                normalizer_profile=policy.profile,
             ):
                 # Guard the emitted span, not just the probe chunk. A rule line
                 # embedded in otherwise real prose rides through the chunk-level
@@ -234,6 +248,15 @@ class CheckRunner:
         }
 
     # --- helpers --------------------------------------------------------
+
+    def _policy_for_check(self, check: PlagCheck, query_text: str) -> MatchPolicy:
+        """Use the policy frozen at admission, including on retries."""
+        if check.matcher_config:
+            try:
+                return MatchPolicy.from_config(check.matcher_config)
+            except (KeyError, TypeError, ValueError):
+                logger.warning("discarding malformed matcher_config for check %s", check.id)
+        return resolve_match_policy(query_text, check.language, self.settings)
 
     def _detect(self, text: str) -> str:
         from .language import detect_language

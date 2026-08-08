@@ -164,6 +164,8 @@ def _plagiarism_readiness(settings) -> dict[str, str]:
         checks["plagiarism_schema"] = "ok"
     elif schema["missing_tables"]:
         checks["plagiarism_schema"] = f"missing tables: {', '.join(schema['missing_tables'])}"
+    elif schema.get("missing_columns"):
+        checks["plagiarism_schema"] = f"missing columns: {', '.join(schema['missing_columns'])}"
     else:
         checks["plagiarism_schema"] = "gin index missing"
 

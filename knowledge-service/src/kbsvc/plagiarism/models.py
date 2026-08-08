@@ -226,6 +226,10 @@ class PlagCheck(PlagiarismBase):
 
     snapshot_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     algorithm_config_hash: Mapped[str] = mapped_column(String(32))
+    # Frozen per-check matcher policy.  Keeping this beside the algorithm hash
+    # makes historical reports explainable after settings change.
+    matcher_version: Mapped[str] = mapped_column(String(64), default="")
+    matcher_config: Mapped[dict] = mapped_column(JSON, default=dict)
 
     status: Mapped[str] = mapped_column(String(24), default="pending")
     cancel_requested: Mapped[bool] = mapped_column(Integer, default=0)

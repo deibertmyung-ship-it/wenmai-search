@@ -48,6 +48,8 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from ..normalization import NormalizedText, normalize_with_offsets
+
 # Lookahead width for the tolerant-extend stage (chars). Small enough to react
 # quickly when the text actually diverges, large enough that a couple of
 # substituted chars don't kill the window.
@@ -109,6 +111,7 @@ def align(
     min_passage_len: int,
     extend_tolerance: float,
     should_stop: Callable[[], bool] | None = None,
+    normalizer_profile: str = "auto",
 ) -> list[AlignedPassage]:
     """Align `query_text` against each candidate; return passage spans.
 
@@ -125,19 +128,53 @@ def align(
     """
     if not query_text or not candidates:
         return []
-    if len(query_text) < min_seed_len:
+
+    if normalizer_profile == "auto":
+        normalizer_profile = "zh" if _looks_chinese(query_text) else "generic"
+    if normalizer_profile == "zh" and (min_seed_len, min_passage_len) == (30, 50):
+        # Keep direct callers safe while the worker supplies an explicit
+        # language policy. English callers retain the historical 30/50 gates.
+        min_seed_len, min_passage_len = 12, 20
+
+    normalized_query = normalize_with_offsets(query_text, profile=normalizer_profile)
+    if normalized_query.effective_chars == 0:
+        return []
+    if len(normalized_query.text) < min_seed_len:
         return []
 
     passages: list[AlignedPassage] = []
     for candidate_chunk_id, candidate_text in candidates:
         if should_stop is not None and should_stop():
             break
-        if len(candidate_text) < min_seed_len:
+        normalized_candidate = normalize_with_offsets(candidate_text, profile=normalizer_profile)
+        if normalized_candidate.effective_chars == 0:
             continue
-        seeds = _find_seeds(query_text, candidate_text, min_seed_len)
+        if len(normalized_candidate.text) < min_seed_len:
+            continue
+
+        if (
+            normalizer_profile == "zh"
+            and min_seed_len <= normalized_query.effective_chars < min_passage_len
+        ):
+            passages.extend(
+                _short_exact_matches(
+                    query_chunk_id,
+                    query_text,
+                    normalized_query,
+                    candidate_chunk_id,
+                    candidate_text,
+                    normalized_candidate,
+                )
+            )
+            continue
+
+        seeds = _find_seeds(normalized_query.text, normalized_candidate.text, min_seed_len)
         if not seeds:
             continue
-        extended = [_extend(seed, query_text, candidate_text, extend_tolerance) for seed in seeds]
+        extended = [
+            _extend(seed, normalized_query.text, normalized_candidate.text, extend_tolerance)
+            for seed in seeds
+        ]
         merged = _merge(extended)
         deduped = _dedupe_by_query_coverage(merged)
         for span in deduped:
@@ -145,11 +182,70 @@ def align(
                 continue
             passages.append(
                 _score_and_build(
-                    span, query_chunk_id, candidate_chunk_id, query_text, candidate_text
+                    span,
+                    query_chunk_id,
+                    candidate_chunk_id,
+                    query_text,
+                    candidate_text,
+                    normalized_query,
+                    normalized_candidate,
                 )
             )
 
     passages.sort(key=lambda p: (p.query_chunk_id, p.query_start, p.candidate_chunk_id))
+    return passages
+
+
+def _looks_chinese(text: str) -> bool:
+    meaningful = [char for char in text if not char.isspace()]
+    if not meaningful:
+        return False
+    han = sum("\u3400" <= char <= "\u9fff" for char in meaningful)
+    return han / len(meaningful) >= 0.5
+
+
+def _short_exact_matches(
+    query_chunk_id: str,
+    query_text: str,
+    normalized_query: NormalizedText,
+    candidate_chunk_id: str,
+    candidate_text: str,
+    normalized_candidate: NormalizedText,
+) -> list[AlignedPassage]:
+    """Return only complete Chinese short-query occurrences."""
+    needle = normalized_query.text
+    if not needle:
+        return []
+
+    passages: list[AlignedPassage] = []
+    start = 0
+    while True:
+        normalized_start = normalized_candidate.text.find(needle, start)
+        if normalized_start < 0:
+            break
+        normalized_end = normalized_start + len(needle)
+        q_start, q_end = normalized_query.original_span_with_boundaries(
+            0, len(needle), query_text
+        )
+        c_start, c_end = normalized_candidate.original_span_with_boundaries(
+            normalized_start, normalized_end, candidate_text
+        )
+        if normalized_start == 0 and normalized_end == len(normalized_candidate.text):
+            c_start, c_end = 0, len(candidate_text)
+        q_start, q_end = 0, len(query_text)
+        passages.append(
+            AlignedPassage(
+                query_chunk_id=query_chunk_id,
+                candidate_chunk_id=candidate_chunk_id,
+                query_start=q_start,
+                query_end=q_end,
+                candidate_start=c_start,
+                candidate_end=c_end,
+                score=1.0,
+                match_type="short_exact",
+            )
+        )
+        start = normalized_start + 1
     return passages
 
 
@@ -318,20 +414,33 @@ def _score_and_build(
     candidate_chunk_id: str,
     query_text: str,
     candidate_text: str,
+    normalized_query: NormalizedText,
+    normalized_candidate: NormalizedText,
 ) -> AlignedPassage:
-    q_segment = query_text[span.q_start : span.q_end]
-    c_segment = candidate_text[span.c_start : span.c_end]
+    q_segment = normalized_query.text[span.q_start : span.q_end]
+    c_segment = normalized_candidate.text[span.c_start : span.c_end]
     # The extend stage advances both sides in lock-step, so these have identical
     # length today. zip without strict= keeps the formula robust if a future
     # gap-tolerant extender lets them diverge.
     matches = sum(1 for a, b in zip(q_segment, c_segment) if a == b)  # noqa: B905
     aligned_len = max(len(q_segment), len(c_segment))
+    query_start, query_end = normalized_query.original_span_with_boundaries(
+        span.q_start, span.q_end, query_text
+    )
+    candidate_start, candidate_end = normalized_candidate.original_span_with_boundaries(
+        span.c_start, span.c_end, candidate_text
+    )
+    if span.q_start == 0 and span.q_end == len(normalized_query.text):
+        query_start, query_end = 0, len(query_text)
+    if span.c_start == 0 and span.c_end == len(normalized_candidate.text):
+        candidate_start, candidate_end = 0, len(candidate_text)
     return AlignedPassage(
         query_chunk_id=query_chunk_id,
         candidate_chunk_id=candidate_chunk_id,
-        query_start=span.q_start,
-        query_end=span.q_end,
-        candidate_start=span.c_start,
-        candidate_end=span.c_end,
+        query_start=query_start,
+        query_end=query_end,
+        candidate_start=candidate_start,
+        candidate_end=candidate_end,
         score=matches / aligned_len if aligned_len else 0.0,
+        match_type="verbatim",
     )

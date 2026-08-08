@@ -38,6 +38,11 @@ REQUIRED_TABLES: tuple[str, ...] = (
 
 _GIN_INDEX = "ix_plag_chunk_fingerprints_gin"
 
+_ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("plag_check", "matcher_version", "TEXT NOT NULL DEFAULT ''"),
+    ("plag_check", "matcher_config", "JSON NOT NULL DEFAULT '{}'::json"),
+)
+
 
 class PlagiarismUnavailableError(KbError):
     """The feature cannot run here - wrong dialect, or schema not created."""
@@ -73,10 +78,26 @@ def init_plagiarism_schema(engine: Engine) -> list[str]:
     ensure_postgres(engine)
     before = set(inspect(engine).get_table_names())
     PlagiarismBase.metadata.create_all(engine)
+    _apply_additive_columns(engine)
     created = sorted(set(inspect(engine).get_table_names()) - before)
     if created:
         logger.info("created plagiarism tables: %s", ", ".join(created))
     return created
+
+
+def _apply_additive_columns(engine: Engine) -> None:
+    """Add new defaulted columns without rebuilding indexes or projections."""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    for table, column, ddl_type in _ADDITIVE_COLUMNS:
+        if table not in tables:
+            continue
+        columns = {item["name"] for item in inspector.get_columns(table)}
+        if column in columns:
+            continue
+        with engine.begin() as connection:
+            connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
+        logger.info("added column %s.%s", table, column)
 
 
 def drop_plagiarism_schema(engine: Engine) -> None:
@@ -99,11 +120,20 @@ def verify_plagiarism_schema(session: Session) -> dict:
             "dialect": engine.dialect.name,
             "reason": "requires PostgreSQL",
             "missing_tables": list(REQUIRED_TABLES),
+            "missing_columns": [f"plag_check.{column}" for _, column, _ in _ADDITIVE_COLUMNS],
             "gin_index": False,
         }
 
     present = set(inspect(engine).get_table_names())
     missing = [name for name in REQUIRED_TABLES if name not in present]
+    missing_columns: list[str] = []
+    if "plag_check" in present:
+        columns = {item["name"] for item in inspect(engine).get_columns("plag_check")}
+        missing_columns = [
+            f"{table}.{column}"
+            for table, column, _ in _ADDITIVE_COLUMNS
+            if column not in columns
+        ]
 
     gin_present = False
     if "plag_corpus_chunk" in present:
@@ -115,8 +145,9 @@ def verify_plagiarism_schema(session: Session) -> dict:
         )
 
     return {
-        "ready": not missing and gin_present,
+        "ready": not missing and not missing_columns and gin_present,
         "dialect": "postgresql",
         "missing_tables": missing,
+        "missing_columns": missing_columns,
         "gin_index": gin_present,
     }

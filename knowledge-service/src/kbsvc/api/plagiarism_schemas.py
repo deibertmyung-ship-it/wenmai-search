@@ -97,6 +97,8 @@ class ReportOut(BaseModel):
     status: CheckStatus
     snapshot_at: datetime
     algorithm_config_hash: str
+    matcher_version: str = ""
+    matcher_config: dict = Field(default_factory=dict)
     query_chars: int
     matched_chars: int
     checked_chunks: int
@@ -121,6 +123,8 @@ class ReportOut(BaseModel):
             status=report.status,
             snapshot_at=report.snapshot_at,
             algorithm_config_hash=report.algorithm_config_hash,
+            matcher_version=report.matcher_version,
+            matcher_config=report.matcher_config,
             query_chars=report.query_chars,
             matched_chars=report.matched_chars,
             checked_chunks=report.checked_chunks,

@@ -155,6 +155,8 @@ class CheckReport:
     matched_chars: int
     checked_chunks: int
     total_chunks: int
+    matcher_version: str = ""
+    matcher_config: dict = field(default_factory=dict)
     sources: list[MatchedSource] = field(default_factory=list)
     unique_passages: list[tuple[int, int]] = field(default_factory=list)
     coverage_reason: CoverageReason | None = None

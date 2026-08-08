@@ -139,6 +139,8 @@ def _explain(exc: BackendError) -> str:
     if exc.code == "plagiarism_concurrency_limit":
         limit = (exc.detail or {}).get("limit", "若干")
         return f"已有 {limit} 个检测在跑。等一个跑完，或到下方列表里取消一个。"
+    if exc.code == "plagiarism_text_too_short":
+        return f"输入过短：{exc.message}"
     if exc.code in {"plagiarism_input_too_large", "validation_error"}:
         return f"输入不合法：{exc.message}"
     if exc.code == "plagiarism_corpus_not_ready":

@@ -188,7 +188,8 @@ class PlagiarismWorker:
         check.leased_by = ""
         check.lease_expires_at = None
 
-        if check.attempts < check.max_attempts:
+        non_retryable = getattr(exc, "code", "") == "plagiarism_text_too_short"
+        if check.attempts < check.max_attempts and not non_retryable:
             check.status = str(CheckStatus.PENDING)
             check.available_at = repo.utcnow() + _backoff(self.settings, check.attempts)
             return

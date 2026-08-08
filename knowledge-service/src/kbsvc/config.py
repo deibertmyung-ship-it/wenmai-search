@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Profile = Literal["local", "server"]
@@ -125,6 +125,10 @@ class Settings(BaseSettings):
     plag_winnow_window: int = 8
     plag_min_seed_len: int = 30
     plag_min_passage_len: int = 50
+    plag_zh_min_seed_len: int = 12
+    plag_zh_min_passage_len: int = 20
+    plag_min_effective_chars: int = 12
+    plag_short_exact_min_score: float = 0.99
     plag_extend_tolerance: float = 0.85
     plag_df_ratio_threshold: float = 0.25
     # A query chunk below this fraction of word characters is skipped: rule
@@ -211,7 +215,9 @@ class Settings(BaseSettings):
             )
         return value
 
-    @field_validator("plag_extend_tolerance", "plag_df_ratio_threshold")
+    @field_validator(
+        "plag_extend_tolerance", "plag_df_ratio_threshold", "plag_short_exact_min_score"
+    )
     @classmethod
     def _must_be_a_ratio(cls, value: float) -> float:
         if not 0.0 < value <= 1.0:
@@ -224,6 +230,9 @@ class Settings(BaseSettings):
         "plag_winnow_window",
         "plag_min_seed_len",
         "plag_min_passage_len",
+        "plag_zh_min_seed_len",
+        "plag_zh_min_passage_len",
+        "plag_min_effective_chars",
         "plag_candidate_top_k",
         "plag_max_input_chars",
         "plag_budget_reference_chars",
@@ -239,6 +248,14 @@ class Settings(BaseSettings):
         if value <= 0:
             raise ValueError(f"must be positive, got {value}")
         return value
+
+    @model_validator(mode="after")
+    def _plag_thresholds_are_ordered(self) -> Settings:
+        if self.plag_zh_min_seed_len < self.plag_min_effective_chars:
+            raise ValueError("plag_zh_min_seed_len must be >= plag_min_effective_chars")
+        if self.plag_zh_min_passage_len <= self.plag_zh_min_seed_len:
+            raise ValueError("plag_zh_min_passage_len must be greater than plag_zh_min_seed_len")
+        return self
 
     @property
     def plagiarism_algorithm_config_hash(self) -> str:
@@ -256,11 +273,12 @@ class Settings(BaseSettings):
         payload = "|".join(
             str(part)
             for part in (
-                "v1",
+                "v2",
                 self.plag_sentences_per_chunk,
                 self.plag_chunk_overlap,
                 self.plag_kgram,
                 self.plag_winnow_window,
+                "plag-normalizer-v2",
             )
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]

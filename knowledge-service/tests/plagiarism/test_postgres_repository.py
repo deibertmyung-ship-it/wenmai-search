@@ -10,11 +10,12 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from kbsvc import ids
 from kbsvc.plagiarism import repository as repo
 from kbsvc.plagiarism.models import (
+    PlagCheck,
     PlagCorpusChunk,
     PlagCorpusProjection,
     utcnow,
@@ -72,12 +73,39 @@ def test_schema_reports_ready_with_every_table_and_the_gin_index(pg_session):
     report = verify_plagiarism_schema(pg_session)
     assert report["ready"] is True
     assert report["missing_tables"] == []
+    assert report["missing_columns"] == []
     assert report["gin_index"] is True
 
 
 def test_schema_init_is_idempotent(pg_session):
     """Re-running init is the normal way to pick up a newly added table."""
     assert init_plagiarism_schema(pg_session.get_bind()) == []
+
+
+def test_schema_init_adds_matcher_columns_without_losing_existing_rows(pg_session):
+    check = PlagCheck(
+        id=ids.new_id(),
+        tenant_id=TENANT,
+        creator_key_id="key",
+        algorithm_config_hash=HASH,
+    )
+    pg_session.add(check)
+    pg_session.flush()
+    check_id = check.id
+
+    pg_session.execute(text("ALTER TABLE plag_check DROP COLUMN matcher_version"))
+    pg_session.execute(text("ALTER TABLE plag_check DROP COLUMN matcher_config"))
+    pg_session.commit()
+
+    assert init_plagiarism_schema(pg_session.get_bind()) == []
+    assert pg_session.execute(
+        text("SELECT count(*) FROM plag_check WHERE id = :id"), {"id": check_id}
+    ).scalar_one() == 1
+    columns = {
+        column["name"]
+        for column in inspect(pg_session.get_bind()).get_columns("plag_check")
+    }
+    assert {"matcher_version", "matcher_config"} <= columns
 
 
 def test_required_tables_all_exist(pg_session):

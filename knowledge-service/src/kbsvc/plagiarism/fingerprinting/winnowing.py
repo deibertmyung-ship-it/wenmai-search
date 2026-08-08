@@ -24,29 +24,11 @@ file is covered by a migration-baseline test against upstream vectors.
 from __future__ import annotations
 
 import hashlib
-import re
-import unicodedata
 
-# Citation / editorial markers that survive a copy-paste from a rendered page
-# (Wikipedia "[12]", "[citation needed]"; academic footnote refs) but are
-# stripped out by the corpus's text extraction. Removing them at fingerprint
-# time lets pasted "...a fact.[12] Next sentence..." align with the marker-free
-# corpus copy instead of corrupting every k-gram that straddles the bracket (at
-# k=5, one "[12]" poisons ~8 consecutive grams). Bracketed markers only; we
-# don't touch parenthetical "(Smith, 2019)" style refs, which overlap with
-# legitimate prose and would risk stripping real content.
-_CITATION_MARKER_RE = re.compile(
-    r"\[\s*(?:"
-    r"\d{1,4}"  # [1] [12] [1234]
-    r"|citation needed|clarification needed|verification needed|page needed"
-    r"|note\s*\d*|nb\s*\d*|dead link|sic|update|edit"
-    r"|by whom|according to whom|when|who|why|where"
-    r")\??\s*\]",
-    re.IGNORECASE,
-)
+from ..normalization import normalize_with_offsets
 
 
-def fingerprint(text: str, k: int, w: int) -> list[int]:
+def fingerprint(text: str, k: int, w: int, *, profile: str = "generic") -> list[int]:
     """Compute the winnowing fingerprint of `text`.
 
     Returns a sorted, deduplicated list of signed 64-bit ints, each derived
@@ -56,7 +38,7 @@ def fingerprint(text: str, k: int, w: int) -> list[int]:
     Output is deterministic across runs and machines (blake2b is keyless and
     reproducible - unlike Python's built-in `hash()`, which is salted).
     """
-    normalized = normalize(text)
+    normalized = normalize_with_offsets(text, profile=profile).text
     if len(normalized) < k:
         return []
 
@@ -74,9 +56,7 @@ def normalize(text: str) -> str:
     normalized form's length alongside the fingerprints, and computing it twice
     from different code paths is how the two silently diverge.
     """
-    nfkc = unicodedata.normalize("NFKC", text)
-    de_cited = _CITATION_MARKER_RE.sub("", nfkc)
-    return " ".join(de_cited.lower().split())
+    return normalize_with_offsets(text, profile="generic").text
 
 
 def _hash_kgram(s: str) -> int:

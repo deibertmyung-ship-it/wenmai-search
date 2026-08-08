@@ -325,6 +325,8 @@ def plagiarism_status_command() -> None:
     typer.echo(f"schema ready    {report['schema']['ready']}")
     if report["schema"]["missing_tables"]:
         typer.echo(f"  missing       {', '.join(report['schema']['missing_tables'])}")
+    if report["schema"].get("missing_columns"):
+        typer.echo(f"  missing cols  {', '.join(report['schema']['missing_columns'])}")
     typer.echo(f"  gin index     {report['schema']['gin_index']}")
     typer.echo(f"live workers    {report['live_workers']}")
     coverage = report["coverage"]

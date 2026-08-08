@@ -11,6 +11,8 @@ from __future__ import annotations
 import random
 import string
 
+import pytest
+
 from kbsvc.plagiarism.alignment.seed_extend import align
 
 # Upstream carried these as parameter defaults; the port moved them to settings.
@@ -54,6 +56,11 @@ def test_query_shorter_than_min_seed_returns_empty():
 
 def test_candidate_shorter_than_min_seed_is_skipped():
     assert run("q", "x" * 100, [("c", "x" * 29)]) == []
+
+
+def test_english_forty_nine_character_exact_passage_stays_below_30_50_gate():
+    text = "a" * 49
+    assert run("q", text, [("c", text)]) == []
 
 
 # --- exact reuse --------------------------------------------------------
@@ -192,3 +199,47 @@ def test_short_chinese_reuse_survives_punctuation_difference():
 
     assert len(result) == 1
     assert result[0].score >= 0.99
+
+
+def test_chinese_partial_short_match_is_not_reported():
+    query = "\u4eba\u7980\u5929\u5730\u3001\u547d\u5c5e\u9634\u9633\u3002"
+    candidate = "\u4eba\u7980\u5929\u5730\u3001\u547d\u5c5e\u9634\u65e5\u3002"
+    assert (
+        run("q-partial", query, [("source", candidate)], min_seed_len=12, min_passage_len=20)
+        == []
+    )
+
+
+def test_unrelated_ancient_chinese_text_is_not_reported():
+    query = (
+        "\u4eba\u7980\u5929\u5730\u3001\u547d\u5c5e\u9634\u9633\u3001\u751f\u5c45\u8986\u8f7d\u4e4b\u5185\u3002"
+    )
+    candidate = (
+        "\u5c71\u4e0d\u5728\u9ad8\uff0c\u6709\u4ed9\u5219\u540d\uff1b"
+        "\u6c34\u4e0d\u5728\u6df1\uff0c\u6709\u9f99\u5219\u7075\u3002"
+    )
+    assert run("q-unrelated", query, [("source", candidate)]) == []
+
+
+def test_pure_punctuation_is_filtered_before_alignment():
+    punctuation = "\u3001\u3002\uff0c\uff01\uff1f" * 8
+    assert run("q-punctuation-only", punctuation, [("source", punctuation)], min_seed_len=12,
+               min_passage_len=20) == []
+
+
+@pytest.mark.parametrize("target_len", [108, 188])
+def test_long_chinese_query_with_many_short_sentences_is_found(target_len: int):
+    sentences = [
+        "\u4eba\u6cd5\u5730\uff0c\u5730\u6cd5\u5929\uff0c\u5929\u6cd5\u9053\uff0c\u9053\u6cd5\u81ea\u7136\u3002",
+        "\u5929\u5730\u7384\u9ec4\uff0c\u5b87\u5b99\u6d2a\u8352\u3002",
+        "\u65e5\u6708\u76c8\u6603\uff0c\u8fb0\u5bbf\u5217\u5f20\u3002",
+        "\u5bd2\u6765\u6691\u5f80\uff0c\u79cb\u6536\u51ac\u85cf\u3002",
+        "\u4e91\u817e\u81f4\u96e8\uff0c\u9732\u7ed3\u4e3a\u971c\u3002",
+    ]
+    query = ""
+    while len(query) < target_len:
+        query += sentences[len(query) % len(sentences)]
+    query = query[:target_len]
+    result = run(f"q-{target_len}", query, [("source", query)])
+    assert len(result) == 1
+    assert result[0].score == 1.0

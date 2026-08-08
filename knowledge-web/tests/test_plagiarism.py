@@ -333,6 +333,24 @@ def test_validation_error_is_explained_with_the_backend_message(
 
 
 @respx.mock
+def test_short_text_error_is_explained_separately(
+    client, corpus_ready_payload, checks_payload
+):
+    stub_corpus(corpus_ready_payload)
+    stub_checks(checks_payload)
+    stub_submit_error(
+        422,
+        "plagiarism_text_too_short",
+        "有效文本少于 12 个字符，无法可靠查重",
+        {"effective_chars": 7, "minimum": 12},
+    )
+    response = client.post("/plagiarism/", data={"text": "short", "form_token": "t"})
+    assert response.status_code == 302
+    body = html(client.get("/plagiarism/", follow_redirects=True))
+    assert "有效文本少于 12 个字符" in body
+
+
+@respx.mock
 def test_corpus_not_ready_is_explained_rather_than_shown_as_a_raw_error(
     client, corpus_ready_payload, checks_payload
 ):

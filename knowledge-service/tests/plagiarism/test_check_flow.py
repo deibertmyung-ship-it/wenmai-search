@@ -19,6 +19,7 @@ from kbsvc.plagiarism.service import (
     FeatureDisabledError,
     IdempotencyConflictError,
     InputTooLargeError,
+    InputTooShortError,
     PlagiarismService,
 )
 from kbsvc.plagiarism.types import CheckStatus, CreateDocumentCheck, CreateTextCheck
@@ -87,6 +88,20 @@ def test_oversized_input_is_refused_before_any_work(kb_session, enabled, monkeyp
         service(enabled).create_text_check(
             kb_session, CreateTextCheck(tenant_id=TENANT, creator_key_id="k1", text="x" * 200)
         )
+
+
+def test_effective_text_shorter_than_twelve_is_refused_before_corpus_lookup(kb_session, enabled):
+    with pytest.raises(InputTooShortError) as exc_info:
+        service(enabled).create_text_check(
+            kb_session,
+            CreateTextCheck(
+                tenant_id=TENANT,
+                creator_key_id="k1",
+                text="\u4eba\u7980\u5929\u5730\u3001\u547d\u5c5e\u9634\u9633\u3002",
+            ),
+        )
+    assert exc_info.value.code == "plagiarism_text_too_short"
+    assert exc_info.value.detail["effective_chars"] < 12
 
 
 def test_the_same_idempotency_key_returns_the_original_check(kb_session, enabled, build_corpus):
