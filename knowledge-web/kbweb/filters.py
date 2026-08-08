@@ -7,6 +7,7 @@ would highlight text the backend never scored, which is a lie about provenance.
 
 from __future__ import annotations
 
+from collections import Counter, defaultdict
 from datetime import datetime
 from itertools import pairwise
 
@@ -125,28 +126,32 @@ def coverage_segments(
     if not valid:
         return [(text, frozenset())]
 
-    # Between two adjacent boundaries the covering set cannot change, so each
-    # slice has exactly one answer. Sweeping boundaries is what lets overlaps
-    # survive; a left-to-right cursor cannot express them.
-    edges = sorted({0, len(text)} | {pos for start, end, _ in valid for pos in (start, end)})
-    sliced = [
-        (
-            text[left:right],
-            frozenset(
-                ordinal for start, end, ordinal in valid if start <= left and right <= end
-            ),
-        )
-        for left, right in pairwise(edges)
-    ]
+    # A real event sweep: do not rescan every span at every boundary. Reports
+    # may contain thousands of passages, so O(spans * boundaries) is not an
+    # acceptable rendering path for the 500k-character input ceiling.
+    events: dict[int, Counter[int]] = defaultdict(Counter)
+    for start, end, ordinal in valid:
+        events[start][ordinal] += 1
+        events[end][ordinal] -= 1
+
+    edges = sorted({0, len(text), *events})
+    active: Counter[int] = Counter()
+    sliced: list[tuple[str, frozenset[int]]] = []
+    for left, right in pairwise(edges):
+        for ordinal, delta in events[left].items():
+            active[ordinal] += delta
+            if active[ordinal] <= 0:
+                del active[ordinal]
+        sliced.append((text[left:right], frozenset(active)))
 
     # Runs with identical owners become one <mark> rather than one per boundary.
-    merged: list[tuple[str, frozenset[int]]] = []
+    merged: list[tuple[list[str], frozenset[int]]] = []
     for fragment, owners in sliced:
         if merged and merged[-1][1] == owners:
-            merged[-1] = (merged[-1][0] + fragment, owners)
+            merged[-1][0].append(fragment)
         else:
-            merged.append((fragment, owners))
-    return merged
+            merged.append(([fragment], owners))
+    return [("".join(fragments), owners) for fragments, owners in merged]
 
 
 def register(app) -> None:

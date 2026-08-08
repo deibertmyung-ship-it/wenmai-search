@@ -138,3 +138,12 @@ def test_coverage_drops_out_of_range_spans_rather_than_trusting_them():
 def test_coverage_handles_empty_inputs():
     assert coverage_segments("", [(0, 1, 1)]) == []
     assert coverage_segments("零一二", []) == [("零一二", frozenset())]
+
+
+def test_coverage_counts_overlapping_spans_from_the_same_source():
+    """Same source, overlapping itself: the active count must not go negative
+    or drop to zero prematurely, which is exactly what a naive
+    set.discard()/set.remove() based implementation would get wrong."""
+    assert coverage_segments("零一二三四五", [(0, 6, 1), (2, 4, 1)]) == [
+        ("零一二三四五", frozenset({1}))
+    ]
