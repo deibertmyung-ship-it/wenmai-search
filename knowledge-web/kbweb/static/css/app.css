@@ -539,7 +539,7 @@ mark {
          color: var(--indigo); padding: var(--space-3) var(--space-4);
          margin-bottom: var(--space-5); border-radius: 0 var(--radius) var(--radius) 0;
          font-size: var(--text-sm); }
-.flash--error { border-left-color: var(--seal); background: var(--seal-wash); color: var(--seal); }
+.flash--error { border-left-color: var(--ochre); background: var(--ochre-wash); color: var(--ochre); }
 .flash--ok    { border-left-color: var(--jade); background: var(--jade-wash); color: var(--jade); }
 
 /* ---------------------------------------------------------------- misc */

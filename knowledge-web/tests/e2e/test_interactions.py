@@ -128,6 +128,9 @@ def test_both_themes_render_readable_contrast(page: Page, live_server: str):
 
 
 def test_reader_appends_the_next_batch_in_place(page: Page, live_server: str):
+    # Exercise the explicit button path without racing the reader's
+    # viewport-driven prefetch callback.
+    page.add_init_script("delete window.IntersectionObserver")
     page.goto(f"{live_server}/read/doc-1")
     chunks = page.locator(".chunk")
     first = chunks.count()

@@ -99,7 +99,7 @@ def test_stream_progress_raises_backend_error_on_upstream_4xx():
             404,
             json={
                 "error": {
-                    "code": "check_not_found",
+                    "code": "plagiarism_check_not_found",
                     "message": "check not found",
                     "detail": {},
                 }
