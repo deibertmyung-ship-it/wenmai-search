@@ -8,6 +8,7 @@ would highlight text the backend never scored, which is a lie about provenance.
 from __future__ import annotations
 
 from datetime import datetime
+from itertools import pairwise
 
 _JOB_TONE = {
     "completed": "ok",
@@ -135,7 +136,7 @@ def coverage_segments(
                 ordinal for start, end, ordinal in valid if start <= left and right <= end
             ),
         )
-        for left, right in zip(edges, edges[1:])
+        for left, right in pairwise(edges)
     ]
 
     # Runs with identical owners become one <mark> rather than one per boundary.
