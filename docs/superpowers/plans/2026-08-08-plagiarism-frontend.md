@@ -16,11 +16,12 @@
 
 - **无脚本必须可用。** 任何交互都要有无 JS 路径。`tests/conftest.py` 的 `config` fixture 是 `params=[False, True]` 参数化的，所以**每个视图测试自动跑 js 与 nojs 两遍**——测试写一遍即覆盖两个维度。
 - **kbweb 不持有存储。** 不缓存后端数据，不落盘，不进 session。
-- **朱砂 `--seal` 是语义色**，只用于命中高亮与引用标记，不作装饰。
+- **朱砂 `--seal` 是语义色**，只用于命中高亮与引用标记，不作装饰。提交按钮、进度条、重复率数字使用既有墨色/靛青/赭石语义色，不得使用 `btn--seal` 或 `--seal`。
 - **模板输出默认转义。** 高亮走分段拼接（`coverage_segments` 返回的片段逐个输出），**不得用 `|safe` 拼原始 HTML**。
 - **API Key 只在服务端**，不出现在任何渲染结果里。
 - 现有代码风格：ruff，`line-length = 100`，`select = ["E", "F", "I", "UP", "B", "SIM"]`，`from __future__ import annotations` 打头。
-- 后端常量：`plag_max_input_chars = 500_000`、`plag_max_active_checks_per_key = 2`、`plag_preview_chars = 300`、`plag_sse_max_seconds = 900`。
+- 后端常量：`plag_max_input_chars = 500_000`、`plag_max_active_checks_per_key = 2`、`plag_preview_chars = 300`、`plag_sse_max_seconds = 900`；既有 chunks API 的 `limit` 上限是 **200**。
+- **以后端真实错误码为准。** 本功能涉及 `feature_disabled`、`plagiarism_concurrency_limit`、`plagiarism_input_too_large`、`plagiarism_corpus_not_ready`、`plagiarism_corpus_empty`、`plagiarism_check_not_found`、`report_visibility_changed`、`idempotency_conflict`，以及框架层可能返回的 `validation_error`。文档 chunks 自身的 `not_found` 是有效契约，但不得拿它替代 plagiarism check 的 `plagiarism_check_not_found`。
 - 测试命令一律在 `knowledge-web/` 下跑。
 
 ## 文件结构
@@ -48,18 +49,39 @@
 | `kbweb/client.py` | 拆出 `_send`；新增 8 个 plagiarism 方法 |
 | `kbweb/filters.py` | 新增 `coverage_segments` |
 | `kbweb/__init__.py:102-109` | 注册 blueprint |
+| `kbweb/views/library.py` | 为文档详情生成服务端 UUID 幂等 token |
 | `kbweb/templates/base.html:31-40` | 导航增加「查重」 |
 | `kbweb/templates/document.html` | 「维护」面板增加查重按钮 |
 | `kbweb/static/css/app.css` | 追加样式 |
 | `tests/test_nojs.py:38` | `PAGES` 增加 `/plagiarism/` |
 | `tests/conftest.py` | 新增 plagiarism 相关 payload fixture |
-| `tests/e2e/stub_backend.py` | 补 plagiarism 端点 |
+| `tests/e2e/stub_backend.py` | 扩展注入式 `FakeKbClient` 的 plagiarism 方法与假 SSE（不是挂 HTTP 路由） |
 | `deploy/Dockerfile:29` | `waitress-serve` 增加 `--threads=16` |
 
-## 后端依赖（阻塞 Task 6）
+`tests/e2e/stub_backend.py` 实际是注入进 kbweb 的 `FakeKbClient`，不是 HTTP 应用；Task 9 必须扩展这个类的方法面，不能在文件里挂假路由。
 
-`ReportOut` 需增加 `query_text` 字段，另立一条 ADR。见规格「后端依赖」节。
-Task 1–5、7–9 均不依赖此项，可先行。
+### Task 0: 后端前置契约（阻塞 Task 6 与 Task 7 的版本一致性）
+
+前端动工前先在 `knowledge-service/` 建一个独立提交，完成并验证以下契约：
+
+1. `CheckReport` 与 `ReportOut` 增加 `query_text`，`ReportOut.of()` 完整映射。
+2. 文本检测继续从 `PlagCheck.query_text` 返回原文；文档检测在 runner 按冻结的 `source_version_id` 解析出正文后，也把这份**检测快照**写入同一字段。报告读取不重复解析对象存储，旧记录兼容路径才按冻结版本回读；冻结版本已不存在时必须返回明确错误，不能静默给出与 `query_chars` 不一致的空串。
+3. `CheckRunner._persist()` 写 `PlagCheckSource.version` 时保存真实 `DocumentVersion.version`，不得继续写常量 `0`。来源摘录随后用报告中的版本读取，避免文档更新后旧偏移切到新正文。
+4. 保持现有 ACL 语义：若在 `get_report` 之前已有来源被撤权，后端返回 `report_visibility_changed` 409，前端显示专门说明，不渲染可能泄露来源信息的部分报告。只有“报告已成功取得、随后 chunks 请求失败”的竞态才按单卡降级。
+5. 新建 `knowledge-service/docs/adr/0006-return-owner-query-text-in-plagiarism-report.md`，记录为何只向检测创建者回显查询侧原文，以及文档模式如何按冻结版本还原。
+
+**Files:**
+- Modify: `knowledge-service/src/kbsvc/plagiarism/types.py`
+- Modify: `knowledge-service/src/kbsvc/plagiarism/models.py`（更新 `query_text` 注释以反映文档检测快照）
+- Modify: `knowledge-service/src/kbsvc/plagiarism/service.py`
+- Modify: `knowledge-service/src/kbsvc/plagiarism/runner.py`
+- Modify: `knowledge-service/src/kbsvc/api/plagiarism_schemas.py`
+- Create: `knowledge-service/docs/adr/0006-return-owner-query-text-in-plagiarism-report.md`
+- Test: `knowledge-service/tests/plagiarism/test_api.py`、对应 runner/service 测试
+
+**门禁测试：** 文本模式与文档模式的报告都返回与 `query_chars` 一致的 `query_text`；来源文档产生新版本后，旧报告仍携带旧来源版本号；`report_visibility_changed` 仍返回 409。
+
+Task 1–5、8 可先行；Task 6 依赖 `query_text`，Task 7 的正确摘录依赖真实来源版本号。
 
 ---
 
@@ -156,6 +178,9 @@ cd knowledge-web && python -m pytest tests/test_filters.py -v
 追加到 `kbweb/filters.py`（放在 `highlight_segments` 之后）：
 
 ```python
+from collections import Counter, defaultdict
+
+
 def coverage_segments(
     text: str, spans: list[tuple[int, int, int]]
 ) -> list[tuple[str, frozenset[int]]]:
@@ -178,29 +203,44 @@ def coverage_segments(
     if not valid:
         return [(text, frozenset())]
 
-    # Between two adjacent boundaries the covering set cannot change, so each
-    # slice has exactly one answer. Sweeping boundaries is what lets overlaps
-    # survive; a left-to-right cursor cannot express them.
-    edges = sorted({0, len(text)} | {pos for start, end, _ in valid for pos in (start, end)})
-    sliced = [
-        (
-            text[left:right],
-            frozenset(
-                ordinal for start, end, ordinal in valid if start <= left and right <= end
-            ),
-        )
-        for left, right in zip(edges, edges[1:])
-    ]
+    # A real event sweep: do not rescan every span at every boundary. Reports
+    # may contain thousands of passages, so O(spans * boundaries) is not an
+    # acceptable rendering path for the 500k-character input ceiling.
+    events: dict[int, Counter[int]] = defaultdict(Counter)
+    for start, end, ordinal in valid:
+        events[start][ordinal] += 1
+        events[end][ordinal] -= 1
+
+    edges = sorted({0, len(text), *events})
+    active: Counter[int] = Counter()
+    sliced: list[tuple[str, frozenset[int]]] = []
+    for left, right in zip(edges, edges[1:]):
+        for ordinal, delta in events[left].items():
+            active[ordinal] += delta
+            if active[ordinal] <= 0:
+                del active[ordinal]
+        sliced.append((text[left:right], frozenset(active)))
 
     # Runs with identical owners become one <mark> rather than one per boundary.
-    merged: list[tuple[str, frozenset[int]]] = []
+    merged: list[tuple[list[str], frozenset[int]]] = []
     for fragment, owners in sliced:
         if merged and merged[-1][1] == owners:
-            merged[-1] = (merged[-1][0] + fragment, owners)
+            merged[-1][0].append(fragment)
         else:
-            merged.append((fragment, owners))
-    return merged
+            merged.append(([fragment], owners))
+    return [("".join(fragments), owners) for fragments, owners in merged]
 ```
+
+再加一条同一来源自重叠的测试，防止用 `set.remove()` 提前清掉仍活跃的区间：
+
+```python
+def test_coverage_counts_overlapping_spans_from_the_same_source():
+    assert coverage_segments("零一二三四五", [(0, 6, 1), (2, 4, 1)]) == [
+        ("零一二三四五", frozenset({1}))
+    ]
+```
+
+复杂度目标：排序 O(n log n)，扫描 O(n)，正文切片/拼接 O(len(text))；不得保留“每个切片再次遍历全部 spans”或循环中反复拼接长字符串的二次复杂度实现。
 
 并在 `register()` 的 `app.jinja_env.globals` 里加上它：
 
@@ -347,7 +387,8 @@ coverage_segments 与 highlight_segments 的区别在于重叠：后者遇重叠
   - `KbClient.get_check(check_id: str) -> dict`
   - `KbClient.get_plag_report(check_id: str) -> dict`
   - `KbClient.delete_check(check_id: str) -> int`（返回 HTTP 状态码，204 或 202）
-  - `KbClient.stream_progress(check_id: str, *, last_event_id: str = "")`（返回 httpx 流式上下文管理器）
+  - `KbClient.stream_progress(check_id: str, *, last_event_id: str = "")`（返回已统一处理鉴权、HTTP 错误与网络错误的流式上下文管理器）
+  - 扩展既有 `KbClient.get_chunks(..., version: int | None = None)`；调用方 `limit` 不得超过后端上限 200
 
 方法名用 `get_plag_report` 而非 `get_report`，避免与后续可能的其他 report 混淆；`delete_check` **返回状态码而非 body**，因为 204 与 202 的区分正是调用方要的信息。
 
@@ -456,7 +497,26 @@ cd knowledge-web && python -m pytest tests/test_plagiarism.py -v
 
 - [ ] **Step 4: 加 plagiarism 方法**
 
-追加到 `kbweb/client.py`，放在 `# --- jobs & ops` 之前：
+先在模块顶部导入 `from contextlib import contextmanager`。追加 plagiarism 方法到 `kbweb/client.py`，放在 `# --- jobs & ops` 之前；同时扩展既有 `get_chunks`，仅在版本非空时发送参数：
+
+```python
+    def get_chunks(
+        self,
+        document_id: str,
+        *,
+        from_ordinal: int = 0,
+        limit: int = 20,
+        version: int | None = None,
+    ) -> list[dict]:
+        params = {"from_ordinal": from_ordinal, "limit": limit}
+        if version is not None:
+            params["version"] = version
+        return self._request(
+            "GET", f"/v1/documents/{document_id}/chunks", params=params
+        ) or []
+```
+
+随后加入 plagiarism 方法：
 
 ```python
     # --- plagiarism -----------------------------------------------------
@@ -503,19 +563,26 @@ cd knowledge-web && python -m pytest tests/test_plagiarism.py -v
         """
         return self._send("DELETE", f"/v1/plagiarism/checks/{check_id}").status_code
 
+    @contextmanager
     def stream_progress(self, check_id: str, *, last_event_id: str = ""):
-        """Open the upstream SSE stream. Caller must use it as a context manager.
-
-        The client's ordinary read timeout is left in place on purpose: kbsvc
-        emits a keepalive every couple of seconds, so an idle read that long
-        means the stream is actually dead and ending it is correct.
-        """
+        """Open an SSE stream with the same error contract as ordinary calls."""
         headers = {"Accept": "text/event-stream"}
         if last_event_id:
             headers["Last-Event-ID"] = last_event_id
-        return self._client.stream(
-            "GET", f"/v1/plagiarism/checks/{check_id}/progress", headers=headers
-        )
+        try:
+            with self._client.stream(
+                "GET", f"/v1/plagiarism/checks/{check_id}/progress", headers=headers
+            ) as response:
+                if response.status_code >= 400:
+                    response.read()
+                    raise BackendError(response.status_code, *_parse_error(response))
+                if not response.headers.get("Content-Type", "").startswith("text/event-stream"):
+                    response.read()
+                    raise BackendUnavailable("upstream progress response is not SSE")
+                yield response
+        except httpx.HTTPError as exc:
+            logger.warning("backend SSE unavailable for %s: %s", check_id, exc)
+            raise BackendUnavailable(type(exc).__name__) from exc
 ```
 
 并在模块末尾 `_parse_error` 之前加：
@@ -526,6 +593,8 @@ def _idempotency(key: str) -> dict[str, str]:
 ```
 
 - [ ] **Step 5: 跑测试确认通过**
+
+补测试断言：来源版本会作为 `version` 查询参数发送；`stream_progress` 的上游 404/503 会抛 `BackendError`，网络失败会抛 `BackendUnavailable`，而不是伪装成成功 SSE。
 
 ```bash
 cd knowledge-web && python -m pytest tests/test_plagiarism.py tests/test_views.py -v
@@ -551,7 +620,7 @@ delete_check 返回状态码而不是 body：204 已删除与 202 已请求取�
 
 **Files:**
 - Create: `kbweb/views/plagiarism.py`、`kbweb/templates/plagiarism.html`
-- Modify: `kbweb/__init__.py:102-109`、`kbweb/templates/base.html:31-40`、`kbweb/templates/document.html`、`tests/conftest.py`、`tests/test_nojs.py:38`、`kbweb/static/css/app.css`
+- Modify: `kbweb/__init__.py:102-109`、`kbweb/views/library.py`、`kbweb/templates/base.html:31-40`、`kbweb/templates/document.html`、`tests/conftest.py`、`tests/test_nojs.py:38`、`kbweb/static/css/app.css`
 - Test: `tests/test_plagiarism.py`（追加）
 
 **Interfaces:**
@@ -750,21 +819,22 @@ def test_concurrency_limit_is_explained_rather_than_shown_as_a_raw_error(
 
 
 @respx.mock
-def test_feature_unavailable_gets_its_own_explanation(client, checks_payload):
+def test_feature_disabled_gets_its_own_explanation(client, checks_payload):
     respx.get(f"{API_BASE}/v1/plagiarism/corpus/status").mock(
         return_value=httpx.Response(
             503,
             json={
                 "error": {
-                    "code": "feature_unavailable",
-                    "message": "plagiarism detection requires PostgreSQL",
+                    "code": "feature_disabled",
+                    "message": "plagiarism detection is disabled",
                     "detail": {},
                 }
             },
         )
     )
-    body = html(client.get("/plagiarism/"))
-    assert "PostgreSQL" in body
+    response = client.get("/plagiarism/")
+    assert response.status_code == 200
+    assert "当前部署未启用抄袭检测" in html(response)
 
 
 @respx.mock
@@ -781,18 +851,19 @@ def test_document_page_offers_a_check_button(client, document_payload, chunks_pa
 
 @respx.mock
 def test_document_check_redirects_to_the_new_check(client):
-    respx.post(f"{API_BASE}/v1/plagiarism/checks/documents/doc-1111-2222").mock(
+    route = respx.post(f"{API_BASE}/v1/plagiarism/checks/documents/doc-1111-2222").mock(
         return_value=httpx.Response(202, json={"check_id": "chk-doc", "status": "pending"})
     )
     response = client.post("/plagiarism/documents/doc-1111-2222", data={"form_token": "t"})
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/plagiarism/checks/chk-doc")
+    assert route.calls.last.request.headers["Idempotency-Key"] == "t"
 ```
 
 - [ ] **Step 3: 跑测试确认失败**
 
 ```bash
-cd knowledge-web && python -m pytest tests/test_plagiarism.py -v -k "submit or corpus or document or concurrency or unavailable or oversized or empty"
+cd knowledge-web && python -m pytest tests/test_plagiarism.py -v -k "submit or corpus or document or concurrency or disabled or oversized or empty"
 ```
 预期：404，因为路由还不存在
 
@@ -880,7 +951,7 @@ def _corpus_or_reason(api) -> tuple[dict | None, str | None]:
     try:
         return api.corpus_status(), None
     except BackendError as exc:
-        if exc.code == "feature_unavailable":
+        if exc.code == "feature_disabled":
             return None, "当前部署未启用抄袭检测——该功能需要 PostgreSQL。"
         raise
 
@@ -889,21 +960,27 @@ def _explain(exc: BackendError) -> str:
     if exc.code == "plagiarism_concurrency_limit":
         limit = (exc.detail or {}).get("limit", "若干")
         return f"已有 {limit} 个检测在跑。等一个跑完，或到下方列表里取消一个。"
-    if exc.code == "validation_error":
+    if exc.code in {"plagiarism_input_too_large", "validation_error"}:
         return f"输入不合法：{exc.message}"
+    if exc.code == "plagiarism_corpus_not_ready":
+        return "语料仍在准备中，请稍后再试。"
+    if exc.code == "plagiarism_corpus_empty":
+        return "书库为空，请先导入典籍。"
+    if exc.code == "idempotency_conflict":
+        return "这张表单已用于另一份内容，请返回后重新提交。"
     return f"提交失败：{exc.message}"
 ```
 
-**注意：** `library` blueprint 的文档详情 endpoint 名要先确认。执行前跑
-`grep -n "def document\|def shelf\|def read" knowledge-web/kbweb/views/library.py`，
-把上面的 `library.document` 换成实际名字。
+为上述每个真实错误码补一个视图测试；至少断言状态码与完整专用文案，避免仅靠后端伪造的 message 让错误分支测试“碰巧通过”。
 
-- [ ] **Step 5: 确认 `BackendError` 有 `code` / `detail` / `message` 属性**
+`library` blueprint 的文档详情 endpoint 已核实为 `library.document`，阅读页为 `library.read`。
+
+- [ ] **Step 5: 锁定 `BackendError` 与错误码契约**
 
 ```bash
-cd knowledge-web && cat kbweb/errors.py
+cd knowledge-web && python -m pytest tests/test_plagiarism.py -v -k "error or disabled or corpus"
 ```
-若字段名不同，按实际字段调整 `_explain` 与 `_corpus_or_reason`。
+现有 `BackendError` 已核实具有 `status` / `code` / `message` / `detail`；测试直接锁定这些字段与真实后端错误码，不再把它们留作执行期占位检查。
 
 - [ ] **Step 6: 写模板**
 
@@ -917,7 +994,7 @@ cd knowledge-web && cat kbweb/errors.py
 <h1 class="section-title">稿件查重</h1>
 
 {% if corpus_error %}
-  <p class="flash flash--error">{{ corpus_error }}</p>
+  <p class="flash flash--warn">{{ corpus_error }}</p>
 {% else %}
   {% set ready = corpus.is_ready %}
   {% set empty = corpus.total_documents == 0 %}
@@ -938,7 +1015,7 @@ cd knowledge-web && cat kbweb/errors.py
                 {% if not ready %}disabled{% endif %}></textarea>
     </label>
     <p class="field__hint">最多 {{ "{:,}".format(max_chars) }} 字。</p>
-    <button class="btn btn--seal" type="submit" {% if not ready %}disabled{% endif %}>开始查重</button>
+    <button class="btn" type="submit" {% if not ready %}disabled{% endif %}>开始查重</button>
   </form>
 {% endif %}
 
@@ -979,8 +1056,8 @@ _CHECK_TONE = {
     # Partial is not a success: the run stopped early and the number it
     # produced is a floor, not a verdict.
     "completed_partial": "warn",
-    "failed": "fail",
-    "cancelled": "fail",
+    "failed": "warn",
+    "cancelled": "warn",
     "pending": "",
     "running": "running",
     "cancel_requested": "running",
@@ -1015,13 +1092,24 @@ def check_tone(status: str) -> str:
        {% if request.endpoint and request.endpoint.startswith('plagiarism.') %}aria-current="page"{% endif %}>查重</a>
 ```
 
-`kbweb/templates/document.html` 的「维护」面板里加一个表单（放在该 panel 内已有控件之后）：
+`kbweb/views/library.py` 顶部导入 `uuid`，并把 `document()` 的模板调用改为：
+
+```python
+    return render_template(
+        "document.html",
+        document=doc,
+        preview=preview,
+        plagiarism_form_token=uuid.uuid4().hex,
+    )
+```
+
+随后在 `kbweb/templates/document.html` 的「维护」面板里加一个表单（放在该 panel 内已有控件之后）：
 
 ```html
   <form method="post" action="{{ url_for('plagiarism.submit_document', document_id=document.id) }}"
         style="margin-top: var(--space-4)">
-    <input type="hidden" name="form_token" value="{{ range(1, 2**31) | random }}">
-    <button class="btn btn--seal btn--sm" type="submit">查重</button>
+    <input type="hidden" name="form_token" value="{{ plagiarism_form_token }}">
+    <button class="btn btn--sm" type="submit">查重</button>
   </form>
 ```
 
@@ -1065,7 +1153,8 @@ PAGES = ["/", "/library", "/ingest/", "/jobs/", "/plagiarism/"]
 .field__input:disabled { opacity: 0.5; cursor: not-allowed; }
 .field__hint { font-size: 0.8125rem; opacity: 0.7; margin-bottom: var(--space-4); }
 .table__note { font-size: 0.75rem; opacity: 0.6; margin-left: var(--space-2); }
-.pill--warn { background: var(--seal-wash); color: var(--seal); }
+.pill--warn { background: var(--ochre-wash); color: var(--ochre); }
+.flash--warn { border-left-color: var(--ochre); background: var(--ochre-wash); color: var(--ochre); }
 ```
 
 - [ ] **Step 11: 跑测试确认通过**
@@ -1086,7 +1175,8 @@ git commit -m "feat(web): 查重提交页、历史列表与提交入口
 的一个。
 
 语料未就绪时禁用提交而不是让用户交一个必然查不出东西的检测。
-feature_unavailable 单独解释，不走通用后端错误页。"
+feature_disabled 单独解释，不走通用后端错误页；提交错误按真实 plagiarism
+错误码分流，不让测试里的伪契约掩盖生产行为。"
 ```
 
 ---
@@ -1094,7 +1184,7 @@ feature_unavailable 单独解释，不走通用后端错误页。"
 ### Task 4: 详情页进度态、无脚本轮询与取消
 
 **Files:**
-- Modify: `kbweb/views/plagiarism.py`
+- Modify: `kbweb/views/plagiarism.py`、`kbweb/templates/base.html`
 - Create: `kbweb/templates/check.html`、`kbweb/templates/partials/_check_progress.html`
 - Test: `tests/test_plagiarism.py`（追加）
 
@@ -1125,17 +1215,26 @@ def stub_check(check_id: str, status: str, **extra):
 
 
 @respx.mock
-def test_running_check_refreshes_itself_without_scripts(client):
+def test_running_check_refreshes_itself_only_without_scripts(client, config):
     stub_check("chk-live", "running")
     body = html(client.get("/plagiarism/checks/chk-live"))
-    assert 'http-equiv="refresh"' in body
+    assert ('http-equiv="refresh"' in body) is config.nojs
     assert "检测中" in body
 
 
 @respx.mock
-def test_pending_check_also_refreshes(client):
+def test_pending_check_follows_the_same_nojs_refresh_rule(client, config):
     stub_check("chk-wait", "pending")
-    assert 'http-equiv="refresh"' in html(client.get("/plagiarism/checks/chk-wait"))
+    body = html(client.get("/plagiarism/checks/chk-wait"))
+    assert ('http-equiv="refresh"' in body) is config.nojs
+
+
+@respx.mock
+def test_cancel_requested_is_live_and_follows_the_nojs_refresh_rule(client, config):
+    stub_check("chk-stopping", "cancel_requested")
+    body = html(client.get("/plagiarism/checks/chk-stopping"))
+    assert ('http-equiv="refresh"' in body) is config.nojs
+    assert "正在停止" in body
 
 
 @respx.mock
@@ -1187,7 +1286,14 @@ def test_cancelling_a_running_check_stays_on_the_check(client):
 def test_unknown_check_is_a_normal_404_page(client):
     respx.get(f"{API_BASE}/v1/plagiarism/checks/chk-nope").mock(
         return_value=httpx.Response(
-            404, json={"error": {"code": "not_found", "message": "no such check", "detail": {}}}
+            404,
+            json={
+                "error": {
+                    "code": "plagiarism_check_not_found",
+                    "message": "no such check",
+                    "detail": {},
+                }
+            },
         )
     )
     assert client.get("/plagiarism/checks/chk-nope").status_code == 404
@@ -1229,19 +1335,25 @@ def delete(check_id: str):
 
 - [ ] **Step 4: 写模板**
 
-新建 `kbweb/templates/check.html`：
+先在 `kbweb/templates/base.html` 的 `</head>` 前增加合法的 head 扩展点：
+
+```html
+{% block head %}{% endblock %}
+```
+
+新建 `kbweb/templates/check.html`，把 refresh 放进 head block，不得输出在 `<main>` / `<body>` 中：
 
 ```html
 {% extends "base.html" %}
 {% block title %}检测 {{ check.check_id | short_id }}{% endblock %}
 
-{% block content %}
-{# The refresh tag is the whole no-script progress mechanism. It must not be
-   emitted in a terminal state or the report page would reload forever. #}
-{% if live and nojs %}
-  <meta http-equiv="refresh" content="{{ nojs_refresh_seconds }}">
-{% endif %}
+{% block head %}
+  {% if live and nojs %}
+    <meta http-equiv="refresh" content="{{ nojs_refresh_seconds }}">
+  {% endif %}
+{% endblock %}
 
+{% block content %}
 <h1 class="section-title">检测 <span class="table__mono">{{ check.check_id | short_id }}</span></h1>
 
 {% if live %}
@@ -1249,7 +1361,7 @@ def delete(check_id: str):
 {% elif check.status in ('completed', 'completed_partial') %}
   {% include "partials/_check_report.html" %}
 {% elif check.status == 'failed' %}
-  <p class="flash flash--error">检测失败。可以回到<a href="{{ url_for('plagiarism.index') }}">查重页</a>重新提交。</p>
+  <p class="flash flash--warn">检测失败。可以回到<a href="{{ url_for('plagiarism.index') }}">查重页</a>重新提交。</p>
 {% else %}
   <p class="flash">这次检测已取消。</p>
 {% endif %}
@@ -1305,8 +1417,8 @@ def events(check_id: str):
 
 ```css
 .progress__stage { font-family: var(--font-kai); font-size: 1.25rem; margin-bottom: var(--space-3); }
-.progress__track { height: 4px; background: var(--seal-wash); border-radius: 2px; overflow: hidden; }
-.progress__bar { height: 100%; background: var(--seal); transition: width var(--duration-normal, 300ms) ease-out; }
+.progress__track { height: 4px; background: var(--ochre-wash); border-radius: 2px; overflow: hidden; }
+.progress__bar { height: 100%; background: var(--ochre); transition: width var(--duration-normal) ease-out; }
 .progress__hint { margin-top: var(--space-3); font-size: 0.8125rem; opacity: 0.7; }
 ```
 
@@ -1533,6 +1645,26 @@ def test_report_page_does_not_keep_refreshing(client, chunks_payload):
         return_value=httpx.Response(200, json=chunks_payload)
     )
     assert 'http-equiv="refresh"' not in html(client.get("/plagiarism/checks/chk-done"))
+
+
+@respx.mock
+def test_visibility_change_gets_a_dedicated_409_page(client):
+    stub_check("chk-hidden", "completed")
+    respx.get(f"{API_BASE}/v1/plagiarism/checks/chk-hidden/report").mock(
+        return_value=httpx.Response(
+            409,
+            json={
+                "error": {
+                    "code": "report_visibility_changed",
+                    "message": "a source is no longer visible",
+                    "detail": {"check_id": "chk-hidden"},
+                }
+            },
+        )
+    )
+    response = client.get("/plagiarism/checks/chk-hidden")
+    assert response.status_code == 409
+    assert "来源访问权限已变化" in html(response)
 ```
 
 - [ ] **Step 6: 跑测试确认失败**
@@ -1556,18 +1688,44 @@ def detail(check_id: str):
     check = api.get_check(check_id)
     status = check["status"]
 
-    report = api.get_plag_report(check_id) if status in REPORTABLE else None
+    report = None
+    report_error = None
+    if status in REPORTABLE:
+        try:
+            report = api.get_plag_report(check_id)
+        except BackendError as exc:
+            if exc.code != "report_visibility_changed":
+                raise
+            report_error = "来源访问权限已变化，出于安全原因无法显示这份报告。"
     sources = numbered_sources(report) if report else []
 
-    return render_template(
+    rendered = render_template(
         "check.html",
         check=check,
         report=report,
+        report_error=report_error,
         sources=sources,
         ratio=duplication_ratio(report) if report else 0.0,
         live=status not in TERMINAL,
         nojs_refresh_seconds=5,
     )
+    return (rendered, 409) if report_error else rendered
+```
+
+同时把 `check.html` 的终态分支改为先判断 `report_error`，再 include 报告 partial：
+
+```html
+{% if live %}
+  {% include "partials/_check_progress.html" %}
+{% elif report_error %}
+  <p class="flash flash--warn">{{ report_error }}</p>
+{% elif check.status in ('completed', 'completed_partial') %}
+  {% include "partials/_check_report.html" %}
+{% elif check.status == 'failed' %}
+  …
+{% else %}
+  …
+{% endif %}
 ```
 
 - [ ] **Step 8: 写报告模板**
@@ -1583,13 +1741,13 @@ def detail(check_id: str):
     {% if not report.is_complete %}<span class="verdict__floor">≥</span>{% endif %}{{ ratio }}%
   </p>
   <p class="verdict__label">
-    {{ sources | length }} 处来源 ·
+    {{ sources | length }} 个来源 ·
     {% if report.is_complete %}已查完整篇{% else %}覆盖不全{% endif %}
   </p>
 </div>
 
 {% if not report.is_complete %}
-  <p class="flash flash--error">
+  <p class="flash flash--warn">
     仅检查了 {{ "{:,}".format(report.checked_chunks) }} / {{ "{:,}".format(report.total_chunks) }} 段（{% if report.coverage_reason == 'time_cap' %}时间预算用尽{% else %}检测被取消{% endif %}）。<strong>未检查部分不代表没有重复。</strong>
   </p>
 {% endif %}
@@ -1619,9 +1777,9 @@ def detail(check_id: str):
 
 ```css
 .verdict { margin: var(--space-6) 0; }
-.verdict__figure { font-family: var(--font-song); font-size: clamp(3rem, 1rem + 7vw, 6rem); line-height: 1; color: var(--seal); }
+.verdict__figure { font-family: var(--font-song); font-size: clamp(3rem, 1rem + 7vw, 6rem); line-height: 1; color: var(--indigo); }
 .verdict__floor { opacity: 0.65; margin-right: 0.1em; }
-.verdict--partial .verdict__figure { color: var(--ink, currentColor); }
+.verdict--partial .verdict__figure { color: var(--ochre); }
 .verdict__label { font-family: var(--font-kai); font-size: 1rem; opacity: 0.8; margin-top: var(--space-2); }
 .sources { list-style: none; padding: 0; }
 .source { padding: var(--space-4) 0; border-top: 1px solid var(--rule, currentColor); }
@@ -1659,7 +1817,7 @@ COMPLETED_PARTIAL 这个状态，注释写着它绝不能被读成「没查到�
 
 ### Task 6: 报告页——全文高亮与角标
 
-**依赖后端 `ReportOut.query_text`。** 若该字段尚未上线，本任务阻塞，其余任务不受影响。
+**依赖“后端前置契约”的完整实现。** 不能只检查 schema 中出现字段名；门禁必须同时证明文本模式和文档模式都返回正确的 `query_text`。
 
 **Files:**
 - Modify: `kbweb/report.py`、`kbweb/templates/partials/_check_report.html`
@@ -1672,9 +1830,9 @@ COMPLETED_PARTIAL 这个状态，注释写着它绝不能被读成「没查到�
 - [ ] **Step 1: 确认后端字段已上线**
 
 ```bash
-cd knowledge-web && grep -n "query_text" ../knowledge-service/src/kbsvc/api/plagiarism_schemas.py
+cd knowledge-service && python -m pytest tests/plagiarism/test_api.py -v -k "report and query_text"
 ```
-预期：`ReportOut` 里出现 `query_text`。没有则停止，先推动后端改动。
+预期：文本模式、文档模式都 PASS，并且响应中的 `len(query_text) == query_chars`。仅 grep 到字段不算完成。
 
 - [ ] **Step 2: 写 `query_spans` 的失败测试**
 
@@ -1813,24 +1971,33 @@ from ..report import duplication_ratio, numbered_sources, query_spans
         spans=query_spans(sources),
 ```
 
-- [ ] **Step 8: 在报告模板里渲染正文**
+- [ ] **Step 8: 在两栏报告布局里渲染正文**
 
-在 `_check_report.html` 的 verdict 块之后、`<h2 class="section-title">来源</h2>` 之前插入：
+在 `_check_report.html` 的 verdict/告警块之后增加 `.report-layout`：左侧放全文，右侧把 Task 5 已有的“来源”标题与 `<ol class="sources">` 整体移入 sticky aside。不得继续按上下顺序排列后却在 Self-Review 中声称是两栏。
 
 ```html
-{% if report.query_text %}
-<div class="submission">
-  {% for fragment, owners in coverage_segments(report.query_text, spans) %}
-    {%- if owners -%}
-      <mark class="hit">{{ fragment }}<span class="hit__markers"
-        >{% for ordinal in owners | sort %}<a class="hit__marker" href="#source-{{ ordinal }}">{{ ordinal }}</a>{% endfor %}</span
-      ></mark>
-    {%- else -%}
-      {{ fragment }}
-    {%- endif -%}
-  {% endfor %}
+<div class="report-layout">
+  <section class="report-layout__submission" aria-label="待检全文">
+    {% if report.query_text %}
+      <div class="submission">
+        {% for fragment, owners in coverage_segments(report.query_text, spans) %}
+          {%- if owners -%}
+            <mark class="hit">{{ fragment }}<span class="hit__markers"
+              >{% for ordinal in owners | sort %}<a class="hit__marker" href="#source-{{ ordinal }}">{{ ordinal }}</a>{% endfor %}</span
+            ></mark>
+          {%- else -%}
+            {{ fragment }}
+          {%- endif -%}
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="flash">原文已按保留策略清理，无法显示全文高亮。</p>
+    {% endif %}
+  </section>
+  <aside class="report-layout__sources" aria-label="命中来源">
+    {# 把 Task 5 的来源标题与 ol.sources 原样移到这里；Task 7 的 details 仍放在对应 li 内。 #}
+  </aside>
 </div>
-{% endif %}
 ```
 
 `{{ fragment }}` 走 Jinja 默认转义，这就是「分段拼接而非 `|safe`」的落点。
@@ -1844,9 +2011,11 @@ from ..report import duplication_ratio, numbered_sources, query_spans
   font-family: var(--font-song);
   font-size: 1.0625rem;
   line-height: 2.0;
-  margin: var(--space-6) 0;
+  margin: 0;
   white-space: pre-wrap;
 }
+.report-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(18rem, 1fr); gap: var(--space-7); align-items: start; margin-top: var(--space-6); }
+.report-layout__sources { position: sticky; top: var(--space-4); max-height: calc(100vh - 2 * var(--space-4)); overflow: auto; }
 .hit { background: var(--seal-wash); color: inherit; padding: 0.05em 0; }
 .hit__markers { white-space: nowrap; }
 .hit__marker {
@@ -1858,6 +2027,10 @@ from ..report import duplication_ratio, numbered_sources, query_spans
   text-decoration: none;
 }
 .hit__marker:hover, .hit__marker:focus { text-decoration: underline; }
+@media (max-width: 56rem) {
+  .report-layout { grid-template-columns: minmax(0, 1fr); }
+  .report-layout__sources { position: static; max-height: none; overflow: visible; }
+}
 ```
 
 - [ ] **Step 10: 跑测试确认通过**
@@ -1890,7 +2063,7 @@ git commit -m "feat(web): 稿件全文高亮与来源角标
 
 **Interfaces:**
 - Consumes: Task 1 的 `source_excerpt`、Task 5 的 `numbered_sources`
-- Produces: `report.attach_excerpts(api, sources, *, limit=8) -> list[dict]`，为前 `limit` 个来源的每个 passage 增加 `source_text` 键（取不到时为空串）
+- Produces: `report.attach_excerpts(api, sources, *, limit=8) -> list[dict]`，按报告冻结版本分页读取，为前 `limit` 个来源的每个 passage 增加 `source_text`；单页固定不超过 200，并设置分页总页数上限
 
 - [ ] **Step 1: 写失败测试**
 
@@ -1911,8 +2084,8 @@ def test_passage_cards_show_both_sides(client, chunks_payload):
 
 
 @respx.mock
-def test_a_revoked_source_degrades_its_card_without_failing_the_page(client):
-    """Access can be revoked between running a check and reading its report."""
+def test_a_source_disappearing_after_report_fetch_degrades_its_card(client):
+    """Covers the race after get_report succeeds; prior revocation is a report-level 409."""
     stub_check("chk-done", "completed")
     stub_report("chk-done", query_text="夫天地者，万物之逆旅也。")
     respx.get(f"{API_BASE}/v1/documents/doc-1111-2222/chunks").mock(
@@ -1954,7 +2127,52 @@ def test_only_the_top_sources_have_their_text_prefetched(client, chunks_payload)
 
     called = sum(1 for route in routes.values() if route.called)
     assert called == 8
+
+
+@respx.mock
+def test_source_prefetch_uses_the_frozen_version_and_paginates_at_200():
+    """The backend rejects limit > 200 and current-version text may not match old offsets."""
+    from kbweb.report import attach_excerpts
+
+    requests = []
+
+    def source_chunk(ordinal: int, text: str, char_start: int) -> dict:
+        return {
+            "ordinal": ordinal,
+            "text": text,
+            "char_start": char_start,
+            "char_end": char_start + len(text),
+        }
+
+    def page_for(request):
+        requests.append(request)
+        start = int(request.url.params["from_ordinal"])
+        rows = (
+            [source_chunk(index, "字", index) for index in range(200)]
+            if start == 0
+            else [source_chunk(200, "命", 200)]
+        )
+        return httpx.Response(200, json=rows)
+
+    respx.get(f"{API_BASE}/v1/documents/doc-old/chunks").mock(side_effect=page_for)
+    api = make_client()
+    source = {
+        "document_id": "doc-old",
+        "version": 1,
+        "ordinal": 1,
+        "passages": [{"source_start": 200, "source_end": 201}],
+    }
+
+    attached = attach_excerpts(api, [source])
+
+    assert attached[0]["passages"][0]["source_text"] == "命"
+    assert len(requests) == 2
+    assert all(request.url.params["limit"] == "200" for request in requests)
+    assert all(request.url.params["version"] == "1" for request in requests)
+    api.close()
 ```
+
+另加回归测试：空 passages 不发请求；页数上限触发后标记 `prefetch_truncated`；空页与 ordinal 不前进能停止；chunks 返回 422/500 时 `attach_excerpts` 必须重新抛出，不能把调用参数错误或服务端故障伪装成“来源已不可访问”。只有 403/404 做权限/删除降级，`BackendUnavailable` 使用“暂时不可用”文案。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -1975,15 +2193,44 @@ from .errors import BackendError, BackendUnavailable
 logger = logging.getLogger(__name__)
 
 MAX_PREFETCHED_SOURCES = 8
-SOURCE_CHUNK_LIMIT = 500
+SOURCE_CHUNK_PAGE_SIZE = 200
+SOURCE_MAX_PAGES = 20
+
+
+def _source_chunks(api, source: dict, passages: list[dict]) -> tuple[list[dict], bool]:
+    """Read the frozen version until all requested offsets are covered or capped."""
+    if not passages:
+        return [], True
+    target_end = max((passage.get("source_end") or 0 for passage in passages), default=0)
+    chunks: list[dict] = []
+    from_ordinal = 0
+    covered = target_end <= 0
+    for _ in range(SOURCE_MAX_PAGES):
+        page = api.get_chunks(
+            source["document_id"],
+            from_ordinal=from_ordinal,
+            limit=SOURCE_CHUNK_PAGE_SIZE,
+            version=source["version"],
+        )
+        if not page:
+            break
+        chunks.extend(page)
+        covered = max((chunk.get("char_end") or 0 for chunk in page), default=0) >= target_end
+        if covered or len(page) < SOURCE_CHUNK_PAGE_SIZE:
+            break
+        next_ordinal = max((chunk.get("ordinal") or 0 for chunk in page), default=-1) + 1
+        if next_ordinal <= from_ordinal:
+            break
+        from_ordinal = next_ordinal
+    return chunks, covered
 
 
 def attach_excerpts(api, sources: list[dict], *, limit: int = MAX_PREFETCHED_SOURCES) -> list[dict]:
     """Give each passage of the top `limit` sources its source-side text.
 
-    Bounded on purpose: one request per source *document*, not per passage,
-    and only for the sources the reader is actually likely to open. The rest
-    keep a link into the reader instead.
+    Bounded on purpose: never one request per passage. At most `limit` source
+    documents are prefetched, each in pages of <= 200 chunks and with a hard
+    page cap. The rest keep a link into the reader instead.
 
     A source that has become unreachable degrades to an empty excerpt. Access
     can be revoked between running a check and reading its report, and one
@@ -1997,16 +2244,23 @@ def attach_excerpts(api, sources: list[dict], *, limit: int = MAX_PREFETCHED_SOU
             continue
 
         try:
-            chunks = api.get_chunks(source["document_id"], from_ordinal=0, limit=SOURCE_CHUNK_LIMIT)
-        except (BackendError, BackendUnavailable) as exc:
+            chunks, covered = _source_chunks(api, source, passages)
+        except BackendError as exc:
+            if exc.status not in {403, 404}:
+                raise
             logger.info("source text unavailable for %s: %s", source["document_id"], exc)
-            attached.append(dict(source, prefetched=True, unavailable=True))
+            attached.append(dict(source, prefetched=True, fetch_error="来源已不可访问。"))
+            continue
+        except BackendUnavailable as exc:
+            logger.info("source service unavailable for %s: %s", source["document_id"], exc)
+            attached.append(dict(source, prefetched=True, fetch_error="来源服务暂时不可用。"))
             continue
 
         attached.append(
             dict(
                 source,
                 prefetched=True,
+                prefetch_truncated=not covered,
                 passages=[
                     dict(
                         passage,
@@ -2047,10 +2301,12 @@ from ..report import attach_excerpts, duplication_ratio, numbered_sources, query
             <p class="passage__label">你的文字</p>
             <p class="passage__text">{{ passage.preview }}</p>
             <p class="passage__label">来源</p>
-            {% if source.unavailable %}
-              <p class="passage__missing">来源已不可访问。</p>
+            {% if source.fetch_error %}
+              <p class="passage__missing">{{ source.fetch_error }}</p>
             {% elif passage.source_text %}
               <p class="passage__text">{{ passage.source_text }}</p>
+            {% elif source.prefetch_truncated %}
+              <p class="passage__missing">来源位置超出本页预取上限，请到书里查看。</p>
             {% else %}
               <p class="passage__missing">来源正文未预取。</p>
             {% endif %}
@@ -2070,7 +2326,7 @@ from ..report import attach_excerpts, duplication_ratio, numbered_sources, query
 ```css
 .passage { margin-top: var(--space-3); }
 .passage__summary { cursor: pointer; font-family: var(--font-sans); font-size: 0.8125rem; opacity: 0.75; }
-.passage__body { padding: var(--space-3) 0 var(--space-3) var(--space-4); border-left: 2px solid var(--seal); margin-top: var(--space-3); }
+.passage__body { padding: var(--space-3) 0 var(--space-3) var(--space-4); border-left: 2px solid var(--paper-edge); margin-top: var(--space-3); }
 .passage__label { font-family: var(--font-kai); font-size: 0.8125rem; opacity: 0.65; margin-top: var(--space-3); }
 .passage__text { font-family: var(--font-song); line-height: 1.9; margin-top: var(--space-2); }
 .passage__missing { font-size: 0.8125rem; opacity: 0.6; margin-top: var(--space-2); }
@@ -2091,10 +2347,9 @@ git commit -m "feat(web): 命中对照卡与来源不可访问的降级
 
 对照卡用 <details>，展开是纯 HTML 行为，无脚本下照样能开。
 
-来源正文按来源文档各拉一次而不是每处命中一次，且只预取前 8 个；
-请求数由上限决定而不是由来源数决定。单个来源 404/403 只让那张卡
-降级——get_report 的注释说明访问权可能在检测跑完后被撤销，一本书
-被删不该让整个报告 500。"
+来源正文不按每处命中单独请求，而是对前 8 个不同来源按冻结版本、
+每页最多 200 chunks 分页读取，并设置总页数上限。报告读取前已撤权
+仍按后端 fail-closed 的 409 处理；仅报告取得后的 403/404 竞态降级单卡。"
 ```
 
 ---
@@ -2151,6 +2406,25 @@ def test_events_proxy_omits_the_header_on_a_first_connection(client):
 
 
 @respx.mock
+def test_events_proxy_does_not_turn_an_upstream_error_into_a_200_stream(client):
+    respx.get(f"{API_BASE}/v1/plagiarism/checks/chk-nope/progress").mock(
+        return_value=httpx.Response(
+            404,
+            json={
+                "error": {
+                    "code": "plagiarism_check_not_found",
+                    "message": "no such check",
+                    "detail": {},
+                }
+            },
+        )
+    )
+    response = client.get("/plagiarism/checks/chk-nope/events")
+    assert response.status_code == 404
+    assert not response.headers["Content-Type"].startswith("text/event-stream")
+
+
+@respx.mock
 def test_progress_script_ships_only_with_javascript_enabled(client, config):
     stub_check("chk-live", "running")
     body = html(client.get("/plagiarism/checks/chk-live"))
@@ -2172,6 +2446,7 @@ cd knowledge-web && python -m pytest tests/test_plagiarism.py -v -k "events or p
 
 ```python
 import time
+from contextlib import ExitStack
 
 from flask import Response, stream_with_context
 
@@ -2187,24 +2462,42 @@ def events(check_id: str):
     api = client()
     last_event_id = request.headers.get("Last-Event-ID", "")
 
+    # Enter upstream before committing the downstream 200 headers. Otherwise a
+    # backend 404/503 becomes a fake successful SSE response whose body happens
+    # to contain JSON or a late generator exception.
+    stack = ExitStack()
+    try:
+        upstream = stack.enter_context(
+            api.stream_progress(check_id, last_event_id=last_event_id)
+        )
+    except Exception:
+        stack.close()
+        raise
+
     @stream_with_context
     def relay():
         # stream_with_context matters: without it the app context pops when
         # this view returns and teardown closes the client mid-stream.
-        deadline = time.monotonic() + PROXY_MAX_SECONDS
-        with api.stream_progress(check_id, last_event_id=last_event_id) as upstream:
+        try:
+            deadline = time.monotonic() + PROXY_MAX_SECONDS
             for line in upstream.iter_lines():
                 # iter_lines drops the newline; SSE needs it back, and blank
                 # lines are what delimit frames.
                 yield f"{line}\n"
                 if time.monotonic() >= deadline:
                     return
+        finally:
+            stack.close()
 
-    return Response(
+    response = Response(
         relay(),
         mimetype="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+    # Covers clients/middleware that close the response without iterating the
+    # generator, in addition to relay()'s finally block.
+    response.call_on_close(stack.close)
+    return response
 ```
 
 - [ ] **Step 4: 写 `check.js`**
@@ -2230,9 +2523,33 @@ def events(check_id: str):
     var stageEl = panel.querySelector('[data-progress-stage]');
     var barEl = panel.querySelector('[data-progress-bar]');
     var source = new EventSource(panel.dataset.eventsUrl);
+    var fallbackTimer = null;
+
+    // SSE is an enhancement, not the only way out of the progress page. A
+    // healthy stream emits keepalives every ~2s; if neither data nor keepalive
+    // arrives for 15s, reload and let the server render the current state.
+    function armFallback() {
+      if (fallbackTimer) window.clearTimeout(fallbackTimer);
+      fallbackTimer = window.setTimeout(function () {
+        source.close();
+        window.location.reload();
+      }, 15000);
+    }
+
+    // Start the deadline immediately as well: a connection can hang before
+    // firing either open or error.
+    armFallback();
+    source.onopen = armFallback;
+    source.onerror = function () {
+      // Keep native EventSource reconnection (and Last-Event-ID) alive, but do
+      // not let repeated errors postpone the fallback forever.
+      if (!fallbackTimer) armFallback();
+    };
+    source.addEventListener('keepalive', armFallback);
 
     Object.keys(STAGES).forEach(function (stage) {
       source.addEventListener(stage, function (event) {
+        armFallback();
         stageEl.textContent = STAGES[stage];
         try {
           var payload = JSON.parse(event.data);
@@ -2245,6 +2562,7 @@ def events(check_id: str):
 
     ['completed', 'completed_partial', 'failed', 'cancelled'].forEach(function (stage) {
       source.addEventListener(stage, function () {
+        if (fallbackTimer) window.clearTimeout(fallbackTimer);
         source.close();
         // Let the server render the report; there is one renderer, not two.
         window.location.reload();
@@ -2292,6 +2610,8 @@ CMD ["waitress-serve", "--host", "0.0.0.0", "--port", "5055", "--threads=16", "w
 
 - [ ] **Step 8: 跑测试确认通过**
 
+视图/客户端层再覆盖上游 503、错误 Content-Type、网络断开，以及下游响应未迭代便关闭时上游上下文仍被释放。除这些测试外，e2e 必须覆盖两种 JS 路径：正常 SSE 终态触发 reload；SSE 持续失败时 15 秒兜底 reload 后仍能进入报告。这样“渐进增强”才是被测试的行为，而不是注释里的愿望。
+
 ```bash
 cd knowledge-web && python -m pytest tests/ -v
 ```
@@ -2320,31 +2640,31 @@ git commit -m "feat(web): SSE 进度代理与阶段进度条
 - Create: `tests/e2e/test_plagiarism_flow.py`
 
 **Interfaces:**
-- Consumes: 前八个 Task 的全部产物
+- Consumes: Task 0–8 的全部产物
 
 - [ ] **Step 1: 读现有 stub 的写法**
 
 ```bash
-cd knowledge-web && sed -n '1,60p' tests/e2e/stub_backend.py && grep -n "def \|@app" tests/e2e/stub_backend.py
+cd knowledge-web && sed -n '1,220p' tests/e2e/stub_backend.py && grep -n "class FakeKbClient\|def " tests/e2e/stub_backend.py
 ```
 
-按它已有的路由风格添加，不要另起一套。
+按它已有的 `FakeKbClient` 类方法风格扩展，不要另起 HTTP stub 或路由层。
 
-- [ ] **Step 2: 给 stub 加 plagiarism 端点**
+- [ ] **Step 2: 扩展实际注入的 `FakeKbClient`**
 
-追加到 `tests/e2e/stub_backend.py`，沿用该文件既有的框架与命名：
+`tests/e2e/conftest.py` 已核实使用 `patch("kbweb.KbClient", FakeKbClient)`，没有启动 HTTP 假后端。因此这里增加类方法和一个假的流式响应对象，不得添加 `@app` 路由。
 
 ```python
 # --- plagiarism ---------------------------------------------------------
 
-_CHECK_POLLS = {"count": 0}
+_CHECK_STATE = {"done": False}
 
 PLAG_REPORT = {
     "check_id": "chk-e2e",
     "status": "completed",
     "snapshot_at": "2026-08-08T10:00:00",
     "algorithm_config_hash": "cfg-e2e",
-    "query_chars": 24,
+    "query_chars": 19,
     "matched_chars": 11,
     "checked_chunks": 4,
     "total_chunks": 4,
@@ -2376,7 +2696,23 @@ PLAG_REPORT = {
 }
 
 
-def plagiarism_corpus_status():
+class _FakeSseResponse:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args) -> None:
+        return None
+
+    def iter_lines(self):
+        progress = 'id: 1\nevent: retrieving\ndata: {"progress": 0.6}\n\n'
+        terminal = 'id: 2\nevent: completed\ndata: {"progress": 1.0}\n\n'
+        yield from progress.splitlines()
+        _CHECK_STATE["done"] = True
+        yield from terminal.splitlines()
+
+
+# Add these methods inside FakeKbClient.
+def corpus_status(self) -> dict:
     return {
         "total_documents": 1,
         "ready_documents": 1,
@@ -2387,20 +2723,21 @@ def plagiarism_corpus_status():
     }
 
 
-def plagiarism_create_check():
-    _CHECK_POLLS["count"] = 0
-    return {
-        "check_id": "chk-e2e",
-        "status": "pending",
-        "snapshot_at": "2026-08-08T10:00:00",
-        "algorithm_config_hash": "cfg-e2e",
-    }
+def create_text_check(self, **_kwargs) -> dict:
+    _CHECK_STATE["done"] = False
+    return {"check_id": "chk-e2e", "status": "pending"}
 
 
-def plagiarism_get_check():
-    """Running for the first two polls, then done - so the page must transition."""
-    _CHECK_POLLS["count"] += 1
-    status = "running" if _CHECK_POLLS["count"] <= 2 else "completed"
+def create_document_check(self, _document_id: str, **_kwargs) -> dict:
+    return self.create_text_check()
+
+
+def list_checks(self, **_kwargs) -> list[dict]:
+    return []
+
+
+def get_check(self, _check_id: str) -> dict:
+    status = "completed" if _CHECK_STATE["done"] else "running"
     return {
         "check_id": "chk-e2e",
         "status": status,
@@ -2408,12 +2745,24 @@ def plagiarism_get_check():
         "snapshot_at": "2026-08-08T10:00:00",
         "algorithm_config_hash": "cfg-e2e",
         "source_document_id": None,
-        "query_chars": 24,
-        "matched_chars": 11 if status == "completed" else 0,
+        "query_chars": PLAG_REPORT["query_chars"],
+        "matched_chars": PLAG_REPORT["matched_chars"] if _CHECK_STATE["done"] else 0,
     }
+
+
+def get_plag_report(self, _check_id: str) -> dict:
+    return PLAG_REPORT
+
+
+def delete_check(self, _check_id: str) -> int:
+    return 204
+
+
+def stream_progress(self, _check_id: str, **_kwargs):
+    return _FakeSseResponse()
 ```
 
-并把它们挂到 `/v1/plagiarism/corpus/status`、`/v1/plagiarism/checks`（GET 返回 `[]`，POST 返回 `plagiarism_create_check()`）、`/v1/plagiarism/checks/chk-e2e`、`/v1/plagiarism/checks/chk-e2e/report` 四条路由上。
+同时把既有 `FakeKbClient.get_chunks` 签名扩展为接受 `version: int | None = None`，与生产 client 保持一致。假的 SSE 必须至少发一个进度阶段和一个终态；终态发出后把模块级状态置为 completed，使 reload 后服务端真正渲染报告。
 
 - [ ] **Step 3: 写 e2e 测试**
 
@@ -2439,9 +2788,10 @@ def test_submit_then_read_the_report(page, live_server):
     page.wait_for_url("**/plagiarism/checks/chk-e2e")
     assert "检测" in page.content()
 
-    # Progress resolves to the report on the same URL.
+    # The JavaScript path receives a real fake-SSE terminal event, then reloads
+    # the same URL. This is not get_check polling.
     page.wait_for_selector(".verdict__figure", timeout=15000)
-    assert "45.8%" in page.inner_text(".verdict__figure")
+    assert "57.9%" in page.inner_text(".verdict__figure")
     assert "春夜宴从弟桃花园序" in page.content()
 
     # The submission is highlighted from backend offsets.
@@ -2452,9 +2802,12 @@ def test_submit_then_read_the_report(page, live_server):
     assert "夫天地者，万物之逆旅也" in page.inner_text(".passage__body")
 ```
 
-`live_server` 与 `page` fixture 的实际名字以 `tests/e2e/conftest.py` 为准，
-执行前跑 `grep -n "def " knowledge-web/tests/e2e/conftest.py` 核对。
-`45.8%` 是 `11 / 24` 的结果，若 stub 数字调整需同步改。
+再加响应式布局 e2e：桌面宽度下断言 `.report-layout` 的 computed `grid-template-columns` 含两列、`.report-layout__sources` 为 `position: sticky`；移动宽度下断言单列且 aside 为 `static`。两个宽度都断言 `document.documentElement.scrollWidth == document.documentElement.clientWidth`，防止全文或来源卡造成横向溢出。
+
+另设一个 Fake SSE 失败场景：`stream_progress()` 连续返回失败，但下一次详情页读取允许 `get_check()` 返回 completed；浏览器测试必须证明 fallback reload 最终进入报告。测试可在导航前用 `page.add_init_script()` 包装 `window.setTimeout`，把 15000ms 的回退计时压到约 100ms；生产代码仍保持 15000ms，避免 e2e 固定等待 15 秒。
+
+`live_server` 与 `page` fixture 名已在 `tests/e2e/conftest.py` 核实，不再作为执行期占位符。
+`57.9%` 是 `11 / 19` 的结果；stub 的 `query_chars` 必须与 `len(query_text)` 一致，不能为了凑展示数字破坏后端不变量。
 
 - [ ] **Step 4: 跑 e2e**
 
@@ -2476,8 +2829,9 @@ cd knowledge-web && python -m pytest tests/ -v && python -m pytest tests/ -m e2e
 git add knowledge-web/tests
 git commit -m "test(web): 查重全流程 e2e
 
-stub 让 check 在头两次轮询时是 running、之后 completed，这样测试真的
-会经过「进度 → 报告」的切换，而不是一上来就看到终态。"
+FakeKbClient 发出真实的假 SSE 进度与终态事件，终态前更新跨请求共享
+状态，使浏览器 reload 后得到 completed 报告；测试不再假装 JS 路径
+会轮询 get_check。"
 ```
 
 ---
@@ -2496,31 +2850,38 @@ stub 让 check 在头两次轮询时是 running、之后 completed，这样测�
 | 主体两栏与角标 | Task 6 |
 | `<details>` 对照卡 | Task 7 Step 5 |
 | 来源正文上限 8 | Task 7 Step 3 + 测试 |
-| 三条运行路径 | Task 4（nojs）、Task 8（SSE） |
-| SSE 三个必须项 | Task 8 Step 3、Step 7 |
+| 冻结版本 + chunks 分页上限 200 | Task 0、Task 2、Task 7 + 契约测试 |
+| 三条运行路径 | Task 4（nojs）、Task 8（SSE + 15 秒失败回退） |
+| SSE 截流、续传、资源关闭与线程数 | Task 8 Step 3、Step 7 + 404/503/断流/close 测试 |
 | 幂等 token | Task 3 Step 4 + 测试 |
 | 语料就绪门禁 | Task 3 |
 | 取消/删除 204 与 202 分流 | Task 2（返回状态码）、Task 4 |
-| 四个错误码分流 | Task 3（`feature_unavailable`、`plagiarism_concurrency_limit`、`validation_error`）、Task 4（`not_found`） |
-| 来源不可访问降级 | Task 7 |
+| 真实错误码分流 | Task 3/4/5：`feature_disabled`、各 `plagiarism_*`、`idempotency_conflict`、`report_visibility_changed` |
+| ACL 撤权 fail-closed 与请求后竞态降级 | Task 0、Task 5、Task 7 |
 | 四层测试 | Task 1/5/6/7（纯函数）、Task 3/4/5/6/7/8（视图）、Task 3 Step 9（nojs）、Task 9（e2e） |
 | Dockerfile 线程数 | Task 8 Step 7 |
-| 后端 `query_text` 依赖 | Task 6 Step 1 显式门禁 |
+| 文本/文档模式 `query_text` 与真实来源版本 | Task 0 门禁，Task 6/7 消费 |
+| 实际 `FakeKbClient` e2e 与假 SSE | Task 9 |
+| 桌面两栏 sticky / 移动单栏 / 无横向溢出 | Task 6 + Task 9 浏览器断言 |
 
-无遗漏。
+实施者仍须以每个 Task 的门禁测试为完成条件；本表是索引，不替代测试。
 
-**类型一致性：** `numbered_sources` 产出的 `ordinal` 被 `query_spans`（Task 6）与 `attach_excerpts`（Task 7）共同消费，键名一致；`coverage_segments` 的 `frozenset[int]` 在模板里经 `| sort` 输出；`delete_check` 全程返回 `int` 状态码。
+**类型一致性：** `numbered_sources` 产出的 `ordinal` 被 `query_spans`（Task 6）与 `attach_excerpts`（Task 7）共同消费；`coverage_segments` 的 `frozenset[int]` 在模板里经 `| sort` 输出；`delete_check` 全程返回 `int`；`source.version` 是真实正整数并原样传给 chunks API。
 
-**三处执行时需先核对的既有名字**（已在对应步骤里写明检查命令，不是占位符）：`library` blueprint 的文档详情 endpoint 名、`BackendError` 的属性名、`tests/e2e/conftest.py` 的 fixture 名。
+**已核实的既有名字：** 文档详情 `library.document`、阅读页 `library.read`；`BackendError` 具有 `status/code/message/detail`；e2e fixture 为 `live_server` 与 `page`；e2e 后端替身是注入式 `FakeKbClient`。
 
 ---
 
 ## 实施顺序与并行
 
-```
-Task 1 ──┬── Task 3 ── Task 4 ──┬── Task 5 ── Task 6* ── Task 7 ── Task 9
-Task 2 ──┘                      └── Task 8
+```text
+Task 0 ─────────────────────┬── Task 6 ──┐
+                           └── Task 7 ──┤
+Task 1 ──┬── Task 3 ── Task 4 ── Task 5 ─┼── Task 9
+Task 2 ──┘                  └── Task 8 ──┘
 ```
 
-`*` Task 6 依赖后端 `query_text`。若阻塞，可跳过 Task 6 直接做 Task 7 与 Task 9
-（去掉 e2e 里的 `mark.hit` 断言），待字段上线后回填。
+- Task 6 依赖 Task 0 的两种模式 `query_text` 门禁与 Task 5 的报告骨架。
+- Task 7 依赖 Task 0 的真实来源版本、Task 2 的 version-aware `get_chunks` 与 Task 5 的来源排序。
+- Task 9 必须在 Task 6、7、8 都完成后运行，才能同时验证全文高亮、版本摘录和 SSE 收尾。
+- 若 Task 0 暂时阻塞，可以先交付 Task 1–5、8 的中间里程碑，但不能把缺少全文高亮/冻结版本摘录的 Task 9 标为完成。
