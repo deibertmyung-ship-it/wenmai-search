@@ -13,7 +13,7 @@ import uuid
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from ..errors import BackendError
-from ..report import duplication_ratio, numbered_sources, query_spans
+from ..report import attach_excerpts, duplication_ratio, numbered_sources, query_spans
 from ._common import client
 
 bp = Blueprint("plagiarism", __name__, url_prefix="/plagiarism")
@@ -88,7 +88,7 @@ def detail(check_id: str):
             if exc.code != "report_visibility_changed":
                 raise
             report_error = "来源访问权限已变化，出于安全原因无法显示这份报告。"
-    sources = numbered_sources(report) if report else []
+    sources = attach_excerpts(api, numbered_sources(report)) if report else []
 
     rendered = render_template(
         "check.html",

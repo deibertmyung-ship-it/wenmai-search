@@ -692,3 +692,105 @@ def test_visibility_change_gets_a_dedicated_409_page(client):
     response = client.get("/plagiarism/checks/chk-hidden")
     assert response.status_code == 409
     assert "来源访问权限已变化" in html(response)
+
+
+@respx.mock
+def test_passage_cards_show_both_sides(client, chunks_payload):
+    stub_check("chk-done", "completed")
+    stub_report("chk-done", query_text="夫天地者，万物之逆旅也。")
+    respx.get(f"{API_BASE}/v1/documents/doc-1111-2222/chunks").mock(
+        return_value=httpx.Response(200, json=chunks_payload)
+    )
+    body = html(client.get("/plagiarism/checks/chk-done"))
+    assert "<details" in body          # openable with no script at all
+    assert "夫天地者，万物之逆旅也" in body   # the query-side preview
+    assert "到书里看" in body
+
+
+@respx.mock
+def test_a_source_disappearing_after_report_fetch_degrades_its_card(client):
+    """Covers the race after get_report succeeds; prior revocation is a report-level 409."""
+    stub_check("chk-done", "completed")
+    stub_report("chk-done", query_text="夫天地者，万物之逆旅也。")
+    respx.get(f"{API_BASE}/v1/documents/doc-1111-2222/chunks").mock(
+        return_value=httpx.Response(
+            404, json={"error": {"code": "not_found", "message": "gone", "detail": {}}}
+        )
+    )
+    response = client.get("/plagiarism/checks/chk-done")
+    assert response.status_code == 200
+    body = html(response)
+    assert "来源已不可访问" in body
+    assert "23.4%" in body      # the rest of the report still renders
+
+
+@respx.mock
+def test_only_the_top_sources_have_their_text_prefetched(client, chunks_payload):
+    """Request count must stay bounded by the cap, not by the source count."""
+    many = [
+        {
+            "document_id": f"doc-{index}",
+            "version_id": "v", "version": 1, "content_hash": "h",
+            "title": f"书 {index}", "matched_chars": 100 - index, "score": 0.5,
+            "passages": [
+                {"query_start": index, "query_end": index + 1, "source_start": 0,
+                 "source_end": 3, "score": 0.5, "preview": "零"}
+            ],
+        }
+        for index in range(12)
+    ]
+    stub_check("chk-many", "completed")
+    stub_report("chk-many", query_text="零" * 20, sources=many)
+    routes = {}
+    for index in range(12):
+        routes[index] = respx.get(f"{API_BASE}/v1/documents/doc-{index}/chunks").mock(
+            return_value=httpx.Response(200, json=chunks_payload)
+        )
+
+    client.get("/plagiarism/checks/chk-many")
+
+    called = sum(1 for route in routes.values() if route.called)
+    assert called == 8
+
+
+@respx.mock
+def test_source_prefetch_uses_the_frozen_version_and_paginates_at_200():
+    """The backend rejects limit > 200 and current-version text may not match old offsets."""
+    from kbweb.report import attach_excerpts
+
+    requests = []
+
+    def source_chunk(ordinal: int, text: str, char_start: int) -> dict:
+        return {
+            "ordinal": ordinal,
+            "text": text,
+            "char_start": char_start,
+            "char_end": char_start + len(text),
+        }
+
+    def page_for(request):
+        requests.append(request)
+        start = int(request.url.params["from_ordinal"])
+        rows = (
+            [source_chunk(index, "字", index) for index in range(200)]
+            if start == 0
+            else [source_chunk(200, "命", 200)]
+        )
+        return httpx.Response(200, json=rows)
+
+    respx.get(f"{API_BASE}/v1/documents/doc-old/chunks").mock(side_effect=page_for)
+    api = make_client()
+    source = {
+        "document_id": "doc-old",
+        "version": 1,
+        "ordinal": 1,
+        "passages": [{"source_start": 200, "source_end": 201}],
+    }
+
+    attached = attach_excerpts(api, [source])
+
+    assert attached[0]["passages"][0]["source_text"] == "命"
+    assert len(requests) == 2
+    assert all(request.url.params["limit"] == "200" for request in requests)
+    assert all(request.url.params["version"] == "1" for request in requests)
+    api.close()

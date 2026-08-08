@@ -626,3 +626,9 @@ mark {
   .report-layout { grid-template-columns: minmax(0, 1fr); }
   .report-layout__sources { position: static; max-height: none; overflow: visible; }
 }
+.passage { margin-top: var(--space-3); }
+.passage__summary { cursor: pointer; font-family: var(--font-sans); font-size: 0.8125rem; opacity: 0.75; }
+.passage__body { padding: var(--space-3) 0 var(--space-3) var(--space-4); border-left: 2px solid var(--paper-edge); margin-top: var(--space-3); }
+.passage__label { font-family: var(--font-kai); font-size: 0.8125rem; opacity: 0.65; margin-top: var(--space-3); }
+.passage__text { font-family: var(--font-song); line-height: 1.9; margin-top: var(--space-2); }
+.passage__missing { font-size: 0.8125rem; opacity: 0.6; margin-top: var(--space-2); }

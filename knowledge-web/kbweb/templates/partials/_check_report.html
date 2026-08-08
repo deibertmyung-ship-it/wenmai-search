@@ -48,6 +48,29 @@
             命中 {{ "{:,}".format(source.matched_chars) }} 字 · score {{ source.score | score(2) }} ·
             {{ source.passages | length }} 处
           </p>
+          {% for passage in source.passages %}
+            <details class="passage" id="passage-{{ source.ordinal }}-{{ loop.index }}">
+              <summary class="passage__summary">第 {{ loop.index }} 处 · score {{ passage.score | score(2) }}</summary>
+              <div class="passage__body">
+                <p class="passage__label">你的文字</p>
+                <p class="passage__text">{{ passage.preview }}</p>
+                <p class="passage__label">来源</p>
+                {% if source.fetch_error %}
+                  <p class="passage__missing">{{ source.fetch_error }}</p>
+                {% elif passage.source_text %}
+                  <p class="passage__text">{{ passage.source_text }}</p>
+                {% elif source.prefetch_truncated %}
+                  <p class="passage__missing">来源位置超出本页预取上限，请到书里查看。</p>
+                {% else %}
+                  <p class="passage__missing">来源正文未预取。</p>
+                {% endif %}
+                <p>
+                  <a class="btn btn--ghost btn--sm"
+                     href="{{ url_for('library.read', document_id=source.document_id) }}">到书里看 →</a>
+                </p>
+              </div>
+            </details>
+          {% endfor %}
         </li>
       {% else %}
         <li class="source"><p>没有找到重复来源。</p></li>
