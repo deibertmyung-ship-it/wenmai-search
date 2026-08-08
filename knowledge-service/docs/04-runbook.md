@@ -362,6 +362,18 @@ kbsvc plagiarism status        # 确认覆盖率 100%
 # 验收通过后设 KB_PLAG_ENABLED=true（验收清单见 docs/specs/）
 ```
 
+本次短文本修复升级了规范化版本（projection hash v2）。已有部署必须先完成一次全量投影和指纹频率重建，再开放新检查：
+
+```powershell
+kbsvc plagiarism init          # 仅追加 matcher_version/matcher_config 列
+kbsvc plagiarism rebuild       # 全量生成 v2 投影；完成前拒绝新检查
+kbsvc plagiarism-worker --once
+kbsvc plagiarism rebuild-df    # 重算 DF 并 ANALYZE plag_corpus_chunk
+kbsvc plagiarism status        # 确认 schema ready、pending=0、failed=0
+```
+
+不要删除 `plag_corpus_chunk`、PostgreSQL 数据卷，也不要手工执行 `DROP INDEX` 或 `REINDEX`；GIN 索引会随新行自动维护。查询阈值（中文 12/20、其他语言 30/50）保存在每条检查的 matcher 快照中，单独调整阈值不要求重建投影。
+
 `backfill` 只登记幂等任务，**可随时中断、可重复运行**——大语料回填是数小时的
 指纹计算，放进 CLI 进程会让它不可恢复也不可观察。
 
@@ -386,6 +398,8 @@ worker 先排空语料任务再处理检测任务——没有投影的文档会�
 **`/readyz` 报 `plagiarism_schema: gin index missing`** — 表在但 GIN 索引没了。
 候选检索**没有 Python 扫描兜底**（ADR-0001 有意如此），失去索引的表现是无上限
 地变慢而不是报错。跑 `kbsvc plagiarism init` 补建。
+
+如果报 `plagiarism_schema: missing columns`，说明旧版 `plag_check` 尚未完成增量迁移；运行 `kbsvc plagiarism init` 即可补上 matcher 列，不会删除已有检查记录。
 
 **创建检测一直返回 409 `plagiarism_corpus_not_ready`** — 有文档还没建成投影。
 `kbsvc plagiarism status` 看 pending/failed 计数；failed 的用

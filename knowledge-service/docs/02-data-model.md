@@ -203,6 +203,8 @@ Tantivy 的 `payload` 字段存的是同一份结构，所以单走「字面」�
 
 哈希变化后，新检测只能对匹配的投影执行，且在重建完成前被拒绝。
 
+每条 `plag_check` 还保存 `matcher_version` 与 `matcher_config`。前者标识对齐实现，后者记录本次实际语言、有效字符数、阈值及规范化版本；这些列通过 `kbsvc plagiarism init` 的增量迁移追加，旧行使用空值/空对象兼容读取，不为历史结果伪造当前阈值。
+
 ### 保留
 
 待检原文、报告、事件默认保留 `KB_PLAG_RETENTION_DAYS`（30）天。停用的投影

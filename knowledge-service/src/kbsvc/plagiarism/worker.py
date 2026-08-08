@@ -196,6 +196,8 @@ class PlagiarismWorker:
 
         check.status = str(CheckStatus.FAILED)
         check.finished_at = repo.utcnow()
+        error_code = getattr(exc, "code", "internal_error")
+        error_detail = getattr(exc, "detail", {})
         repo.append_event(
             session,
             check_id=check.id,
@@ -204,7 +206,11 @@ class PlagiarismWorker:
             status=CheckStatus.FAILED,
             progress=1.0,
             # Never the stack trace - events are readable by the caller.
-            detail={"error": type(exc).__name__},
+            detail={
+                "error": type(exc).__name__,
+                "code": error_code,
+                "detail": error_detail,
+            },
         )
 
 

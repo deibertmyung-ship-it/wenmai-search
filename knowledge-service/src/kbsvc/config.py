@@ -129,6 +129,9 @@ class Settings(BaseSettings):
     plag_zh_min_passage_len: int = 20
     plag_min_effective_chars: int = 12
     plag_short_exact_min_score: float = 0.99
+    # Bump together with plagiarism.normalization.NORMALIZER_VERSION when the
+    # stored fingerprint representation changes.
+    plag_normalizer_version: str = "plag-normalizer-v2"
     plag_extend_tolerance: float = 0.85
     plag_df_ratio_threshold: float = 0.25
     # A query chunk below this fraction of word characters is skipped: rule
@@ -278,7 +281,7 @@ class Settings(BaseSettings):
                 self.plag_chunk_overlap,
                 self.plag_kgram,
                 self.plag_winnow_window,
-                "plag-normalizer-v2",
+                self.plag_normalizer_version,
             )
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]

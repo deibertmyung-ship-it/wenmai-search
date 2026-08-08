@@ -15,6 +15,14 @@ def test_chinese_policy_uses_zh_thresholds(settings):
     assert policy.matcher_version == "seed-extend-v2"
 
 
+def test_chinese_locale_variants_keep_the_chinese_policy(settings):
+    text = "\u4eba\u7980\u5929\u5730\u3001\u547d\u5c5e\u9634\u9633\u751f\u5c45\u8986\u8f7d\u3002"
+    for language in ("zh-cn", "zh-tw"):
+        policy = resolve_match_policy(text, language, settings)
+        assert policy.resolved_language == language
+        assert (policy.min_seed_len, policy.min_passage_len) == (12, 20)
+
+
 def test_english_policy_keeps_generic_thresholds(settings):
     policy = resolve_match_policy("The quick brown fox jumps over the lazy dog.", "en", settings)
     assert policy.profile == "generic"

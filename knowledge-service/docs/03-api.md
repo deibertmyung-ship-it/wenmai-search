@@ -107,6 +107,18 @@ Base: `/v1`。认证：`Authorization: Bearer <api_key>`（`KB_AUTH_REQUIRED=fal
 { "check_id": "…", "status": "pending", "snapshot_at": "…", "algorithm_config_hash": "…" }
 ```
 
+有效字符少于 12（空白、标点和引用标记不计入）时不会创建任务，返回 422：
+
+```json
+{
+  "error": {
+    "code": "plagiarism_text_too_short",
+    "message": "有效文本少于 12 个字符，无法可靠查重",
+    "detail": {"effective_chars": 7, "minimum": 12}
+  }
+}
+```
+
 ### POST /v1/plagiarism/checks/documents/{document_id} → 202
 检测一篇已入库文档的当前版本。**该文档的所有版本**都会被排除出候选——
 只排除当前版本会让它的早期修订与自己匹配。
@@ -118,6 +130,8 @@ Base: `/v1`。认证：`Authorization: Bearer <api_key>`（`KB_AUTH_REQUIRED=fal
 ```json
 {
   "check_id": "…", "status": "completed",
+  "matcher_version": "seed-extend-v2",
+  "matcher_config": {"profile": "zh", "effective_chars": 14, "min_seed_len": 12, "min_passage_len": 20, "normalizer_version": "plag-normalizer-v2"},
   "query_chars": 1200, "matched_chars": 380,
   "checked_chunks": 12, "total_chunks": 12,
   "coverage_reason": null, "is_complete": true,

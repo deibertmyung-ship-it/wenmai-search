@@ -37,3 +37,20 @@ def test_pure_punctuation_has_no_effective_characters():
 
 def test_normalizer_version_is_explicit():
     assert NORMALIZER_VERSION == "plag-normalizer-v2"
+
+
+def test_offsets_cover_empty_spans_and_nfkc_expansion():
+    normalized = normalize_with_offsets("A\uff21B", profile="generic")
+    assert normalized.text == "aab"
+    assert normalized.original_span(0, 0) == (0, 0)
+    assert normalized.original_span(1, 2) == (1, 2)
+    assert normalized.original_span(3, 3) == (3, 3)
+
+
+def test_original_slice_contains_punctuation_around_a_match():
+    text = "前文——人禀天地、命属阴阳。后文"
+    normalized = normalize_with_offsets(text, profile="zh")
+    start = normalized.text.index("人禀天地")
+    end = start + len("人禀天地命属阴阳")
+    original_start, original_end = normalized.original_span_with_boundaries(start, end, text)
+    assert "人禀天地、命属阴阳" in text[original_start:original_end]
