@@ -590,3 +590,39 @@ mark {
 .source__ordinal { display: inline-block; min-width: 1.6em; font-family: var(--font-song); color: var(--seal); }
 .source__title { font-size: 1.0625rem; }
 .source__meta { font-size: 0.8125rem; opacity: 0.7; margin-top: var(--space-2); }
+
+.submission {
+  font-family: var(--font-song);
+  font-size: 1.0625rem;
+  line-height: 2.0;
+  margin: 0;
+  white-space: pre-wrap;
+}
+.report-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(18rem, 1fr);
+  gap: var(--space-7);
+  align-items: start;
+  margin-top: var(--space-6);
+}
+.report-layout__sources {
+  position: sticky;
+  top: var(--space-4);
+  max-height: calc(100vh - 2 * var(--space-4));
+  overflow: auto;
+}
+.hit { background: var(--seal-wash); color: inherit; padding: 0.05em 0; }
+.hit__markers { white-space: nowrap; }
+.hit__marker {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  vertical-align: super;
+  color: var(--seal);
+  margin-left: 0.15em;
+  text-decoration: none;
+}
+.hit__marker:hover, .hit__marker:focus { text-decoration: underline; }
+@media (max-width: 56rem) {
+  .report-layout { grid-template-columns: minmax(0, 1fr); }
+  .report-layout__sources { position: static; max-height: none; overflow: visible; }
+}

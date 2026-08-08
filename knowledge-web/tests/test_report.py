@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from kbweb.report import duplication_ratio, numbered_sources, source_excerpt
+from kbweb.report import duplication_ratio, numbered_sources, query_spans, source_excerpt
 
 
 def chunk(ordinal: int, text: str, char_start: int) -> dict:
@@ -84,3 +84,22 @@ def test_excerpt_survives_offsets_that_do_not_match_chunk_text_length():
 def test_excerpt_returns_empty_when_nothing_covers_the_range():
     assert source_excerpt([chunk(0, "零一二", 0)], 50, 60) == ""
     assert source_excerpt([], 0, 10) == ""
+
+
+def test_query_spans_carry_the_source_ordinal():
+    sources = [
+        {
+            "ordinal": 1,
+            "passages": [
+                {"query_start": 0, "query_end": 11},
+                {"query_start": 20, "query_end": 25},
+            ],
+        },
+        {"ordinal": 2, "passages": [{"query_start": 5, "query_end": 15}]},
+    ]
+    assert sorted(query_spans(sources)) == [(0, 11, 1), (5, 15, 2), (20, 25, 1)]
+
+
+def test_query_spans_tolerates_a_source_with_no_passages():
+    assert query_spans([{"ordinal": 1, "passages": []}]) == []
+    assert query_spans([{"ordinal": 1}]) == []

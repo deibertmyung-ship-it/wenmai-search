@@ -13,7 +13,7 @@ import uuid
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from ..errors import BackendError
-from ..report import duplication_ratio, numbered_sources
+from ..report import duplication_ratio, numbered_sources, query_spans
 from ._common import client
 
 bp = Blueprint("plagiarism", __name__, url_prefix="/plagiarism")
@@ -96,6 +96,7 @@ def detail(check_id: str):
         report=report,
         report_error=report_error,
         sources=sources,
+        spans=query_spans(sources),
         ratio=duplication_ratio(report) if report else 0.0,
         live=status not in TERMINAL,
         nojs_refresh_seconds=5,

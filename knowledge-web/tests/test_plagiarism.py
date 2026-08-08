@@ -528,6 +528,66 @@ def test_unknown_check_is_a_normal_404_page(client):
     assert client.get("/plagiarism/checks/chk-nope").status_code == 404
 
 
+@respx.mock
+def test_report_highlights_the_submission_from_backend_offsets(client, chunks_payload):
+    stub_check("chk-done", "completed")
+    stub_report("chk-done", query_text="夫天地者，万物之逆旅也。古人秉烛夜游，良有以也。")
+    respx.get(f"{API_BASE}/v1/documents/doc-1111-2222/chunks").mock(
+        return_value=httpx.Response(200, json=chunks_payload)
+    )
+    body = html(client.get("/plagiarism/checks/chk-done"))
+    assert "<mark" in body
+    assert "夫天地者，万物之逆旅也" in body
+    assert "古人秉烛夜游" in body
+
+
+@respx.mock
+def test_a_passage_matching_two_sources_carries_both_markers(client, chunks_payload):
+    stub_check("chk-two", "completed")
+    stub_report(
+        "chk-two",
+        query_text="零一二三四五",
+        sources=[
+            {
+                "document_id": "doc-a",
+                "version_id": "v", "version": 1, "content_hash": "h",
+                "title": "甲书", "matched_chars": 4, "score": 0.9,
+                "passages": [
+                    {"query_start": 0, "query_end": 4, "source_start": 0,
+                     "source_end": 4, "score": 0.9, "preview": "零一二三"}
+                ],
+            },
+            {
+                "document_id": "doc-b",
+                "version_id": "v", "version": 1, "content_hash": "h",
+                "title": "乙书", "matched_chars": 4, "score": 0.8,
+                "passages": [
+                    {"query_start": 2, "query_end": 6, "source_start": 0,
+                     "source_end": 4, "score": 0.8, "preview": "二三四五"}
+                ],
+            },
+        ],
+    )
+    for document_id in ("doc-a", "doc-b"):
+        respx.get(f"{API_BASE}/v1/documents/{document_id}/chunks").mock(
+            return_value=httpx.Response(200, json=chunks_payload)
+        )
+    body = html(client.get("/plagiarism/checks/chk-two"))
+    # The overlapping run must name both sources, not just the first.
+    assert "#source-1" in body and "#source-2" in body
+
+
+@respx.mock
+def test_submission_text_is_escaped_not_injected(client, chunks_payload):
+    """Highlighting is fragment concatenation; it must never emit raw HTML."""
+    stub_check("chk-xss", "completed")
+    stub_report("chk-xss", query_text="<script>alert(1)</script>夫天地者", sources=[],
+                unique_passages=[], matched_chars=0)
+    body = html(client.get("/plagiarism/checks/chk-xss"))
+    assert "<script>alert(1)</script>" not in body
+    assert "&lt;script&gt;" in body
+
+
 def stub_report(check_id: str, **extra):
     payload = {
         "check_id": check_id,

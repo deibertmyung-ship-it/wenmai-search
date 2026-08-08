@@ -17,20 +17,41 @@
   </p>
 {% endif %}
 
-<h2 class="section-title">来源</h2>
-<ol class="sources">
-  {% for source in sources %}
-    <li class="source" id="source-{{ source.ordinal }}">
-      <p class="source__title">
-        <span class="source__ordinal">{{ source.ordinal }}</span>
-        <a href="{{ url_for('library.read', document_id=source.document_id) }}">{{ source.title }}</a>
-      </p>
-      <p class="source__meta">
-        命中 {{ "{:,}".format(source.matched_chars) }} 字 · score {{ source.score | score(2) }} ·
-        {{ source.passages | length }} 处
-      </p>
-    </li>
-  {% else %}
-    <li class="source"><p>没有找到重复来源。</p></li>
-  {% endfor %}
-</ol>
+<div class="report-layout">
+  <section class="report-layout__submission" aria-label="待检全文">
+    {% if report.query_text %}
+      <div class="submission">
+        {% for fragment, owners in coverage_segments(report.query_text, spans) %}
+          {%- if owners -%}
+            <mark class="hit">{{ fragment }}<span class="hit__markers"
+              >{% for ordinal in owners | sort %}<a class="hit__marker" href="#source-{{ ordinal }}">{{ ordinal }}</a>{% endfor %}</span
+            ></mark>
+          {%- else -%}
+            {{ fragment }}
+          {%- endif -%}
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="flash">原文已按保留策略清理，无法显示全文高亮。</p>
+    {% endif %}
+  </section>
+  <aside class="report-layout__sources" aria-label="命中来源">
+    <h2 class="section-title">来源</h2>
+    <ol class="sources">
+      {% for source in sources %}
+        <li class="source" id="source-{{ source.ordinal }}">
+          <p class="source__title">
+            <span class="source__ordinal">{{ source.ordinal }}</span>
+            <a href="{{ url_for('library.read', document_id=source.document_id) }}">{{ source.title }}</a>
+          </p>
+          <p class="source__meta">
+            命中 {{ "{:,}".format(source.matched_chars) }} 字 · score {{ source.score | score(2) }} ·
+            {{ source.passages | length }} 处
+          </p>
+        </li>
+      {% else %}
+        <li class="source"><p>没有找到重复来源。</p></li>
+      {% endfor %}
+    </ol>
+  </aside>
+</div>

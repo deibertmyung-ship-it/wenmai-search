@@ -55,3 +55,15 @@ def duplication_ratio(report: dict) -> float:
     if query_chars <= 0:
         return 0.0
     return round((report.get("matched_chars") or 0) / query_chars * 100, 1)
+
+
+def query_spans(sources: list[dict]) -> list[tuple[int, int, int]]:
+    """Flatten numbered sources into `(start, end, ordinal)` for coverage_segments.
+
+    Requires sources already carrying `ordinal` - see `numbered_sources`.
+    """
+    return [
+        (passage["query_start"], passage["query_end"], source["ordinal"])
+        for source in sources
+        for passage in source.get("passages") or []
+    ]
