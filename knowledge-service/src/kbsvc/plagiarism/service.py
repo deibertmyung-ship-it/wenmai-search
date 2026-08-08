@@ -320,6 +320,7 @@ class PlagiarismService:
             coverage_reason=CoverageReason(check.coverage_reason)
             if check.coverage_reason
             else None,
+            query_text=check.query_text,
         )
 
     def get_corpus_status(

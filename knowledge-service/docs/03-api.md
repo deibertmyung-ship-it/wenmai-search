@@ -128,7 +128,8 @@ Base: `/v1`。认证：`Authorization: Bearer <api_key>`（`KB_AUTH_REQUIRED=fal
                    "source_start": 120, "source_end": 178,
                    "score": 0.98, "preview": "……（≤300 字符）" }]
   }],
-  "unique_passages": [[3, 61]]
+  "unique_passages": [[3, 61]],
+  "query_text": "……（提交的原文；文档模式下为空串）"
 }
 ```
 
@@ -137,6 +138,11 @@ Base: `/v1`。认证：`Authorization: Bearer <api_key>`（`KB_AUTH_REQUIRED=fal
 
 `coverage_reason` 非空表示**没有查完**（`time_cap` / `cancelled`），
 此时结果不可作为「无抄袭」结论。
+
+`query_text` 是提交检测的原文：文本模式下与提交内容逐字一致；文档模式下恒为
+空串，因为原文已经在文档表里有一份，不重复存储（见 ADR-0006）。
+`GET /v1/plagiarism/checks` 与 `GET /v1/plagiarism/checks/{id}` 不受影响，
+继续不返回提交的原文。
 
 读取报告时会**重新校验**每个来源的当前可见性——权限可能在检测之后被收回，
 已存的报告不该成为绕过它的通道。

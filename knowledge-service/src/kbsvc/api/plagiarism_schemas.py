@@ -107,6 +107,10 @@ class ReportOut(BaseModel):
     is_complete: bool
     sources: list[SourceOut] = Field(default_factory=list)
     unique_passages: list[tuple[int, int]] = Field(default_factory=list)
+    # Populated for text-mode checks; empty for document-mode checks, whose
+    # submitted text is a reference to an already-stored document and is not
+    # duplicated here.
+    query_text: str = ""
 
     @classmethod
     def of(cls, report: CheckReport) -> ReportOut:
@@ -121,6 +125,7 @@ class ReportOut(BaseModel):
             total_chunks=report.total_chunks,
             coverage_reason=str(report.coverage_reason) if report.coverage_reason else None,
             is_complete=report.is_complete,
+            query_text=report.query_text,
             sources=[
                 SourceOut(
                     document_id=source.document_id,

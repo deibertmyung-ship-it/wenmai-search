@@ -205,6 +205,35 @@ def test_report_carries_offsets_and_completeness(api, api_corpus, kb_session):
     assert body["coverage_reason"] is None
 
 
+def test_report_echoes_the_submitted_text_in_text_mode(api, api_corpus, kb_session):
+    from kbsvc.config import get_settings
+    from kbsvc.plagiarism.runner import CheckRunner
+
+    text = "前言。" + REUSED + "后记。"
+    check_id = create_text(api, text=text).json()["check_id"]
+    CheckRunner(get_settings()).run(kb_session, check_id)
+    kb_session.commit()
+
+    body = api.get(f"/v1/plagiarism/checks/{check_id}/report").json()
+    assert body["query_text"] == text
+
+
+def test_report_leaves_query_text_empty_in_document_mode_by_design(api, api_corpus, kb_session):
+    """Document mode does not duplicate the source into the check row (see
+    `PlagCheck.query_text` and ADR-0006), so the report's `query_text` is an
+    empty string here - this is the intended asymmetry with text mode, not a
+    bug to fix."""
+    from kbsvc.config import get_settings
+    from kbsvc.plagiarism.runner import CheckRunner
+
+    check_id = api.post(f"/v1/plagiarism/checks/documents/{api_corpus}").json()["check_id"]
+    CheckRunner(get_settings()).run(kb_session, check_id)
+    kb_session.commit()
+
+    body = api.get(f"/v1/plagiarism/checks/{check_id}/report").json()
+    assert body["query_text"] == ""
+
+
 # --- deletion -----------------------------------------------------------
 
 
