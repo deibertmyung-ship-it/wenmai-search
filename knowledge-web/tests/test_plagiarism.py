@@ -424,3 +424,105 @@ def test_document_check_redirects_to_the_new_check(client):
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/plagiarism/checks/chk-doc")
     assert route.calls.last.request.headers["Idempotency-Key"] == "t"
+
+
+def stub_check(check_id: str, status: str, **extra):
+    payload = {
+        "check_id": check_id,
+        "status": status,
+        "created_at": "2026-08-08T10:00:00",
+        "snapshot_at": "2026-08-08T10:00:00",
+        "algorithm_config_hash": "cfg-abc123",
+        "source_document_id": None,
+        "query_chars": 1000,
+        "matched_chars": 234,
+    }
+    payload.update(extra)
+    respx.get(f"{API_BASE}/v1/plagiarism/checks/{check_id}").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+
+
+@respx.mock
+def test_running_check_refreshes_itself_only_without_scripts(client, config):
+    stub_check("chk-live", "running")
+    body = html(client.get("/plagiarism/checks/chk-live"))
+    assert ('http-equiv="refresh"' in body) is config.nojs
+    assert "检测中" in body
+
+
+@respx.mock
+def test_pending_check_follows_the_same_nojs_refresh_rule(client, config):
+    stub_check("chk-wait", "pending")
+    body = html(client.get("/plagiarism/checks/chk-wait"))
+    assert ('http-equiv="refresh"' in body) is config.nojs
+
+
+@respx.mock
+def test_cancel_requested_is_live_and_follows_the_nojs_refresh_rule(client, config):
+    stub_check("chk-stopping", "cancel_requested")
+    body = html(client.get("/plagiarism/checks/chk-stopping"))
+    assert ('http-equiv="refresh"' in body) is config.nojs
+    assert "正在停止" in body
+
+
+@respx.mock
+def test_failed_check_stops_refreshing(client):
+    """A terminal page that keeps reloading burns the backend forever."""
+    stub_check("chk-bad", "failed")
+    body = html(client.get("/plagiarism/checks/chk-bad"))
+    assert 'http-equiv="refresh"' not in body
+    assert "失败" in body
+
+
+@respx.mock
+def test_cancelled_check_stops_refreshing(client):
+    stub_check("chk-stop", "cancelled")
+    body = html(client.get("/plagiarism/checks/chk-stop"))
+    assert 'http-equiv="refresh"' not in body
+    assert "已取消" in body
+
+
+@respx.mock
+def test_cancel_is_a_real_form_post(client):
+    stub_check("chk-live", "running")
+    body = html(client.get("/plagiarism/checks/chk-live"))
+    assert 'method="post"' in body
+    assert "/plagiarism/checks/chk-live/delete" in body
+
+
+@respx.mock
+def test_deleting_a_finished_check_returns_to_the_list(client):
+    respx.delete(f"{API_BASE}/v1/plagiarism/checks/chk-done").mock(
+        return_value=httpx.Response(204)
+    )
+    response = client.post("/plagiarism/checks/chk-done/delete")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/plagiarism/")
+
+
+@respx.mock
+def test_cancelling_a_running_check_stays_on_the_check(client):
+    respx.delete(f"{API_BASE}/v1/plagiarism/checks/chk-live").mock(
+        return_value=httpx.Response(202, json={"outcome": "cancel_requested"})
+    )
+    response = client.post("/plagiarism/checks/chk-live/delete")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/plagiarism/checks/chk-live")
+
+
+@respx.mock
+def test_unknown_check_is_a_normal_404_page(client):
+    respx.get(f"{API_BASE}/v1/plagiarism/checks/chk-nope").mock(
+        return_value=httpx.Response(
+            404,
+            json={
+                "error": {
+                    "code": "plagiarism_check_not_found",
+                    "message": "no such check",
+                    "detail": {},
+                }
+            },
+        )
+    )
+    assert client.get("/plagiarism/checks/chk-nope").status_code == 404

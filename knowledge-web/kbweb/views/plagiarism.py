@@ -74,10 +74,24 @@ def submit_document(document_id: str):
 
 @bp.get("/checks/<check_id>")
 def detail(check_id: str):
-    """Stub so `url_for("plagiarism.detail", ...)` resolves from this task's
-    redirects. The real progress/report page lands in the next task, which
-    replaces this function body rather than appending a second `detail`."""
-    return "", 204
+    check = client().get_check(check_id)
+    return render_template(
+        "check.html",
+        check=check,
+        report=None,
+        live=check["status"] not in TERMINAL,
+        nojs_refresh_seconds=5,
+    )
+
+
+@bp.post("/checks/<check_id>/delete")
+def delete(check_id: str):
+    status = client().delete_check(check_id)
+    if status == 202:
+        flash("已请求取消，正在停止", "ok")
+        return redirect(url_for("plagiarism.detail", check_id=check_id))
+    flash("已删除", "ok")
+    return redirect(url_for("plagiarism.index"))
 
 
 def _corpus_or_reason(api) -> tuple[dict | None, str | None]:
@@ -103,3 +117,9 @@ def _explain(exc: BackendError) -> str:
     if exc.code == "idempotency_conflict":
         return "这张表单已用于另一份内容，请返回后重新提交。"
     return f"提交失败：{exc.message}"
+
+
+@bp.get("/checks/<check_id>/events")
+def events(check_id: str):
+    """Filled in by the SSE task; the route exists now so `url_for` resolves."""
+    return "", 204
