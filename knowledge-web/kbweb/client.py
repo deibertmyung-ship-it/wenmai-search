@@ -33,7 +33,8 @@ class KbClient:
 
     # --- plumbing -------------------------------------------------------
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+    def _send(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        """Everything auth, timeout and error-shaped happens here."""
         try:
             response = self._client.request(method, path, **kwargs)
         except httpx.HTTPError as exc:
@@ -42,6 +43,10 @@ class KbClient:
 
         if response.status_code >= 400:
             raise BackendError(response.status_code, *_parse_error(response))
+        return response
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        response = self._send(method, path, **kwargs)
         if not response.content:
             return None
         return response.json()
@@ -154,6 +159,64 @@ class KbClient:
             },
         )
 
+    # --- plagiarism -----------------------------------------------------
+
+    def corpus_status(self) -> dict:
+        return self._request("GET", "/v1/plagiarism/corpus/status")
+
+    def create_text_check(
+        self, *, text: str, language: str = "auto", idempotency_key: str = ""
+    ) -> dict:
+        return self._request(
+            "POST",
+            "/v1/plagiarism/checks",
+            json={"text": text, "language": language},
+            headers=_idempotency(idempotency_key),
+        )
+
+    def create_document_check(self, document_id: str, *, idempotency_key: str = "") -> dict:
+        return self._request(
+            "POST",
+            f"/v1/plagiarism/checks/documents/{document_id}",
+            headers=_idempotency(idempotency_key),
+        )
+
+    def list_checks(self, *, limit: int = 50, offset: int = 0) -> list[dict]:
+        return (
+            self._request(
+                "GET", "/v1/plagiarism/checks", params={"limit": limit, "offset": offset}
+            )
+            or []
+        )
+
+    def get_check(self, check_id: str) -> dict:
+        return self._request("GET", f"/v1/plagiarism/checks/{check_id}")
+
+    def get_plag_report(self, check_id: str) -> dict:
+        return self._request("GET", f"/v1/plagiarism/checks/{check_id}/report")
+
+    def delete_check(self, check_id: str) -> int:
+        """Returns the status code: 204 is gone, 202 is cancellation requested.
+
+        The distinction is the whole answer here, so the body is not what the
+        caller wants.
+        """
+        return self._send("DELETE", f"/v1/plagiarism/checks/{check_id}").status_code
+
+    def stream_progress(self, check_id: str, *, last_event_id: str = ""):
+        """Open the upstream SSE stream. Caller must use it as a context manager.
+
+        The client's ordinary read timeout is left in place on purpose: kbsvc
+        emits a keepalive every couple of seconds, so an idle read that long
+        means the stream is actually dead and ending it is correct.
+        """
+        headers = {"Accept": "text/event-stream"}
+        if last_event_id:
+            headers["Last-Event-ID"] = last_event_id
+        return self._client.stream(
+            "GET", f"/v1/plagiarism/checks/{check_id}/progress", headers=headers
+        )
+
     # --- jobs & ops -----------------------------------------------------
 
     def list_jobs(self, *, state: str | None = None, limit: int = 50) -> list[dict]:
@@ -170,6 +233,10 @@ class KbClient:
 
     def health(self) -> dict:
         return self._request("GET", "/healthz")
+
+
+def _idempotency(key: str) -> dict[str, str]:
+    return {"Idempotency-Key": key} if key else {}
 
 
 def _parse_error(response: httpx.Response) -> tuple[str, str, dict]:
