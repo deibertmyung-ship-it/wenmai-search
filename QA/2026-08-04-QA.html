@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="文脉检索项目问答整理：2026-08-04 发布与部署，2026-08-05 检索链路核查与 Tantivy 改造，2026-08-06 server profile 部署，2026-08-07 精排评估与分词预计算，2026-08-08 前端选型调研与字体、无脚本模式落地">
+  <meta name="description" content="文脉检索项目问答整理：2026-08-04 发布与部署，2026-08-05 检索链路核查与 Tantivy 改造，2026-08-06 server profile 部署，2026-08-07 精排评估与分词预计算，2026-08-08 前端选型调研与字体、无脚本模式落地，以及抄袭检测后端的六阶段落地与真实语料验收">
   <title>文脉检索项目 QA · 2026-08-04 ~ 08-08</title>
   <style>
     :root {
@@ -297,6 +297,8 @@
         <strong>08-07：</strong>否决 bge-reranker-v2-m3 精排（理由是算力不是选型），把分词结果改为 ingest 时预计算。
         <strong>08-08：</strong>调研 GitHub 上的同类前端并否决全部模板，把字体从「设备彩票」改为自托管子集化，
         把无脚本承诺做成测试维度——它当场抓到一个真 bug。
+        <strong>并行的另一条线（08-07~08）：</strong>把抄袭检测按 ADR-0001 选择性移植进 kbsvc，
+        六阶段落地并对 201 部真实古籍验收——真实语料一上就抓出五个测试环境发现不了的缺陷。
         所有结论均以对运行中系统的实测为准，推翻的判断也一并保留。
       </p>
       <div class="meta">
@@ -349,6 +351,12 @@
       <a href="#nojs">无脚本承诺与它抓到的 bug</a>
       <a href="#cjk-typography">CJK 排版与一次自我推翻</a>
       <a href="#handover-0808">交付与遗留</a>
+      <strong style="margin-top:18px">08-07~08 抄袭检测后端</strong>
+      <a href="#plag-port">移植决策与阶段推进</a>
+      <a href="#plag-testfinds">测试抓到的四个缺陷</a>
+      <a href="#plag-acceptance">真实语料验收</a>
+      <a href="#plag-env">环境侧的三次误判</a>
+      <a href="#plag-handover">交付与遗留</a>
     </aside>
 
     <main>
@@ -2369,6 +2377,328 @@ sparse_search         3.6ms</code></pre>
           </div>
         </article>
       </section>
+
+      <hr style="margin:56px 0 40px;border:0;border-top:2px solid var(--line)">
+
+      <p class="eyebrow" style="margin-bottom:8px">2026-08-07 ~ 08-08</p>
+      <h2 style="margin-top:0">抄袭检测后端：六个阶段与真实语料验收</h2>
+      <p style="color:var(--muted);max-width:760px">
+        与上一节的前端工作并行的另一条线：按 ADR-0001 与规格，把
+        <code>noplag-engine</code> 的算法选择性移植进 <code>kbsvc</code>，落成一个
+        PostgreSQL-only、默认关闭的深模块。六个阶段全部完成并对 201 部真实古籍做了验收。
+        <strong>真实语料一上就抓出五个测试环境发现不了的缺陷</strong>，是这条线最值钱的部分。
+      </p>
+
+      <div class="summary" aria-label="抄袭检测核心结果">
+        <article>
+          <span>286</span>
+          <p>测试通过（新增 100 项，含 PG 集成与 HTTP seam）</p>
+        </article>
+        <article>
+          <span>201/201</span>
+          <p>语料投影建成，0 失败，回填约 7 分钟</p>
+        </article>
+        <article>
+          <span>5</span>
+          <p>只有真实规模才暴露的缺陷</p>
+        </article>
+      </div>
+
+      <section id="plag-port">
+        <h2>三十六、移植决策与阶段推进</h2>
+
+        <article class="qa">
+          <h3 class="question">为什么是「选择性移植」而不是整包引入或独立服务？</h3>
+          <div class="answer">
+            <p>ADR-0001 的判断：上游 <code>noplag-engine</code> 自带一整套 FastAPI 应用、异步
+              SQLAlchemy、上传与对象存储、Alembic 迁移，这些与 kbsvc 已有能力完全重叠，且不满足
+              本项目的鉴权、ACL 与任务可靠性要求。独立服务则要额外做鉴权转发、租户映射、
+              ACL 同步与文档同步。</p>
+            <p>所以只复制算法实现，按 kbsvc 架构改写。代价写在 ADR 里：<strong>移植后不能
+              直接 <code>git pull</code> 升级</strong>，每次都要重新做差异审查。</p>
+            <table>
+              <thead><tr><th>阶段</th><th>产出</th></tr></thead>
+              <tbody>
+                <tr><td>0</td><td>固定上游提交 <code>005da60f</code>、Apache-2.0 全文、逐文件归属表</td></tr>
+                <tr><td>1</td><td>6 个算法文件移植 + 自有的 types/states</td></tr>
+                <tr><td>2</td><td>9 张 <code>plag_*</code> 表、schema、repository、30 项 PG 集成测试</td></tr>
+                <tr><td>3</td><td>投影构建、入库钩子、CLI 六命令</td></tr>
+                <tr><td>4</td><td>服务层、CheckRunner、独立 worker</td></tr>
+                <tr><td>5</td><td>8 个 HTTP 端点、持久化 SSE、readiness</td></tr>
+                <tr><td>6</td><td>文档、回填、验收、开启</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">哪些文件没有按原样移植？</h3>
+          <div class="answer">
+            <p>11 个文件的清单里，有 5 个最终没有逐字移植，理由各不相同，都记进了提交信息与
+              <code>THIRD_PARTY_NOTICES.md</code>：</p>
+            <ul>
+              <li><code>workflows/progress.py</code> —— 整个是进程内 asyncio pub-sub，正是
+                ADR-0001 明令不移植的东西。只有事件领域类型有用，已按我们的持久化事件契约重写。</li>
+              <li><code>retrieval/fingerprint_df.py</code> —— 上游是异步的<strong>读取端</strong>，
+                且依赖一个位于 <code>scripts/</code>（不移植清单）的构建脚本。读取端我们已有等价实现，
+                真正缺的是写入端，自己写的。</li>
+              <li><code>retrieval/stop_list.py</code> —— 按概念移植。上游在入库和查询两侧都过滤，
+                其文档用大篇幅警告两侧必须一致；我们只在查询侧过滤，该隐患根本不存在，
+                重调阈值也不需要重新指纹化语料。上游的进程级缓存与跨层 hash 断言随之删除。</li>
+              <li><code>workflows/check.py</code> / <code>corpus.py</code> —— 其逻辑分别落在
+                runner 与 projection 里。</li>
+            </ul>
+            <div class="note">
+              <strong>其中一个判断后来被验收推翻。</strong>我认为 <code>l1_winnowing.py</code>
+              的候选策略已由 GIN 查询覆盖，未移植——但那个文件里还有一段
+              non-discriminative chunk skip，正是后面第三十八节那个误报的守卫。
+              「候选策略」和「哪些分块不值得拿来探测」是两件事，当时没分开看。
+            </div>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">测试 seam 怎么切的？</h3>
+          <div class="answer">
+            <p>实施方案原本列了 10 个测试文件、四个层次。按 to-spec 的「尽量少、尽量高」收拢为三个：</p>
+            <table>
+              <thead><tr><th>seam</th><th>放什么</th></tr></thead>
+              <tbody>
+                <tr><td>HTTP（复用既有 api_client）</td>
+                  <td>绝大部分可观察行为：两种创建模式、所有权、幂等、错误码、SSE 回放与续传</td></tr>
+                <tr><td>worker drain（复用既有模式）</td>
+                  <td>只放无法从 HTTP 稳定观察的进程语义：租约竞争、过期回收、协作取消、部分完成</td></tr>
+                <tr><td>算法基线（新增，最低层）</td>
+                  <td>上游固定向量。移植场景下「钉住实现输出」是唯一正当的测实现细节</td></tr>
+              </tbody>
+            </table>
+            <p>算法基线额外加了三项<strong>上游没有的中文用例</strong>——上游基线全是拉丁文，
+              一个在 CJK 上悄悄坏掉的移植能通过它的每一条断言。其中对齐那项断言字符偏移能切回原文，
+              因为偏移正是报告要高亮的东西。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="plag-testfinds">
+        <h2>三十七、测试抓到的四个设计缺陷</h2>
+
+        <article class="qa">
+          <h3 class="question">写测试的过程中改了哪些设计？</h3>
+          <div class="answer">
+            <p>四处，都不是「测试没写对」，是设计本身有问题：</p>
+            <table>
+              <thead><tr><th>缺陷</th><th>为什么是设计问题</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>幂等键唯一约束把所有未带键的检测视为键为 <code>''</code> 而互相冲突</td>
+                  <td>幂等键是<strong>可选的</strong>。同一调用方发第二个普通请求就会失败。
+                    改为 PostgreSQL 部分唯一索引（<code>WHERE idempotency_key &lt;&gt; ''</code>）</td>
+                </tr>
+                <tr>
+                  <td>入库钩子的异常捕获写在钩子函数<strong>内部</strong></td>
+                  <td>「抄袭永不拖垮入库」若依赖抄袭模块自己抓住它的每一个 bug，那就不是保证。
+                    防御边界移到 worker 的调用点</td>
+                </tr>
+                <tr>
+                  <td>功能关闭时只有创建路径返回 503</td>
+                  <td>「关闭」应意味着这个面不开放，而不是「可读不可写」。
+                    实测 <code>GET /corpus/status</code> 在关闭态下如实报出 201 篇语料，
+                    这让 <code>KB_PLAG_ENABLED</code> 不成其为发布闸门。守卫上移到路由层</td>
+                </tr>
+                <tr>
+                  <td>用 <code>KB_DATABASE_URL</code> 让整套测试连 PG</td>
+                  <td>把设计好的 skip 变成 <strong>120 个硬错误</strong>，连纯算法测试都跟着挂。
+                    改为只给需要全局 engine 的两个 worker 测试单独加 fixture</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="note">
+              第三项之所以能溜过去，是因为原测试<strong>只覆盖了 POST</strong>。
+              改成按端点参数化后，七条路由逐个断言，包括 SSE 那条——流式响应最容易在这类改动里被漏掉。
+            </div>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">PostgreSQL 测试怎么处理「跑不了」的情况？</h3>
+          <div class="answer">
+            <p>抄袭是首个需要真实 PostgreSQL 的测试集（其余全跑 SQLite）。策略是复用 compose 那个实例，
+              <strong>不可用时 skip 并把原因写进报告</strong>，明确标注
+              <code>these assertions did NOT run</code>。</p>
+            <div class="note">
+              「没跑」和「跑过且没问题」必须能区分，否则绿灯毫无意义。实测无 PG 时
+              199 项通过 / 79 项 skip，每项都带完整原因。
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="plag-acceptance">
+        <h2>三十八、真实语料验收抓到的五个缺陷</h2>
+
+        <article class="qa">
+          <h3 class="question">回填实际花了多久？</h3>
+          <div class="answer">
+            <p><strong>约 7 分钟</strong>，201/201 完成、0 失败。产出 232,960 个投影分块、
+              320 万指纹、241 MB。</p>
+            <div class="note">
+              我先前估的是「数小时」，<strong>这个估计错了</strong>——按嵌入吞吐外推，
+              但投影构建根本不跑嵌入模型，只做分句与指纹。
+            </div>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">格式行造成 100% 误报是怎么回事？</h3>
+          <div class="answer">
+            <p>提交 300 个连字符，报告说四部书各命中 100%。分隔线与语料里每条分隔线逐字相同，
+              是<strong>真实的 verbatim 匹配，也是毫无意义的匹配</strong>。</p>
+            <p>对照实验把范围定得很干净：</p>
+            <table>
+              <thead><tr><th>输入</th><th>结果</th></tr></thead>
+              <tbody>
+                <tr><td>现代白话散文</td><td>0 来源，0% 命中</td></tr>
+                <tr><td>原创文言</td><td>0 来源，0% 命中</td></tr>
+                <tr><td>纯分隔线</td><td><strong>4 来源，100% 命中</strong></td></tr>
+              </tbody>
+            </table>
+            <p>DF 停用词表抓不到它：分隔线只出现在少数几本书里，文档频率极低，在停用词表眼里
+              它「很罕见」——正是要保留的那一类。（实测该语料最大 DF 为 43，低于 0.25 阈值
+              对应的 51，<strong>停用词表本就是空的</strong>。）</p>
+            <div class="note">
+              <strong>修复走了一步弯路。</strong>先只做分块级过滤，验收发现仍然误报——
+              嵌在正文里的分隔线，其所在分块整体「多数为文字」，能通过分块检查，
+              随后对齐仍匹配到那段符号。真正需要有区分性的是<strong>被报出来的那一段</strong>。
+              改到片段级后：来源 3 → 1（只剩原书），预览从一串连字符变成真正的正文，
+              命中字符 600 → 238。
+            </div>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">性能验收暴露了什么？</h3>
+          <div class="answer">
+            <p>创建请求 P95 <strong>815 ms</strong>，超出 500 ms 目标。根因是
+              <code>_visible_document_ids</code> 取到 id 列表后逐个
+              <code>session.get(Document)</code> 读 ACL——201 篇文档就是 201 次查询。</p>
+            <div class="note">
+              <strong>这个分支只在 ACL 非空时走到。</strong>我此前测出的 88–132 ms 恰好用的是空 ACL，
+              而所有真实调用方的 ACL 都非空。改成一次查询取 <code>(id, acl)</code> 后回到 164 ms。
+              这与 08-07 修的 <code>/v1/documents</code> N+1 是同一类问题，我犯了第二次。
+            </div>
+            <table>
+              <thead><tr><th>验收项</th><th>目标</th><th>实测</th></tr></thead>
+              <tbody>
+                <tr><td>创建请求 P95</td><td>&lt; 500 ms</td><td>164 ms（中位 88 ms）</td></tr>
+                <tr><td>SSE 首字节</td><td>&lt; 2 s</td><td>76 ms（中位 50 ms）</td></tr>
+                <tr><td>100,000 字符</td><td>60 s 预算内</td><td>32.6 s，1498/1498 分块查完</td></tr>
+                <tr><td>GIN 索引</td><td>真实数据量命中</td><td>Bitmap Index Scan，33 ms</td></tr>
+                <tr><td>逐字复用</td><td>找回原书</td><td>score 1.000，偏移可切回原文</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">还有哪两个？</h3>
+          <div class="answer">
+            <p><strong>compose 只透传了 2 个 <code>KB_PLAG_*</code>。</strong>
+              <code>.env</code> 由 compose 读取用于插值，<strong>并不挂进容器</strong>；
+              没在 <code>environment:</code> 里点名的变量对应用不可见，应用于是静默使用代码默认值。
+              <code>.env.example</code> 记了 25 个——也就是说运维照文档改配置会以为生效、其实没有。
+              已全部补齐。</p>
+            <p><strong><code>rebuild-df</code> 在 233k 分块上跑不完。</strong>我先归因于 ORM 对象创建
+              （200 万行各建一个实例），改写成纯 SQL 后<strong>确实完成了</strong>——但仍需数分钟。
+              第一次判断只对了一半：真正的放大器是 <code>work_mem</code> 只有 4 MB，
+              230 万行的 DISTINCT 大量落盘。SQL 版保留（它确实必要），
+              <code>ANALYZE</code> 拆出来单独跑只要 4.5 秒。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="plag-env">
+        <h2>三十九、环境侧的三次误判</h2>
+
+        <article class="qa">
+          <h3 class="question">构建失败、服务打不开、429，分别是什么原因？</h3>
+          <div class="answer">
+            <table>
+              <thead><tr><th>现象</th><th>我最初的判断</th><th>实际</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>镜像构建 apt exit 100</td>
+                  <td>内存不足（有前科）</td>
+                  <td><strong>Debian 镜像 502 Bad Gateway</strong>。普通容器访问同一域名返回 200，
+                    内存尚余 6.6 GB——是上游 CDN 故障。次日恢复后一次构建通过</td>
+                </tr>
+                <tr>
+                  <td><code>127.0.0.1:5055</code> 打不开</td>
+                  <td>—</td>
+                  <td>四个应用服务 <code>Exited (255)</code> 已 10 小时，日志干净=被外部杀掉。
+                    <strong>是我的疏漏</strong>：中途发现栈停了，只重启了存储层，
+                    因为验收全用一次性容器直连数据库，绕过了这四个服务</td>
+                </tr>
+                <tr>
+                  <td>性能脚本 429</td>
+                  <td>可能是缺陷</td>
+                  <td><strong>并发上限在正常工作</strong>。第二版改成测完即删仍 429——
+                    worker 太快，DELETE 打到的已是 running，返回 202 转
+                    <code>cancel_requested</code>，仍算活动</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="note">
+              另外两次纯属自伤：<code>POST</code> 返回 400 一度被当成第二个 bug，实为
+              <strong>shell 把中文 JSON body 弄坏了</strong>（本次会话踩第二遍，
+              08-06 已经踩过一次）；以及一度以为路由没注册，实为这个 FastAPI 版本把
+              <code>include_router</code> 的结果保留为 <code>_IncludedRouter</code> 而不展开成
+              route，<strong>是探测方式不对，不是注册有问题</strong>。
+            </div>
+            <p>Dockerfile 顺带改了一处：把 apt 层移到所有 <code>COPY</code> 之前。
+              它原本在 <code>COPY pyproject.toml</code> 之后，于是新增一个可选 extra 就会让 apt 重跑——
+              这次正好撞上镜像故障，整个构建失败。移上去后依赖清单的改动再也不会触发 apt。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="plag-handover">
+        <h2>四十、交付与遗留</h2>
+
+        <article class="qa">
+          <h3 class="question">最终交付了什么？</h3>
+          <div class="answer">
+            <p>一个 PostgreSQL-only 的深模块，8 个 HTTP 端点、持久化 SSE、独立 worker、
+              CLI 七个子命令，286 项测试通过。</p>
+            <p><strong>规格被改了一处</strong>：原本要求「人工开启 <code>KB_PLAG_ENABLED</code>」，
+              经确认改为以<strong>验收结果</strong>为闸门。理由记在 ADR-0001 的修订注里——
+              前者可检查、可复现，后者只是一道仪式，且会把「已经验证过」和「还没人去按」混为一谈。
+              默认值仍是 <code>false</code>（新部署没有语料，开着无意义），
+              indexing 与 enabled 仍是两个独立开关。</p>
+            <p>本部署已通过验收并开启，<code>/readyz</code> 三项抄袭检查全部
+              <code>ok</code>。</p>
+          </div>
+        </article>
+
+        <article class="qa">
+          <h3 class="question">还剩什么？</h3>
+          <div class="answer">
+            <ol>
+              <li><strong>评测集仍然没有。</strong>这是 08-07 就记下的缺口，至今未补。
+                抄袭侧的阈值（<code>DF_RATIO</code>、<code>MIN_WORD_RATIO</code>、
+                <code>EXTEND_TOLERANCE</code>）现在同样只能凭感觉调。</li>
+              <li><strong><code>KB_PLAG_DF_RATIO_THRESHOLD</code> 在本语料上是空转。</strong>
+                最大 DF 43 &lt; 阈值对应的 51，停用词表恒为空。默认值对这批古籍不起作用，
+                需要按实际分布重定或改用 top-N。</li>
+              <li><strong>误报只验证了三类输入。</strong>格式行已修，但只做了「现代白话 /
+                原创文言 / 纯符号」三个对照，没有系统性的误报率测量。</li>
+              <li><code>work_mem</code> 4 MB 下 <code>rebuild-df</code> 需数分钟；
+                语料再大一个量级需要调参或改增量。</li>
+              <li><strong><code>knowledge-web</code> 的并行改动全程未碰</strong>，
+                两次被 <code>git add -A</code> 误纳入后均已拆出。</li>
+            </ol>
+          </div>
+        </article>
+      </section>
     </main>
   </div>
 
@@ -2390,6 +2720,13 @@ sparse_search         3.6ms</code></pre>
       以及先把一个 e2e 失败怀疑成本次 CSS 改动所致（回退 CSS 三轮对照后证明是既有 flaky）。
       08-08 的字体分片数、测试数与提交状态均为实测；但新版式<strong>未经浏览器人眼确认</strong>，
       只验证了资源可被正确发出。
+      抄袭检测那条线另有五处：把回填耗时估成「数小时」（实为 7 分钟，因为投影构建不跑嵌入模型）、
+      把 rebuild-df 的瓶颈归因于 ORM 对象创建（改 SQL 后确实完成，但真正的放大器是 work_mem 只有 4MB）、
+      把镜像构建失败归因于内存（实为 Debian 镜像 502，普通容器访问同一域名返回 200）、
+      把 shell 弄坏中文 JSON body 造成的 400 当成第二个 bug、
+      以及一度以为路由没注册（实为该 FastAPI 版本不展开 include_router 的结果，是探测方式不对）。
+      抄袭检测的全部性能与覆盖率数字均为实测；误报只做了三类输入的对照，
+      <strong>没有系统性的误报率测量</strong>。
       其余数字均为实测。运行状态、依赖版本和部署方式以后续代码变更为准。
     </div>
   </footer>
