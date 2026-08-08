@@ -107,9 +107,9 @@ class ReportOut(BaseModel):
     is_complete: bool
     sources: list[SourceOut] = Field(default_factory=list)
     unique_passages: list[tuple[int, int]] = Field(default_factory=list)
-    # Populated for text-mode checks; empty for document-mode checks, whose
-    # submitted text is a reference to an already-stored document and is not
-    # duplicated here.
+    # The detection-time snapshot of what was checked: the submitted text in
+    # text mode, or the text resolved from the frozen source document version
+    # in document mode. Populated for both modes.
     query_text: str = ""
 
     @classmethod

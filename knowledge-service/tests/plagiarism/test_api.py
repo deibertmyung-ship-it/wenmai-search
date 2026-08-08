@@ -218,11 +218,10 @@ def test_report_echoes_the_submitted_text_in_text_mode(api, api_corpus, kb_sessi
     assert body["query_text"] == text
 
 
-def test_report_leaves_query_text_empty_in_document_mode_by_design(api, api_corpus, kb_session):
-    """Document mode does not duplicate the source into the check row (see
-    `PlagCheck.query_text` and ADR-0006), so the report's `query_text` is an
-    empty string here - this is the intended asymmetry with text mode, not a
-    bug to fix."""
+def test_report_echoes_the_detection_time_snapshot_in_document_mode(api, api_corpus, kb_session):
+    """Document mode resolves the frozen source_version_id at detection time
+    and writes that snapshot into the same `query_text` field text mode uses
+    (see `PlagCheck.query_text` and ADR-0006) - it must not stay empty."""
     from kbsvc.config import get_settings
     from kbsvc.plagiarism.runner import CheckRunner
 
@@ -231,7 +230,8 @@ def test_report_leaves_query_text_empty_in_document_mode_by_design(api, api_corp
     kb_session.commit()
 
     body = api.get(f"/v1/plagiarism/checks/{check_id}/report").json()
-    assert body["query_text"] == ""
+    assert body["query_text"] == REUSED
+    assert len(body["query_text"]) == body["query_chars"]
 
 
 # --- deletion -----------------------------------------------------------

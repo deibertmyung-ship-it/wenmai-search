@@ -365,3 +365,188 @@ def test_real_prose_is_still_probed(kb_session, enabled, build_corpus):
     kb_session.commit()
     CheckRunner(enabled).run(kb_session, summary.check_id)
     assert kb_session.query(PlagCheckSource).filter_by(check_id=summary.check_id).count() >= 1
+
+
+# --- query_text snapshot (ADR-0006) --------------------------------------
+
+
+def test_document_mode_check_row_carries_the_resolved_snapshot(kb_session, enabled, build_corpus):
+    """The runner must write the detection-time snapshot onto `PlagCheck.query_text`
+    for document mode too - not just chunk from it and discard it - so the report
+    can return it later without ever re-parsing object storage."""
+    document_id = build_corpus(text=REUSED)
+    kb_session.commit()
+
+    svc = service(enabled)
+    summary = svc.create_document_check(
+        kb_session,
+        CreateDocumentCheck(tenant_id=TENANT, creator_key_id="k1", document_id=document_id),
+    )
+    kb_session.commit()
+    CheckRunner(enabled).run(kb_session, summary.check_id)
+    kb_session.flush()
+
+    check = kb_session.get(PlagCheck, summary.check_id)
+    assert check.query_text == REUSED
+    assert check.query_chars == len(REUSED)
+
+
+def test_persisted_source_carries_the_real_document_version(
+    kb_session, enabled, seed_document, enqueue_job
+):
+    """`_persist()` used to hardcode `version=0`. Task 7 needs the real
+    `DocumentVersion.version` to fetch source excerpts against the exact frozen
+    text, not whatever the document looks like today."""
+    from kbsvc.plagiarism.projection import ProjectionBuilder
+
+    document_id, version_id = seed_document(text=REUSED, version_no=3)
+    ProjectionBuilder(enabled).build(kb_session, enqueue_job(document_id, version_id).id)
+    kb_session.commit()
+
+    svc = service(enabled)
+    summary = svc.create_text_check(
+        kb_session,
+        CreateTextCheck(tenant_id=TENANT, creator_key_id="k1", text="前言。" + REUSED + "后记。"),
+    )
+    kb_session.commit()
+    CheckRunner(enabled).run(kb_session, summary.check_id)
+    kb_session.flush()
+
+    sources = kb_session.query(PlagCheckSource).filter_by(check_id=summary.check_id).all()
+    assert len(sources) == 1
+    assert sources[0].version == 3
+
+
+def test_report_falls_back_to_the_frozen_version_for_legacy_document_checks(
+    kb_session, enabled, build_corpus
+):
+    """Compatibility path: a check row persisted before the runner started
+    writing the snapshot (empty `query_text` despite a non-zero `query_chars`)
+    must still resolve at read time, from the frozen `source_version_id`."""
+    document_id = build_corpus(text=REUSED)
+    kb_session.commit()
+
+    svc = service(enabled)
+    summary = svc.create_document_check(
+        kb_session,
+        CreateDocumentCheck(tenant_id=TENANT, creator_key_id="k1", document_id=document_id),
+    )
+    kb_session.commit()
+    CheckRunner(enabled).run(kb_session, summary.check_id)
+    kb_session.flush()
+
+    # Simulate a pre-fix row: the old runner left `query_text` empty.
+    check = kb_session.get(PlagCheck, summary.check_id)
+    check.query_text = ""
+    kb_session.flush()
+
+    report = svc.get_report(
+        kb_session, check_id=summary.check_id, tenant_id=TENANT, creator_key_id="k1"
+    )
+    assert report.query_text == REUSED
+
+
+def test_report_raises_a_clear_error_when_the_frozen_version_is_gone(
+    kb_session, enabled, build_corpus
+):
+    """A legacy row whose frozen version can no longer be read must surface a
+    clear error, never a `""` that would silently contradict a non-zero
+    `query_chars`."""
+    from kbsvc.db.models import DocumentVersion
+    from kbsvc.plagiarism.service import SourceVersionUnavailableError
+
+    document_id = build_corpus(text=REUSED)
+    kb_session.commit()
+
+    svc = service(enabled)
+    summary = svc.create_document_check(
+        kb_session,
+        CreateDocumentCheck(tenant_id=TENANT, creator_key_id="k1", document_id=document_id),
+    )
+    kb_session.commit()
+    CheckRunner(enabled).run(kb_session, summary.check_id)
+    kb_session.flush()
+
+    check = kb_session.get(PlagCheck, summary.check_id)
+    check.query_text = ""  # simulate a pre-fix row
+    version_id = check.source_version_id
+    kb_session.flush()
+
+    kb_session.query(DocumentVersion).filter_by(id=version_id).delete()
+    kb_session.flush()
+
+    with pytest.raises(SourceVersionUnavailableError):
+        svc.get_report(
+            kb_session, check_id=summary.check_id, tenant_id=TENANT, creator_key_id="k1"
+        )
+
+
+def test_report_never_restores_purged_text_for_a_cancelled_check(
+    kb_session, enabled, build_corpus
+):
+    """Cancellation purges `query_text` on purpose (`repo.purge_sensitive_content`)
+    but leaves `query_chars` as a numeric trace - the same shape a genuine
+    pre-fix legacy row has. The read-time fallback must not mistake one for
+    the other and re-derive the erased text right back from the frozen source
+    version."""
+    document_id = build_corpus(text=REUSED)
+    kb_session.commit()
+
+    svc = service(enabled)
+    summary = svc.create_document_check(
+        kb_session,
+        CreateDocumentCheck(tenant_id=TENANT, creator_key_id="k1", document_id=document_id),
+    )
+    kb_session.commit()
+    CheckRunner(enabled).run(kb_session, summary.check_id)
+    kb_session.flush()
+
+    check = kb_session.get(PlagCheck, summary.check_id)
+    assert check.query_chars > 0  # sanity: something was actually checked
+    check.status = str(CheckStatus.CANCELLED)
+    repo.purge_sensitive_content(kb_session, check_id=check.id)
+    kb_session.flush()
+
+    report = svc.get_report(
+        kb_session, check_id=summary.check_id, tenant_id=TENANT, creator_key_id="k1"
+    )
+    assert report.query_text == ""
+
+
+def test_report_still_flags_revoked_access_after_the_query_text_change(
+    kb_session, enabled, build_corpus
+):
+    """A source revoked before `get_report` runs must still surface as
+    `report_visibility_changed` - the query_text compatibility fallback added
+    alongside it must not run before, or instead of, this ACL check."""
+    from kbsvc.db.models import Document
+    from kbsvc.plagiarism.service import ReportVisibilityChangedError
+
+    document_id = build_corpus(text=REUSED)
+    document = kb_session.get(Document, document_id)
+    document.acl = ["team-a"]
+    kb_session.commit()
+
+    svc = service(enabled)
+    summary = svc.create_text_check(
+        kb_session,
+        CreateTextCheck(
+            tenant_id=TENANT,
+            creator_key_id="k1",
+            text="前言。" + REUSED + "后记。",
+            acl=["team-a"],
+        ),
+    )
+    kb_session.commit()
+    CheckRunner(enabled).run(kb_session, summary.check_id)
+    kb_session.commit()
+
+    assert kb_session.query(PlagCheckSource).filter_by(check_id=summary.check_id).count() >= 1
+
+    document.acl = ["team-b"]
+    kb_session.commit()
+
+    with pytest.raises(ReportVisibilityChangedError):
+        svc.get_report(
+            kb_session, check_id=summary.check_id, tenant_id=TENANT, creator_key_id="k1"
+        )

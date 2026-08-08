@@ -206,8 +206,14 @@ class PlagCheck(PlagiarismBase):
     idempotency_key: Mapped[str] = mapped_column(String(255), default="")
     request_digest: Mapped[str] = mapped_column(String(64), default="")
 
-    # Text mode stores the submitted text; document mode stores a reference and
-    # leaves `query_text` empty so the original is not duplicated.
+    # The detection-time snapshot of what this check actually examined. Text
+    # mode stores the submitted text verbatim, set at creation. Document mode
+    # stores the text resolved from the frozen `source_version_id`, written
+    # once by `CheckRunner._persist()` when the run happens - not re-derived
+    # from object storage on every report read. Rows written before that
+    # (document mode, pre `ADR-0006` rewrite) may still have this empty; see
+    # `PlagiarismService._resolve_report_query_text` for the read-time
+    # compatibility fallback.
     query_text: Mapped[str] = mapped_column(Text, default="")
     query_chars: Mapped[int] = mapped_column(Integer, default=0)
     source_document_id: Mapped[str] = mapped_column(String(36), default="")

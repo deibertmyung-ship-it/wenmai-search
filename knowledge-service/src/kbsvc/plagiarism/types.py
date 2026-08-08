@@ -158,8 +158,9 @@ class CheckReport:
     sources: list[MatchedSource] = field(default_factory=list)
     unique_passages: list[tuple[int, int]] = field(default_factory=list)
     coverage_reason: CoverageReason | None = None
-    # Mirrors PlagCheck.query_text: populated in text mode, empty in document
-    # mode so the source is not duplicated.
+    # Mirrors PlagCheck.query_text: the detection-time snapshot of what was
+    # actually checked, populated by CheckRunner for both text and document
+    # mode (document mode resolves it from the frozen source_version_id).
     query_text: str = ""
 
     @property

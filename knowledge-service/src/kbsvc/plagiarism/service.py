@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from .. import ids
 from ..config import Settings, get_settings
-from ..db.models import Document
+from ..db.models import Document, DocumentVersion
 from ..errors import KbError, NotFoundError, ValidationError
 from . import repository as repo
 from .models import PlagCheck, PlagCheckPassage, PlagCheckSource, utcnow
@@ -55,6 +55,20 @@ class IdempotencyConflictError(KbError):
 
 class ReportVisibilityChangedError(KbError):
     code = "report_visibility_changed"
+    http_status = 409
+
+
+class SourceVersionUnavailableError(KbError):
+    """The frozen `source_version_id` a document-mode check depends on is gone.
+
+    Raised from two places: `CheckRunner._resolve_query_text` when a fresh
+    document-mode run cannot read its own source at detection time, and
+    `PlagiarismService._resolve_report_query_text` - the read-time
+    compatibility path - for checks persisted before the runner started
+    snapshotting `query_text` at detection time.
+    """
+
+    code = "plagiarism_source_version_unavailable"
     http_status = 409
 
 
@@ -320,7 +334,7 @@ class PlagiarismService:
             coverage_reason=CoverageReason(check.coverage_reason)
             if check.coverage_reason
             else None,
-            query_text=check.query_text,
+            query_text=self._resolve_report_query_text(session, check),
         )
 
     def get_corpus_status(
@@ -397,6 +411,54 @@ class PlagiarismService:
             # Not-yours and does-not-exist are the same answer on purpose.
             raise CheckNotFoundError("check not found", {"check_id": check_id})
         return check
+
+    def _resolve_report_query_text(self, session: Session, check: PlagCheck) -> str:
+        """`query_text` is normally already sitting on the row.
+
+        `CheckRunner` writes the detection-time snapshot into `PlagCheck.query_text`
+        for both text and document mode, so the ordinary case here is just
+        `check.query_text` - the report never re-parses object storage.
+
+        This is a compatibility path for document-mode checks persisted before
+        that (pre `ADR-0006` rewrite): their `query_text` is empty even though
+        `query_chars` is not, because the old runner deliberately left it blank.
+        The only way to still answer "what was checked" for those rows is to
+        re-resolve the frozen `source_version_id` here, once. If that version -
+        or its text - is no longer available, the caller must be told: silently
+        returning `""` would contradict a non-zero `query_chars` and look like
+        an empty document rather than an unresolvable one.
+
+        A cancelled check looks the same on paper - empty `query_text` with a
+        non-zero `query_chars` - for a completely different reason:
+        `repo.purge_sensitive_content` clears `query_text` on purpose to erase
+        the submitted text, but leaves `query_chars` untouched as a numeric
+        trace. That erasure must stick; re-deriving the text from the frozen
+        version here would silently undo it. `CANCELLED` is excluded so this
+        fallback only ever fires for genuinely legacy completed rows.
+        """
+        if (
+            check.query_text
+            or check.query_chars == 0
+            or not check.source_version_id
+            or CheckStatus(check.status) == CheckStatus.CANCELLED
+        ):
+            return check.query_text
+
+        from .projection import ProjectionBuilder
+
+        version = session.get(DocumentVersion, check.source_version_id)
+        if version is None:
+            raise SourceVersionUnavailableError(
+                "the frozen source version for this check no longer exists",
+                {"check_id": check.id, "source_version_id": check.source_version_id},
+            )
+        text = ProjectionBuilder(self.settings)._load_text(session, version)
+        if not text:
+            raise SourceVersionUnavailableError(
+                "the frozen source version's text is no longer available",
+                {"check_id": check.id, "source_version_id": check.source_version_id},
+            )
+        return text
 
     def _visible_document_ids(
         self, session: Session, tenant_id: str, acl: list[str]

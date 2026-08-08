@@ -20,6 +20,7 @@ from .service import (
     InputTooLargeError,
     PlagiarismService,
     ReportVisibilityChangedError,
+    SourceVersionUnavailableError,
 )
 from .types import (
     ACTIVE_CHECK_STATUSES,
@@ -50,6 +51,7 @@ __all__ = [
     "InputTooLargeError",
     "PlagiarismService",
     "ReportVisibilityChangedError",
+    "SourceVersionUnavailableError",
     "CheckEvent",
     "CheckReport",
     "CheckStage",
