@@ -8,6 +8,7 @@ is never rendered into a page.
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from typing import Any
 
 import httpx
@@ -112,12 +113,20 @@ class KbClient:
     def get_document(self, document_id: str) -> dict:
         return self._request("GET", f"/v1/documents/{document_id}")
 
-    def get_chunks(self, document_id: str, *, from_ordinal: int = 0, limit: int = 20) -> list[dict]:
+    def get_chunks(
+        self,
+        document_id: str,
+        *,
+        from_ordinal: int = 0,
+        limit: int = 20,
+        version: int | None = None,
+    ) -> list[dict]:
+        params = {"from_ordinal": from_ordinal, "limit": limit}
+        if version is not None:
+            params["version"] = version
         return (
             self._request(
-                "GET",
-                f"/v1/documents/{document_id}/chunks",
-                params={"from_ordinal": from_ordinal, "limit": limit},
+                "GET", f"/v1/documents/{document_id}/chunks", params=params
             )
             or []
         )
@@ -203,19 +212,34 @@ class KbClient:
         """
         return self._send("DELETE", f"/v1/plagiarism/checks/{check_id}").status_code
 
+    @contextmanager
     def stream_progress(self, check_id: str, *, last_event_id: str = ""):
-        """Open the upstream SSE stream. Caller must use it as a context manager.
+        """Open an SSE stream with the same error contract as ordinary calls.
 
-        The client's ordinary read timeout is left in place on purpose: kbsvc
-        emits a keepalive every couple of seconds, so an idle read that long
-        means the stream is actually dead and ending it is correct.
+        A caller must never receive a raw, unwrapped stream that could be a
+        disguised error page: a 4xx/5xx upstream response becomes a
+        BackendError, a non-SSE Content-Type on an otherwise-200 response
+        becomes a BackendUnavailable, and so does a network failure.
         """
         headers = {"Accept": "text/event-stream"}
         if last_event_id:
             headers["Last-Event-ID"] = last_event_id
-        return self._client.stream(
-            "GET", f"/v1/plagiarism/checks/{check_id}/progress", headers=headers
-        )
+        try:
+            with self._client.stream(
+                "GET", f"/v1/plagiarism/checks/{check_id}/progress", headers=headers
+            ) as response:
+                if response.status_code >= 400:
+                    response.read()
+                    raise BackendError(response.status_code, *_parse_error(response))
+                if not response.headers.get("Content-Type", "").startswith(
+                    "text/event-stream"
+                ):
+                    response.read()
+                    raise BackendUnavailable("upstream progress response is not SSE")
+                yield response
+        except httpx.HTTPError as exc:
+            logger.warning("backend SSE unavailable for %s: %s", check_id, exc)
+            raise BackendUnavailable(type(exc).__name__) from exc
 
     # --- jobs & ops -----------------------------------------------------
 

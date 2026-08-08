@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import httpx
+import pytest
 import respx
 from kbweb.client import KbClient
 from kbweb.config import Config
+from kbweb.errors import BackendError, BackendUnavailable
 
 from .conftest import API_BASE
 
@@ -61,4 +63,107 @@ def test_document_check_posts_to_the_document_route():
     api = make_client()
     api.create_document_check("doc-1111-2222")
     assert route.called
+    api.close()
+
+
+@respx.mock
+def test_get_chunks_forwards_the_source_version_as_a_query_param():
+    route = respx.get(f"{API_BASE}/v1/documents/doc-1111-2222/chunks").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    api = make_client()
+    api.get_chunks("doc-1111-2222", version=3)
+
+    request = route.calls.last.request
+    assert request.url.params["version"] == "3"
+    api.close()
+
+
+@respx.mock
+def test_get_chunks_omits_the_version_param_when_not_given():
+    route = respx.get(f"{API_BASE}/v1/documents/doc-1111-2222/chunks").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    api = make_client()
+    api.get_chunks("doc-1111-2222")
+
+    request = route.calls.last.request
+    assert "version" not in request.url.params
+    api.close()
+
+
+@respx.mock
+def test_stream_progress_raises_backend_error_on_upstream_4xx():
+    respx.get(f"{API_BASE}/v1/plagiarism/checks/chk-1/progress").mock(
+        return_value=httpx.Response(
+            404,
+            json={
+                "error": {
+                    "code": "check_not_found",
+                    "message": "check not found",
+                    "detail": {},
+                }
+            },
+        )
+    )
+    api = make_client()
+    with pytest.raises(BackendError) as excinfo, api.stream_progress("chk-1"):
+        pass
+    assert excinfo.value.status == 404
+    api.close()
+
+
+@respx.mock
+def test_stream_progress_raises_backend_error_on_upstream_5xx():
+    respx.get(f"{API_BASE}/v1/plagiarism/checks/chk-1/progress").mock(
+        return_value=httpx.Response(503, json={"error": {"code": "x", "message": "down"}})
+    )
+    api = make_client()
+    with pytest.raises(BackendError) as excinfo, api.stream_progress("chk-1"):
+        pass
+    assert excinfo.value.status == 503
+    api.close()
+
+
+@respx.mock
+def test_stream_progress_raises_backend_unavailable_on_network_failure():
+    respx.get(f"{API_BASE}/v1/plagiarism/checks/chk-1/progress").mock(
+        side_effect=httpx.ConnectError("boom")
+    )
+    api = make_client()
+    with pytest.raises(BackendUnavailable), api.stream_progress("chk-1"):
+        pass
+    api.close()
+
+
+@respx.mock
+def test_stream_progress_raises_backend_unavailable_when_content_type_is_not_sse():
+    """A 200 with the wrong Content-Type could be a disguised error page (e.g.
+
+    a proxy's HTML error page returned with a 200). The caller must never see
+    a raw stream that might not actually be SSE.
+    """
+    respx.get(f"{API_BASE}/v1/plagiarism/checks/chk-1/progress").mock(
+        return_value=httpx.Response(
+            200, headers={"Content-Type": "text/plain"}, content=b"not an event stream"
+        )
+    )
+    api = make_client()
+    with pytest.raises(BackendUnavailable), api.stream_progress("chk-1"):
+        pass
+    api.close()
+
+
+@respx.mock
+def test_stream_progress_yields_the_response_when_upstream_is_healthy():
+    respx.get(f"{API_BASE}/v1/plagiarism/checks/chk-1/progress").mock(
+        return_value=httpx.Response(
+            200,
+            headers={"Content-Type": "text/event-stream"},
+            content=b"event: progress\ndata: {}\n\n",
+        )
+    )
+    api = make_client()
+    with api.stream_progress("chk-1") as response:
+        assert response.status_code == 200
     api.close()
