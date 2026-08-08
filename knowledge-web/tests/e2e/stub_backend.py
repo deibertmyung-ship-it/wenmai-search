@@ -31,6 +31,54 @@ TOTAL_CHUNKS = 30
 
 HIT_TERM = "贼克"
 
+# Plagiarism requests may construct a fresh FakeKbClient, so the state that
+# survives an SSE request and the following browser reload lives at module
+# scope. E2E tests reset this dictionary before each journey.
+_CHECK_STATE = {
+    "check_id": "chk-e2e",
+    "done": False,
+    "fallback_ready": False,
+    "stream_fail": False,
+}
+
+QUERY_TEXT = "夫天地者，万物之逆旅也。古人秉烛夜游。"
+
+PLAG_REPORT = {
+    "check_id": "chk-e2e",
+    "status": "completed",
+    "snapshot_at": "2026-08-08T10:00:00",
+    "algorithm_config_hash": "cfg-e2e",
+    "query_chars": len(QUERY_TEXT),
+    "matched_chars": 11,
+    "checked_chunks": 4,
+    "total_chunks": 4,
+    "coverage_reason": None,
+    "is_complete": True,
+    "query_text": QUERY_TEXT,
+    "sources": [
+        {
+            "document_id": "doc-1111-2222",
+            "version_id": "ver-1",
+            "version": 1,
+            "content_hash": "abc",
+            "title": "春夜宴从弟桃花园序",
+            "matched_chars": 11,
+            "score": 0.94,
+            "passages": [
+                {
+                    "query_start": 0,
+                    "query_end": 11,
+                    "source_start": 0,
+                    "source_end": 11,
+                    "score": 0.94,
+                    "preview": "夫天地者，万物之逆旅也",
+                }
+            ],
+        }
+    ],
+    "unique_passages": [[0, 11]],
+}
+
 
 def _offsets(snippet: str, term: str = HIT_TERM) -> list[list[int]]:
     """Derive highlight spans the way the backend does, so they always line up."""
@@ -192,11 +240,11 @@ STATS = {
 }
 
 
-def _chunk(ordinal: int) -> dict:
+def _chunk(ordinal: int, document_id: str = DOC_ID, version: int = 1) -> dict:
     return {
         "chunk_id": f"chunk-ord-{ordinal}",
-        "document_id": DOC_ID,
-        "version_id": "ver-1",
+        "document_id": document_id,
+        "version_id": f"ver-{version}",
         "ordinal": ordinal,
         "kind": "text",
         "text": (
@@ -226,8 +274,14 @@ class FakeKbClient:
         return SOURCES
 
     def create_source(self, name: str, kind: str = "upload", uri: str = "") -> dict:
-        return {"id": "src-new", "name": name, "kind": kind, "uri": uri, "config": {},
-                "document_count": 0}
+        return {
+            "id": "src-new",
+            "name": name,
+            "kind": kind,
+            "uri": uri,
+            "config": {},
+            "document_count": 0,
+        }
 
     def search(self, query, **kwargs) -> dict:
         payload = {**SEARCH_PAYLOAD, "query": query}
@@ -246,9 +300,19 @@ class FakeKbClient:
     def get_document(self, document_id: str) -> dict:
         return {**DOCUMENT, "id": document_id}
 
-    def get_chunks(self, document_id: str, *, from_ordinal: int = 0, limit: int = 20) -> list[dict]:
+    def get_chunks(
+        self,
+        document_id: str,
+        *,
+        from_ordinal: int = 0,
+        limit: int = 20,
+        version: int | None = None,
+    ) -> list[dict]:
         end = min(from_ordinal + limit, TOTAL_CHUNKS)
-        return [_chunk(i) for i in range(from_ordinal, end)]
+        return [
+            _chunk(i, document_id=document_id, version=version or 1)
+            for i in range(from_ordinal, end)
+        ]
 
     def reindex_document(self, document_id: str) -> dict:
         return {"job_id": "job-reindex", "document_id": document_id, "state": "pending"}
@@ -257,8 +321,13 @@ class FakeKbClient:
         return {"job_id": "job-delete", "document_id": document_id, "state": "pending"}
 
     def upload(self, **kwargs) -> dict:
-        return {"document_id": DOC_ID, "version_id": "ver-9", "job_id": "job-upload",
-                "state": "pending", "deduplicated": False}
+        return {
+            "document_id": DOC_ID,
+            "version_id": "ver-9",
+            "job_id": "job-upload",
+            "state": "pending",
+            "deduplicated": False,
+        }
 
     def ingest_path(self, **kwargs) -> dict:
         return {"registered": 12, "deduplicated": 3, "failed": 0, "items": [], "errors": []}
@@ -275,3 +344,75 @@ class FakeKbClient:
 
     def health(self) -> dict:
         return {"status": "ok", "profile": "local"}
+
+    # --- plagiarism -----------------------------------------------------
+
+    def corpus_status(self) -> dict:
+        return {
+            "total_documents": 1,
+            "ready_documents": 1,
+            "pending_documents": 0,
+            "failed_documents": 0,
+            "algorithm_config_hash": "cfg-e2e",
+            "is_ready": True,
+        }
+
+    def create_text_check(self, **_kwargs) -> dict:
+        _CHECK_STATE["done"] = False
+        _CHECK_STATE["fallback_ready"] = False
+        return {"check_id": _CHECK_STATE["check_id"], "status": "pending"}
+
+    def create_document_check(self, _document_id: str, **_kwargs) -> dict:
+        return self.create_text_check()
+
+    def list_checks(self, **_kwargs) -> list[dict]:
+        return []
+
+    def get_check(self, _check_id: str) -> dict:
+        done = bool(_CHECK_STATE["done"] or _CHECK_STATE["fallback_ready"])
+        return {
+            "check_id": _CHECK_STATE["check_id"],
+            "status": "completed" if done else "running",
+            "created_at": "2026-08-08T10:00:00",
+            "snapshot_at": "2026-08-08T10:00:00",
+            "algorithm_config_hash": "cfg-e2e",
+            "source_document_id": None,
+            "query_chars": PLAG_REPORT["query_chars"],
+            "matched_chars": PLAG_REPORT["matched_chars"] if done else 0,
+        }
+
+    def get_plag_report(self, _check_id: str) -> dict:
+        return {**PLAG_REPORT, "check_id": _CHECK_STATE["check_id"]}
+
+    def delete_check(self, _check_id: str) -> int:
+        return 204
+
+    def stream_progress(self, _check_id: str, **_kwargs):
+        return _FakeSseResponse(should_fail=bool(_CHECK_STATE["stream_fail"]))
+
+
+class _FakeSseResponse:
+    """Small context-managed response matching httpx's streaming surface."""
+
+    def __init__(self, *, should_fail: bool = False) -> None:
+        self.should_fail = should_fail
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args) -> None:
+        return None
+
+    def iter_lines(self):
+        if self.should_fail:
+            # The proxy returns a short-lived 200 stream. EventSource observes
+            # the close, retries, and the browser's bounded fallback reload
+            # then reads the completed state below.
+            _CHECK_STATE["fallback_ready"] = True
+            return
+
+        progress = 'id: 1\nevent: retrieving\ndata: {"progress": 0.6}\n\n'
+        terminal = 'id: 2\nevent: completed\ndata: {"progress": 1.0}\n\n'
+        yield from progress.splitlines()
+        _CHECK_STATE["done"] = True
+        yield from terminal.splitlines()
