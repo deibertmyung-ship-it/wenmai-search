@@ -154,6 +154,23 @@ def coverage_segments(
     return [("".join(fragments), owners) for fragments, owners in merged]
 
 
+_CHECK_TONE = {
+    "completed": "ok",
+    # Partial is not a success: the run stopped early and the number it
+    # produced is a floor, not a verdict.
+    "completed_partial": "warn",
+    "failed": "warn",
+    "cancelled": "warn",
+    "pending": "",
+    "running": "running",
+    "cancel_requested": "running",
+}
+
+
+def check_tone(status: str) -> str:
+    return _CHECK_TONE.get(status, "")
+
+
 def register(app) -> None:
     app.jinja_env.filters.update(
         {
@@ -164,6 +181,7 @@ def register(app) -> None:
             "score": score,
             "timeago": timeago,
             "filesize": filesize,
+            "check_tone": check_tone,
         }
     )
     app.jinja_env.globals["highlight_segments"] = highlight_segments

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}查重{% endblock %}
+
+{% block content %}
+<h1 class="section-title">稿件查重</h1>
+
+{% if corpus_error %}
+  <p class="flash flash--warn">{{ corpus_error }}</p>
+{% else %}
+  {% set ready = corpus.is_ready %}
+  {% set empty = corpus.total_documents == 0 %}
+
+  {% if empty %}
+    <p class="flash">书库为空，先<a href="{{ url_for('ingest.index') }}">导入典籍</a>再来查重。</p>
+  {% elif not ready %}
+    <p class="flash">语料准备中 {{ "{:,}".format(corpus.ready_documents) }} / {{ "{:,}".format(corpus.total_documents) }}，稍后再试。</p>
+  {% endif %}
+
+  <form class="panel" method="post" action="{{ url_for('plagiarism.submit') }}">
+    <input type="hidden" name="form_token" value="{{ form_token }}">
+    <label class="field">
+      <span class="field__label">待检文字</span>
+      <textarea class="field__input" name="text" rows="14"
+                maxlength="{{ max_chars }}"
+                placeholder="粘贴要检测的稿件……"
+                {% if not ready %}disabled{% endif %}></textarea>
+    </label>
+    <p class="field__hint">最多 {{ "{:,}".format(max_chars) }} 字。</p>
+    <button class="btn" type="submit" {% if not ready %}disabled{% endif %}>开始查重</button>
+  </form>
+{% endif %}
+
+<h2 class="section-title">检测记录</h2>
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr><th>状态</th><th>检测</th><th>字数</th><th>重复</th><th>创建</th></tr>
+    </thead>
+    <tbody>
+      {% for check in checks %}
+        <tr>
+          <td><span class="pill pill--{{ check.status | check_tone }}">{{ check.status }}</span></td>
+          <td class="table__mono">
+            <a href="{{ url_for('plagiarism.detail', check_id=check.check_id) }}">{{ check.check_id | short_id }}</a>
+            {% if check.source_document_id %}<span class="table__note">文档</span>{% endif %}
+          </td>
+          <td class="table__mono">{{ "{:,}".format(check.query_chars) }}</td>
+          <td class="table__mono">{{ "{:,}".format(check.matched_chars) }}</td>
+          <td class="table__mono" title="{{ check.created_at }}">{{ check.created_at | timeago }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="table__mono">还没有检测记录</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

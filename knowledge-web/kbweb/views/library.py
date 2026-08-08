@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 from flask import Blueprint, redirect, render_template, request, url_for
 
 from ._common import as_int, client, settings
@@ -50,7 +52,12 @@ def document(document_id: str):
     api = client()
     doc = api.get_document(document_id)
     preview = api.get_chunks(document_id, from_ordinal=0, limit=3)
-    return render_template("document.html", document=doc, preview=preview)
+    return render_template(
+        "document.html",
+        document=doc,
+        preview=preview,
+        plagiarism_form_token=uuid.uuid4().hex,
+    )
 
 
 @bp.get("/read/<document_id>")

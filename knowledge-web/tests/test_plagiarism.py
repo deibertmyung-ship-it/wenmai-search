@@ -167,3 +167,260 @@ def test_stream_progress_yields_the_response_when_upstream_is_healthy():
     with api.stream_progress("chk-1") as response:
         assert response.status_code == 200
     api.close()
+
+
+def html(response) -> str:
+    return response.data.decode("utf-8")
+
+
+def stub_corpus(payload):
+    respx.get(f"{API_BASE}/v1/plagiarism/corpus/status").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+
+
+def stub_checks(payload):
+    respx.get(f"{API_BASE}/v1/plagiarism/checks").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+
+
+@respx.mock
+def test_submit_page_renders_the_form_and_history(
+    client, corpus_ready_payload, checks_payload
+):
+    stub_corpus(corpus_ready_payload)
+    stub_checks(checks_payload)
+    body = html(client.get("/plagiarism/"))
+    assert "<textarea" in body
+    assert 'method="post"' in body
+    assert "chk-done" in body
+    assert "chk-live" in body
+
+
+@respx.mock
+def test_submit_is_disabled_while_the_corpus_is_still_building(
+    client, corpus_pending_payload, checks_payload
+):
+    stub_corpus(corpus_pending_payload)
+    stub_checks(checks_payload)
+    body = html(client.get("/plagiarism/"))
+    assert "disabled" in body
+    assert "1,203" in body and "1,580" in body
+
+
+@respx.mock
+def test_empty_corpus_says_to_import_first(client, checks_payload):
+    stub_corpus(
+        {
+            "total_documents": 0,
+            "ready_documents": 0,
+            "pending_documents": 0,
+            "failed_documents": 0,
+            "algorithm_config_hash": "cfg-abc123",
+            "is_ready": False,
+        }
+    )
+    stub_checks(checks_payload)
+    body = html(client.get("/plagiarism/"))
+    assert "书库为空" in body
+
+
+@respx.mock
+def test_submitting_text_forwards_the_token_and_redirects_to_the_check(
+    client, corpus_ready_payload, checks_payload
+):
+    stub_corpus(corpus_ready_payload)
+    stub_checks(checks_payload)
+    route = respx.post(f"{API_BASE}/v1/plagiarism/checks").mock(
+        return_value=httpx.Response(202, json={"check_id": "chk-new", "status": "pending"})
+    )
+
+    response = client.post(
+        "/plagiarism/", data={"text": "夫天地者，万物之逆旅也", "form_token": "tok-xyz"}
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/plagiarism/checks/chk-new")
+    assert route.calls.last.request.headers["Idempotency-Key"] == "tok-xyz"
+
+
+@respx.mock
+def test_oversized_input_is_rejected_before_reaching_the_backend(
+    client, corpus_ready_payload, checks_payload
+):
+    """Server-side, not just a JS counter - nojs must be rejected too."""
+    stub_corpus(corpus_ready_payload)
+    stub_checks(checks_payload)
+    route = respx.post(f"{API_BASE}/v1/plagiarism/checks")
+
+    response = client.post(
+        "/plagiarism/", data={"text": "字" * 500_001, "form_token": "tok-xyz"}
+    )
+
+    assert not route.called
+    assert response.status_code == 302
+
+
+@respx.mock
+def test_empty_submission_is_rejected_before_reaching_the_backend(
+    client, corpus_ready_payload, checks_payload
+):
+    stub_corpus(corpus_ready_payload)
+    stub_checks(checks_payload)
+    route = respx.post(f"{API_BASE}/v1/plagiarism/checks")
+    client.post("/plagiarism/", data={"text": "   ", "form_token": "tok-xyz"})
+    assert not route.called
+
+
+@respx.mock
+def test_concurrency_limit_is_explained_rather_than_shown_as_a_raw_error(
+    client, corpus_ready_payload, checks_payload
+):
+    stub_corpus(corpus_ready_payload)
+    stub_checks(checks_payload)
+    respx.post(f"{API_BASE}/v1/plagiarism/checks").mock(
+        return_value=httpx.Response(
+            429,
+            json={
+                "error": {
+                    "code": "plagiarism_concurrency_limit",
+                    "message": "too many checks already running",
+                    "detail": {"active": 2, "limit": 2},
+                }
+            },
+        )
+    )
+    response = client.post("/plagiarism/", data={"text": "夫天地者", "form_token": "t"})
+    assert response.status_code == 302
+    body = html(client.get("/plagiarism/", follow_redirects=True))
+    assert "已有" in body
+
+
+def stub_submit_error(status: int, code: str, message: str, detail: dict | None = None):
+    respx.post(f"{API_BASE}/v1/plagiarism/checks").mock(
+        return_value=httpx.Response(
+            status,
+            json={"error": {"code": code, "message": message, "detail": detail or {}}},
+        )
+    )
+
+
+@respx.mock
+def test_input_too_large_is_explained_with_the_backend_message(
+    client, corpus_ready_payload, checks_payload
+):
+    stub_corpus(corpus_ready_payload)
+    stub_checks(checks_payload)
+    stub_submit_error(422, "plagiarism_input_too_large", "text exceeds server-side limit")
+    response = client.post("/plagiarism/", data={"text": "夫天地者", "form_token": "t"})
+    assert response.status_code == 302
+    body = html(client.get("/plagiarism/", follow_redirects=True))
+    assert "输入不合法：text exceeds server-side limit" in body
+
+
+@respx.mock
+def test_validation_error_is_explained_with_the_backend_message(
+    client, corpus_ready_payload, checks_payload
+):
+    stub_corpus(corpus_ready_payload)
+    stub_checks(checks_payload)
+    stub_submit_error(422, "validation_error", "language must be a supported code")
+    response = client.post("/plagiarism/", data={"text": "夫天地者", "form_token": "t"})
+    assert response.status_code == 302
+    body = html(client.get("/plagiarism/", follow_redirects=True))
+    assert "输入不合法：language must be a supported code" in body
+
+
+@respx.mock
+def test_corpus_not_ready_is_explained_rather_than_shown_as_a_raw_error(
+    client, corpus_ready_payload, checks_payload
+):
+    stub_corpus(corpus_ready_payload)
+    stub_checks(checks_payload)
+    stub_submit_error(409, "plagiarism_corpus_not_ready", "corpus is being rebuilt")
+    response = client.post("/plagiarism/", data={"text": "夫天地者", "form_token": "t"})
+    assert response.status_code == 302
+    body = html(client.get("/plagiarism/", follow_redirects=True))
+    assert "语料仍在准备中，请稍后再试。" in body
+
+
+@respx.mock
+def test_corpus_empty_is_explained_rather_than_shown_as_a_raw_error(
+    client, corpus_ready_payload, checks_payload
+):
+    stub_corpus(corpus_ready_payload)
+    stub_checks(checks_payload)
+    stub_submit_error(409, "plagiarism_corpus_empty", "corpus has no ready documents")
+    response = client.post("/plagiarism/", data={"text": "夫天地者", "form_token": "t"})
+    assert response.status_code == 302
+    body = html(client.get("/plagiarism/", follow_redirects=True))
+    assert "书库为空，请先导入典籍。" in body
+
+
+@respx.mock
+def test_idempotency_conflict_is_explained_rather_than_shown_as_a_raw_error(
+    client, corpus_ready_payload, checks_payload
+):
+    stub_corpus(corpus_ready_payload)
+    stub_checks(checks_payload)
+    stub_submit_error(409, "idempotency_conflict", "key was used with a different payload")
+    response = client.post("/plagiarism/", data={"text": "夫天地者", "form_token": "t"})
+    assert response.status_code == 302
+    body = html(client.get("/plagiarism/", follow_redirects=True))
+    assert "这张表单已用于另一份内容，请返回后重新提交。" in body
+
+
+@respx.mock
+def test_unrecognised_error_code_falls_back_to_the_backend_message(
+    client, corpus_ready_payload, checks_payload
+):
+    stub_corpus(corpus_ready_payload)
+    stub_checks(checks_payload)
+    stub_submit_error(500, "internal_error", "something unexpected broke")
+    response = client.post("/plagiarism/", data={"text": "夫天地者", "form_token": "t"})
+    assert response.status_code == 302
+    body = html(client.get("/plagiarism/", follow_redirects=True))
+    assert "提交失败：something unexpected broke" in body
+
+
+@respx.mock
+def test_feature_disabled_gets_its_own_explanation(client, checks_payload):
+    respx.get(f"{API_BASE}/v1/plagiarism/corpus/status").mock(
+        return_value=httpx.Response(
+            503,
+            json={
+                "error": {
+                    "code": "feature_disabled",
+                    "message": "plagiarism detection is disabled",
+                    "detail": {},
+                }
+            },
+        )
+    )
+    response = client.get("/plagiarism/")
+    assert response.status_code == 200
+    assert "当前部署未启用抄袭检测" in html(response)
+
+
+@respx.mock
+def test_document_page_offers_a_check_button(client, document_payload, chunks_payload):
+    respx.get(f"{API_BASE}/v1/documents/doc-1111-2222").mock(
+        return_value=httpx.Response(200, json=document_payload)
+    )
+    respx.get(f"{API_BASE}/v1/documents/doc-1111-2222/chunks").mock(
+        return_value=httpx.Response(200, json=chunks_payload)
+    )
+    body = html(client.get("/library/doc-1111-2222"))
+    assert "/plagiarism/documents/doc-1111-2222" in body
+
+
+@respx.mock
+def test_document_check_redirects_to_the_new_check(client):
+    route = respx.post(f"{API_BASE}/v1/plagiarism/checks/documents/doc-1111-2222").mock(
+        return_value=httpx.Response(202, json={"check_id": "chk-doc", "status": "pending"})
+    )
+    response = client.post("/plagiarism/documents/doc-1111-2222", data={"form_token": "t"})
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/plagiarism/checks/chk-doc")
+    assert route.calls.last.request.headers["Idempotency-Key"] == "t"

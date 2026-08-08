@@ -563,3 +563,14 @@ mark {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* --- 查重 ------------------------------------------------------------ */
+
+.field { display: block; margin-bottom: var(--space-4); }
+.field__label { display: block; margin-bottom: var(--space-2); font-family: var(--font-sans); font-size: 0.875rem; }
+.field__input { width: 100%; font-family: var(--font-song); font-size: 1rem; line-height: 1.9; padding: var(--space-3); }
+.field__input:disabled { opacity: 0.5; cursor: not-allowed; }
+.field__hint { font-size: 0.8125rem; opacity: 0.7; margin-bottom: var(--space-4); }
+.table__note { font-size: 0.75rem; opacity: 0.6; margin-left: var(--space-2); }
+.pill--warn { background: var(--ochre-wash); color: var(--ochre); }
+.flash--warn { border-left-color: var(--ochre); background: var(--ochre-wash); color: var(--ochre); }

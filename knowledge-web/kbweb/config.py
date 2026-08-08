@@ -44,6 +44,14 @@ class Config:
         return {
             "SECRET_KEY": self.secret_key,
             "MAX_CONTENT_LENGTH": self.max_content_length,
+            # Werkzeug 3.1 added a second, independent cap on plain form
+            # fields (default 500,000 bytes) that fires before MAX_CONTENT_LENGTH
+            # ever gets consulted. A url-encoded plagiarism submission near the
+            # 500,000-character ceiling is already several times that just from
+            # percent-encoding CJK bytes, so left at its default this 413s
+            # every large-but-legal submission in production, not only in
+            # tests. MAX_CONTENT_LENGTH is the one real limit we want.
+            "MAX_FORM_MEMORY_SIZE": None,
             "JSON_AS_ASCII": False,
             "TEMPLATES_AUTO_RELOAD": _flag("KBWEB_TEMPLATE_RELOAD", False),
         }

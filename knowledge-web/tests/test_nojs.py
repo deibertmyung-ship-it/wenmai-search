@@ -33,9 +33,23 @@ def _stub_everything(sources_payload, document_payload, jobs_payload):
     )
     respx.get(f"{API_BASE}/v1/stats").mock(return_value=httpx.Response(500, json={}))
     respx.get(f"{API_BASE}/v1/jobs").mock(return_value=httpx.Response(200, json=jobs_payload))
+    respx.get(f"{API_BASE}/v1/plagiarism/corpus/status").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "total_documents": 1,
+                "ready_documents": 1,
+                "pending_documents": 0,
+                "failed_documents": 0,
+                "algorithm_config_hash": "cfg",
+                "is_ready": True,
+            },
+        )
+    )
+    respx.get(f"{API_BASE}/v1/plagiarism/checks").mock(return_value=httpx.Response(200, json=[]))
 
 
-PAGES = ["/", "/library", "/ingest/", "/jobs/"]
+PAGES = ["/", "/library", "/ingest/", "/jobs/", "/plagiarism/"]
 
 
 @pytest.mark.parametrize("path", PAGES)
