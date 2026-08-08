@@ -100,10 +100,11 @@ def _register_errors(app: Flask) -> None:
 
 
 def _register_blueprints(app: Flask) -> None:
-    from .views import api, ingest, jobs, library, search
+    from .views import api, ingest, jobs, library, plagiarism, search
 
     app.register_blueprint(search.bp)
     app.register_blueprint(library.bp)
     app.register_blueprint(ingest.bp)
+    app.register_blueprint(plagiarism.bp)
     app.register_blueprint(jobs.bp)
     app.register_blueprint(api.bp)

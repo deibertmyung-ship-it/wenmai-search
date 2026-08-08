@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}检测 {{ check.check_id | short_id }}{% endblock %}
+
+{% block head %}
+  {% if live and nojs %}
+    <meta http-equiv="refresh" content="{{ nojs_refresh_seconds }}">
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<h1 class="section-title">检测 <span class="table__mono">{{ check.check_id | short_id }}</span></h1>
+
+{% if live %}
+  {% include "partials/_check_progress.html" %}
+{% elif report_error %}
+  <p class="flash flash--warn">{{ report_error }}</p>
+{% elif check.status in ('completed', 'completed_partial') %}
+  {% include "partials/_check_report.html" %}
+{% elif check.status == 'failed' %}
+  <p class="flash flash--warn">检测失败。可以回到<a href="{{ url_for('plagiarism.index') }}">查重页</a>重新提交。</p>
+{% else %}
+  <p class="flash">这次检测已取消。</p>
+{% endif %}
+
+<form method="post" action="{{ url_for('plagiarism.delete', check_id=check.check_id) }}"
+      style="margin-top: var(--space-6)">
+  <button class="btn btn--ghost btn--sm" type="submit">
+    {% if live %}取消检测{% else %}删除记录{% endif %}
+  </button>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/check.js') }}" defer></script>
+{% endblock %}

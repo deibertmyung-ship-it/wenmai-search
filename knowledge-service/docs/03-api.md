@@ -128,7 +128,8 @@ Base: `/v1`。认证：`Authorization: Bearer <api_key>`（`KB_AUTH_REQUIRED=fal
                    "source_start": 120, "source_end": 178,
                    "score": 0.98, "preview": "……（≤300 字符）" }]
   }],
-  "unique_passages": [[3, 61]]
+  "unique_passages": [[3, 61]],
+  "query_text": "……（这次检测实际比对的正文）"
 }
 ```
 
@@ -137,6 +138,13 @@ Base: `/v1`。认证：`Authorization: Bearer <api_key>`（`KB_AUTH_REQUIRED=fal
 
 `coverage_reason` 非空表示**没有查完**（`time_cap` / `cancelled`），
 此时结果不可作为「无抄袭」结论。
+
+`query_text` 是这次检测实际检查的正文：文本模式下与提交内容逐字一致；文档
+模式下是检测那一刻按冻结的来源版本解析出的快照，由 `CheckRunner` 在检测时
+写入，报告读取时只原样返回这个已存的值，不会重新解析（见 ADR-0006）。这个
+字段在此次修订之前落库的文档模式检测上仍是空字符串——不做历史回填，客户端
+需按空值处理，不要假设它总是非空。`GET /v1/plagiarism/checks` 与
+`GET /v1/plagiarism/checks/{id}` 不受影响，继续不返回提交的原文。
 
 读取报告时会**重新校验**每个来源的当前可见性——权限可能在检测之后被收回，
 已存的报告不该成为绕过它的通道。

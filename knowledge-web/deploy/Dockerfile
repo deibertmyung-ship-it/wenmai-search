@@ -26,4 +26,6 @@ EXPOSE 5055
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import socket,sys; s=socket.create_connection(('127.0.0.1',5055),3); s.close()" || exit 1
 
-CMD ["waitress-serve", "--host", "0.0.0.0", "--port", "5055", "wsgi:app"]
+# Each open SSE stream holds a thread for as long as it lives, so the default
+# of 4 would let a couple of progress pages starve the whole site.
+CMD ["waitress-serve", "--host", "0.0.0.0", "--port", "5055", "--threads=16", "wsgi:app"]

@@ -7,7 +7,9 @@ would highlight text the backend never scored, which is a lie about provenance.
 
 from __future__ import annotations
 
+from collections import Counter, defaultdict
 from datetime import datetime
+from itertools import pairwise
 
 _JOB_TONE = {
     "completed": "ok",
@@ -102,6 +104,73 @@ def filesize(value: int | None) -> str:
     return f"{size:.1f}GB"
 
 
+def coverage_segments(
+    text: str, spans: list[tuple[int, int, int]]
+) -> list[tuple[str, frozenset[int]]]:
+    """Split text into (fragment, source ordinals) pairs.
+
+    Deliberately *not* `highlight_segments`: that one drops a span overlapping
+    the previous hit, which is right for search snippets and wrong here. One
+    passage matching several sources is exactly what a plagiarism report exists
+    to show, so overlaps are kept and merged instead.
+
+    Ordinals are 1-based and match the numbering of the source list.
+    """
+    if not text:
+        return []
+    valid = [
+        (start, end, ordinal)
+        for start, end, ordinal in spans or []
+        if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(text)
+    ]
+    if not valid:
+        return [(text, frozenset())]
+
+    # A real event sweep: do not rescan every span at every boundary. Reports
+    # may contain thousands of passages, so O(spans * boundaries) is not an
+    # acceptable rendering path for the 500k-character input ceiling.
+    events: dict[int, Counter[int]] = defaultdict(Counter)
+    for start, end, ordinal in valid:
+        events[start][ordinal] += 1
+        events[end][ordinal] -= 1
+
+    edges = sorted({0, len(text), *events})
+    active: Counter[int] = Counter()
+    sliced: list[tuple[str, frozenset[int]]] = []
+    for left, right in pairwise(edges):
+        for ordinal, delta in events[left].items():
+            active[ordinal] += delta
+            if active[ordinal] <= 0:
+                del active[ordinal]
+        sliced.append((text[left:right], frozenset(active)))
+
+    # Runs with identical owners become one <mark> rather than one per boundary.
+    merged: list[tuple[list[str], frozenset[int]]] = []
+    for fragment, owners in sliced:
+        if merged and merged[-1][1] == owners:
+            merged[-1][0].append(fragment)
+        else:
+            merged.append(([fragment], owners))
+    return [("".join(fragments), owners) for fragments, owners in merged]
+
+
+_CHECK_TONE = {
+    "completed": "ok",
+    # Partial is not a success: the run stopped early and the number it
+    # produced is a floor, not a verdict.
+    "completed_partial": "warn",
+    "failed": "warn",
+    "cancelled": "warn",
+    "pending": "",
+    "running": "running",
+    "cancel_requested": "running",
+}
+
+
+def check_tone(status: str) -> str:
+    return _CHECK_TONE.get(status, "")
+
+
 def register(app) -> None:
     app.jinja_env.filters.update(
         {
@@ -112,6 +181,8 @@ def register(app) -> None:
             "score": score,
             "timeago": timeago,
             "filesize": filesize,
+            "check_tone": check_tone,
         }
     )
     app.jinja_env.globals["highlight_segments"] = highlight_segments
+    app.jinja_env.globals["coverage_segments"] = coverage_segments

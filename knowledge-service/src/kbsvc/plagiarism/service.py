@@ -58,6 +58,20 @@ class ReportVisibilityChangedError(KbError):
     http_status = 409
 
 
+class SourceVersionUnavailableError(KbError):
+    """Raised by `CheckRunner._resolve_query_text` when a document-mode check's
+    frozen `source_version_id` can no longer be read at detection time.
+
+    Internal to the detection run: the worker catches this like any other run
+    failure (retry while attempts remain, then `failed`). It is not part of
+    the `get_report()` contract - a report only ever returns `check.query_text`
+    as it was written when the check last ran, never re-derived at read time.
+    """
+
+    code = "plagiarism_source_version_unavailable"
+    http_status = 409
+
+
 class ConcurrencyLimitError(KbError):
     code = "plagiarism_concurrency_limit"
     http_status = 429
@@ -320,6 +334,12 @@ class PlagiarismService:
             coverage_reason=CoverageReason(check.coverage_reason)
             if check.coverage_reason
             else None,
+            # Whatever CheckRunner last wrote, verbatim - never re-derived at
+            # read time. New checks always have it (text mode at creation,
+            # document mode at detection). A document-mode check persisted
+            # before the runner started writing this snapshot degrades to an
+            # empty string here rather than being backfilled.
+            query_text=check.query_text or "",
         )
 
     def get_corpus_status(

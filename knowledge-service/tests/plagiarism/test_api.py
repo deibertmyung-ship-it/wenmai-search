@@ -205,6 +205,35 @@ def test_report_carries_offsets_and_completeness(api, api_corpus, kb_session):
     assert body["coverage_reason"] is None
 
 
+def test_report_echoes_the_submitted_text_in_text_mode(api, api_corpus, kb_session):
+    from kbsvc.config import get_settings
+    from kbsvc.plagiarism.runner import CheckRunner
+
+    text = "前言。" + REUSED + "后记。"
+    check_id = create_text(api, text=text).json()["check_id"]
+    CheckRunner(get_settings()).run(kb_session, check_id)
+    kb_session.commit()
+
+    body = api.get(f"/v1/plagiarism/checks/{check_id}/report").json()
+    assert body["query_text"] == text
+
+
+def test_report_echoes_the_detection_time_snapshot_in_document_mode(api, api_corpus, kb_session):
+    """Document mode resolves the frozen source_version_id at detection time
+    and writes that snapshot into the same `query_text` field text mode uses
+    (see `PlagCheck.query_text` and ADR-0006) - it must not stay empty."""
+    from kbsvc.config import get_settings
+    from kbsvc.plagiarism.runner import CheckRunner
+
+    check_id = api.post(f"/v1/plagiarism/checks/documents/{api_corpus}").json()["check_id"]
+    CheckRunner(get_settings()).run(kb_session, check_id)
+    kb_session.commit()
+
+    body = api.get(f"/v1/plagiarism/checks/{check_id}/report").json()
+    assert body["query_text"] == REUSED
+    assert len(body["query_text"]) == body["query_chars"]
+
+
 # --- deletion -----------------------------------------------------------
 
 

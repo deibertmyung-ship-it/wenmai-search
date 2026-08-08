@@ -27,7 +27,11 @@ def config(request) -> Config:
         reader_page_size=3,
         debug_ui=True,
         secret_key="test-secret",
-        max_content_length=1024 * 1024,
+        # 8 MiB, not 1: the oversized-plagiarism-input test posts 500,001
+        # url-encoded CJK characters (~4.3MB on the wire once percent-encoded),
+        # and it wants the *view's* char-count rejection to fire, not Flask's
+        # transport-level 413 firing first and hiding it.
+        max_content_length=8 * 1024 * 1024,
         nojs=request.param,
     )
 
@@ -172,5 +176,55 @@ def jobs_payload() -> list[dict]:
             "scheduled_at": "2026-08-01T10:00:00",
             "created_at": "2026-08-01T10:00:00",
             "finished_at": "2026-08-01T10:02:00",
+        },
+    ]
+
+
+@pytest.fixture
+def corpus_ready_payload() -> dict:
+    return {
+        "total_documents": 201,
+        "ready_documents": 201,
+        "pending_documents": 0,
+        "failed_documents": 0,
+        "algorithm_config_hash": "cfg-abc123",
+        "is_ready": True,
+    }
+
+
+@pytest.fixture
+def corpus_pending_payload() -> dict:
+    return {
+        "total_documents": 1580,
+        "ready_documents": 1203,
+        "pending_documents": 377,
+        "failed_documents": 0,
+        "algorithm_config_hash": "cfg-abc123",
+        "is_ready": False,
+    }
+
+
+@pytest.fixture
+def checks_payload() -> list[dict]:
+    return [
+        {
+            "check_id": "chk-done",
+            "status": "completed",
+            "created_at": "2026-08-08T10:00:00",
+            "snapshot_at": "2026-08-08T10:00:00",
+            "algorithm_config_hash": "cfg-abc123",
+            "source_document_id": None,
+            "query_chars": 1000,
+            "matched_chars": 234,
+        },
+        {
+            "check_id": "chk-live",
+            "status": "running",
+            "created_at": "2026-08-08T10:05:00",
+            "snapshot_at": "2026-08-08T10:05:00",
+            "algorithm_config_hash": "cfg-abc123",
+            "source_document_id": "doc-1111-2222",
+            "query_chars": 0,
+            "matched_chars": 0,
         },
     ]

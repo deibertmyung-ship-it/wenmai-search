@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from kbweb.filters import (
     breadcrumb,
+    coverage_segments,
     filesize,
     highlight_segments,
     job_tone,
@@ -78,3 +79,71 @@ def test_formatting_helpers():
 def test_timeago_degrades_gracefully_on_bad_input():
     assert timeago(None) == "—"
     assert timeago("not-a-date") == "not-a-date"
+
+
+def owners_of(segments, fragment):
+    return next(own for frag, own in segments if frag == fragment)
+
+
+def test_coverage_marks_a_single_span():
+    segments = coverage_segments("夫天地者万物之逆旅也", [(0, 3, 1)])
+    assert segments == [("夫天地", frozenset({1})), ("者万物之逆旅也", frozenset())]
+
+
+def test_coverage_keeps_overlap_instead_of_dropping_it():
+    """highlight_segments drops the second span here; this must not."""
+    segments = coverage_segments("零一二三四五", [(0, 4, 1), (2, 6, 2)])
+    assert segments == [
+        ("零一", frozenset({1})),
+        ("二三", frozenset({1, 2})),
+        ("四五", frozenset({2})),
+    ]
+
+
+def test_coverage_merges_two_sources_covering_the_same_span():
+    segments = coverage_segments("零一二三", [(1, 3, 1), (1, 3, 2)])
+    assert owners_of(segments, "一二") == frozenset({1, 2})
+
+
+def test_coverage_handles_a_contained_span():
+    segments = coverage_segments("零一二三四五", [(0, 6, 1), (2, 4, 2)])
+    assert segments == [
+        ("零一", frozenset({1})),
+        ("二三", frozenset({1, 2})),
+        ("四五", frozenset({1})),
+    ]
+
+
+def test_coverage_joins_runs_with_identical_owners():
+    """Adjacent spans from the same source emit one run, not two."""
+    segments = coverage_segments("零一二三", [(0, 2, 1), (2, 4, 1)])
+    assert segments == [("零一二三", frozenset({1}))]
+
+
+def test_coverage_leaves_a_gap_between_non_adjacent_spans():
+    segments = coverage_segments("零一二三四五", [(0, 2, 1), (4, 6, 2)])
+    assert segments == [
+        ("零一", frozenset({1})),
+        ("二三", frozenset()),
+        ("四五", frozenset({2})),
+    ]
+
+
+def test_coverage_drops_out_of_range_spans_rather_than_trusting_them():
+    assert coverage_segments("零一二", [(0, 99, 1)]) == [("零一二", frozenset())]
+    assert coverage_segments("零一二", [(-1, 2, 1)]) == [("零一二", frozenset())]
+    assert coverage_segments("零一二", [(2, 2, 1)]) == [("零一二", frozenset())]
+
+
+def test_coverage_handles_empty_inputs():
+    assert coverage_segments("", [(0, 1, 1)]) == []
+    assert coverage_segments("零一二", []) == [("零一二", frozenset())]
+
+
+def test_coverage_counts_overlapping_spans_from_the_same_source():
+    """Same source, overlapping itself: the active count must not go negative
+    or drop to zero prematurely, which is exactly what a naive
+    set.discard()/set.remove() based implementation would get wrong."""
+    assert coverage_segments("零一二三四五", [(0, 6, 1), (2, 4, 1)]) == [
+        ("零一二三四五", frozenset({1}))
+    ]

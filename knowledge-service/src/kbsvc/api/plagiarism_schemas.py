@@ -107,6 +107,12 @@ class ReportOut(BaseModel):
     is_complete: bool
     sources: list[SourceOut] = Field(default_factory=list)
     unique_passages: list[tuple[int, int]] = Field(default_factory=list)
+    # The detection-time snapshot of what was checked: the submitted text in
+    # text mode, or the text resolved from the frozen source document version
+    # in document mode. Always populated for checks run after this field was
+    # added; document-mode checks that predate it return "" here rather than
+    # being backfilled.
+    query_text: str = ""
 
     @classmethod
     def of(cls, report: CheckReport) -> ReportOut:
@@ -121,6 +127,7 @@ class ReportOut(BaseModel):
             total_chunks=report.total_chunks,
             coverage_reason=str(report.coverage_reason) if report.coverage_reason else None,
             is_complete=report.is_complete,
+            query_text=report.query_text,
             sources=[
                 SourceOut(
                     document_id=source.document_id,

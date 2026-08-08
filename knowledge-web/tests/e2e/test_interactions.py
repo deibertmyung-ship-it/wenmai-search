@@ -128,6 +128,9 @@ def test_both_themes_render_readable_contrast(page: Page, live_server: str):
 
 
 def test_reader_appends_the_next_batch_in_place(page: Page, live_server: str):
+    # Exercise the explicit button path without racing the reader's
+    # viewport-driven prefetch callback.
+    page.add_init_script("delete window.IntersectionObserver")
     page.goto(f"{live_server}/read/doc-1")
     chunks = page.locator(".chunk")
     first = chunks.count()
@@ -207,6 +210,10 @@ def test_repeated_section_headings_are_printed_once(page: Page, live_server: str
 
 
 def test_appended_chunks_follow_the_same_running_head_rule(page: Page, live_server: str):
+    # This test exercises the explicit button path.  Disable the reader's
+    # viewport-driven prefetch so an IntersectionObserver callback cannot race
+    # the click and append a second page before the assertion runs.
+    page.add_init_script("delete window.IntersectionObserver")
     page.goto(f"{live_server}/read/doc-1")
     before = page.locator(".chunk__heading").count()
     page.get_by_role("button", name="续读下一段").click()

@@ -82,6 +82,11 @@ class CheckRunner:
         repo.clear_results(session, check_id=check.id)
 
         query_text = self._resolve_query_text(session, check)
+        # Write the detection-time snapshot back onto the row for both modes.
+        # Text mode already carries it (set at creation); document mode has
+        # never had it until now - this is what lets `get_report` return it
+        # without ever re-parsing object storage at read time.
+        check.query_text = query_text
         budget = _Budget.for_input(self.settings, len(query_text))
 
         self._emit(session, check, CheckStage.STARTED, progress=0.0)
@@ -236,16 +241,29 @@ class CheckRunner:
         return pysbd_language(detect_language(text))
 
     def _resolve_query_text(self, session: Session, check: PlagCheck) -> str:
-        """Text mode carries its own text; document mode reads the version."""
+        """Text mode carries its own text; document mode reads the frozen version.
+
+        This is the one place the source document is re-read to answer "what is
+        actually being checked" - the caller writes the result back onto
+        `check.query_text`, so later report reads never repeat this resolution.
+        A missing frozen version is a hard failure here, not a silent empty
+        result: an empty query would make the run "complete" with zero chunks
+        and zero matches, which reads exactly like a legitimately empty
+        document instead of the unresolvable one it actually is.
+        """
         if check.query_text:
             return check.query_text
         if not check.source_version_id:
             return ""
         from .projection import ProjectionBuilder
+        from .service import SourceVersionUnavailableError
 
         version = session.get(DocumentVersion, check.source_version_id)
         if version is None:
-            return ""
+            raise SourceVersionUnavailableError(
+                "the frozen source version for this check no longer exists",
+                {"check_id": check.id, "source_version_id": check.source_version_id},
+            )
         return ProjectionBuilder(self.settings)._load_text(session, version)
 
     def _persist(
@@ -263,6 +281,18 @@ class CheckRunner:
             if projection is None:
                 continue
             document = session.get(Document, projection.document_id)
+            # The real ordinal, not a placeholder: Task 7 fetches source
+            # excerpts against this exact frozen version rather than whatever
+            # the document looks like today, and `0` is never a real version.
+            # `projection.version_id` is a straight primary-key lookup - the
+            # projection itself already carries the reference, so there is no
+            # need to add a column or backfill anything to answer this.
+            version = session.get(DocumentVersion, projection.version_id)
+            if version is None:
+                raise RuntimeError(
+                    f"projection {projection.id} references missing version "
+                    f"{projection.version_id}"
+                )
 
             spans = [(p.query_start, p.query_end) for p in passages]
             merged = merge_intervals(spans)
@@ -275,7 +305,7 @@ class CheckRunner:
                 tenant_id=check.tenant_id,
                 document_id=projection.document_id,
                 version_id=projection.version_id,
-                version=0,
+                version=version.version,
                 content_hash=projection.content_hash,
                 title=(document.title if document else "")[:512],
                 matched_chars=matched_chars,

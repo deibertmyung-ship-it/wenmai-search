@@ -13,6 +13,7 @@
 | [0003](0003-precompute-analyzed-tokens-at-ingest.md) | 分词结果在 ingest 时预计算并存入 Postgres | Accepted | 2026-08-07 |
 | [0004](0004-additive-column-migration-without-a-framework.md) | 加列迁移写在 init_db 中，不引入迁移框架 | Accepted | 2026-08-07 |
 | [0005](0005-pushdown-document-filter-instead-of-post-fusion.md) | 书名筛选先解析为 document_ids 再下推 | Accepted | 2026-08-07 |
+| [0006](0006-return-owner-query-text-in-plagiarism-report.md) | 报告接口向检测创建者回显查询侧原文（`ReportOut.query_text`） | Accepted | 2026-08-08 |
 
 ## 关联
 

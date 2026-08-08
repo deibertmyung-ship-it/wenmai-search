@@ -365,3 +365,119 @@ def test_real_prose_is_still_probed(kb_session, enabled, build_corpus):
     kb_session.commit()
     CheckRunner(enabled).run(kb_session, summary.check_id)
     assert kb_session.query(PlagCheckSource).filter_by(check_id=summary.check_id).count() >= 1
+
+
+# --- query_text snapshot (ADR-0006) --------------------------------------
+
+
+def test_document_mode_check_row_carries_the_resolved_snapshot(kb_session, enabled, build_corpus):
+    """The runner must write the detection-time snapshot onto `PlagCheck.query_text`
+    for document mode too - not just chunk from it and discard it - so the report
+    can return it later without ever re-parsing object storage."""
+    document_id = build_corpus(text=REUSED)
+    kb_session.commit()
+
+    svc = service(enabled)
+    summary = svc.create_document_check(
+        kb_session,
+        CreateDocumentCheck(tenant_id=TENANT, creator_key_id="k1", document_id=document_id),
+    )
+    kb_session.commit()
+    CheckRunner(enabled).run(kb_session, summary.check_id)
+    kb_session.flush()
+
+    check = kb_session.get(PlagCheck, summary.check_id)
+    assert check.query_text == REUSED
+    assert check.query_chars == len(REUSED)
+
+
+def test_persisted_source_carries_the_real_document_version(
+    kb_session, enabled, seed_document, enqueue_job
+):
+    """`_persist()` used to hardcode `version=0`. Task 7 needs the real
+    `DocumentVersion.version` to fetch source excerpts against the exact frozen
+    text, not whatever the document looks like today."""
+    from kbsvc.plagiarism.projection import ProjectionBuilder
+
+    document_id, version_id = seed_document(text=REUSED, version_no=3)
+    ProjectionBuilder(enabled).build(kb_session, enqueue_job(document_id, version_id).id)
+    kb_session.commit()
+
+    svc = service(enabled)
+    summary = svc.create_text_check(
+        kb_session,
+        CreateTextCheck(tenant_id=TENANT, creator_key_id="k1", text="前言。" + REUSED + "后记。"),
+    )
+    kb_session.commit()
+    CheckRunner(enabled).run(kb_session, summary.check_id)
+    kb_session.flush()
+
+    sources = kb_session.query(PlagCheckSource).filter_by(check_id=summary.check_id).all()
+    assert len(sources) == 1
+    assert sources[0].version == 3
+
+
+def test_a_missing_source_version_fails_the_check_rather_than_completing_empty(
+    kb_session, enabled, build_corpus
+):
+    """A document-mode check whose frozen `source_version_id` can no longer be
+    read must fail the run, not silently produce an empty "successful" report
+    that reads exactly like a legitimately empty document."""
+    from kbsvc.db.models import DocumentVersion
+    from kbsvc.plagiarism.service import SourceVersionUnavailableError
+
+    document_id = build_corpus(text=REUSED)
+    kb_session.commit()
+
+    svc = service(enabled)
+    summary = svc.create_document_check(
+        kb_session,
+        CreateDocumentCheck(tenant_id=TENANT, creator_key_id="k1", document_id=document_id),
+    )
+    kb_session.commit()
+
+    check = kb_session.get(PlagCheck, summary.check_id)
+    kb_session.query(DocumentVersion).filter_by(id=check.source_version_id).delete()
+    kb_session.flush()
+
+    with pytest.raises(SourceVersionUnavailableError):
+        CheckRunner(enabled).run(kb_session, summary.check_id)
+
+
+def test_report_still_flags_revoked_access_after_the_query_text_change(
+    kb_session, enabled, build_corpus
+):
+    """A source revoked before `get_report` runs must still surface as
+    `report_visibility_changed` - simplifying `query_text` to a plain
+    `check.query_text or ""` must not have disturbed this ACL check."""
+    from kbsvc.db.models import Document
+    from kbsvc.plagiarism.service import ReportVisibilityChangedError
+
+    document_id = build_corpus(text=REUSED)
+    document = kb_session.get(Document, document_id)
+    document.acl = ["team-a"]
+    kb_session.commit()
+
+    svc = service(enabled)
+    summary = svc.create_text_check(
+        kb_session,
+        CreateTextCheck(
+            tenant_id=TENANT,
+            creator_key_id="k1",
+            text="前言。" + REUSED + "后记。",
+            acl=["team-a"],
+        ),
+    )
+    kb_session.commit()
+    CheckRunner(enabled).run(kb_session, summary.check_id)
+    kb_session.commit()
+
+    assert kb_session.query(PlagCheckSource).filter_by(check_id=summary.check_id).count() >= 1
+
+    document.acl = ["team-b"]
+    kb_session.commit()
+
+    with pytest.raises(ReportVisibilityChangedError):
+        svc.get_report(
+            kb_session, check_id=summary.check_id, tenant_id=TENANT, creator_key_id="k1"
+        )
