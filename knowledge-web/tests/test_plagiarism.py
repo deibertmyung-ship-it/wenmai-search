@@ -644,6 +644,16 @@ def test_complete_report_states_the_ratio_plainly(client, chunks_payload):
 
 
 @respx.mock
+def test_empty_report_qualifies_the_threshold_used(client):
+    stub_check("chk-clean", "completed")
+    stub_report("chk-clean", sources=[], unique_passages=[], matched_chars=0)
+    body = html(client.get("/plagiarism/checks/chk-clean"))
+
+    assert "没有找到达到当前检测阈值的重复段落。" in body
+    assert "没有找到重复来源。" not in body
+
+
+@respx.mock
 def test_partial_report_states_the_ratio_as_a_floor_and_warns(client, chunks_payload):
     """The whole point of COMPLETED_PARTIAL is that it is not a verdict."""
     stub_check("chk-part", "completed_partial")

@@ -168,3 +168,27 @@ def test_chinese_verbatim_reuse_is_found_with_correct_offsets():
     assert p.query_start <= q_offset
     assert p.query_end >= q_offset + len(reused)
     assert query[p.query_start : p.query_end].find(reused) >= 0
+
+
+def test_twenty_four_character_chinese_reuse_is_not_filtered_by_generic_defaults():
+    """A production check must not apply the English 30/50 gates to Chinese."""
+    text = "人禀天地、命属阴阳、生居覆载之内、尽在五行之中。"
+
+    result = run("q-short", text, [("source", text)])
+
+    assert len(result) == 1
+    passage = result[0]
+    assert (passage.query_start, passage.query_end) == (0, len(text))
+    assert (passage.candidate_start, passage.candidate_end) == (0, len(text))
+    assert passage.score == 1.0
+
+
+def test_short_chinese_reuse_survives_punctuation_difference():
+    query = "人禀天地、命属阴阳、生居覆载之内、尽在五行之中。"
+    candidate = "人禀天地，命属阴阳，生居覆载之内，尽在五行之中。"
+
+    result = run("q-punctuation", query, [("source", candidate)], min_seed_len=12,
+                 min_passage_len=20)
+
+    assert len(result) == 1
+    assert result[0].score >= 0.99
