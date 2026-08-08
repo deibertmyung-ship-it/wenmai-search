@@ -794,3 +794,68 @@ def test_source_prefetch_uses_the_frozen_version_and_paginates_at_200():
     assert all(request.url.params["limit"] == "200" for request in requests)
     assert all(request.url.params["version"] == "1" for request in requests)
     api.close()
+
+
+@respx.mock
+def test_events_proxy_forwards_last_event_id_upstream(client):
+    """Without this header the backend replays the whole stream on reconnect."""
+    stub_check("chk-live", "running")
+    route = respx.get(f"{API_BASE}/v1/plagiarism/checks/chk-live/progress").mock(
+        return_value=httpx.Response(
+            200,
+            headers={"Content-Type": "text/event-stream"},
+            content=b"id: 7\nevent: chunking\ndata: {}\n\n",
+        )
+    )
+
+    response = client.get(
+        "/plagiarism/checks/chk-live/events", headers={"Last-Event-ID": "6"}
+    )
+    body = response.get_data(as_text=True)
+
+    assert route.calls.last.request.headers["Last-Event-ID"] == "6"
+    assert "event: chunking" in body
+    assert response.headers["Content-Type"].startswith("text/event-stream")
+    assert response.headers["X-Accel-Buffering"] == "no"
+
+
+@respx.mock
+def test_events_proxy_omits_the_header_on_a_first_connection(client):
+    stub_check("chk-live", "running")
+    route = respx.get(f"{API_BASE}/v1/plagiarism/checks/chk-live/progress").mock(
+        return_value=httpx.Response(
+            200,
+            headers={"Content-Type": "text/event-stream"},
+            content=b"event: queued\ndata: {}\n\n",
+        )
+    )
+    client.get("/plagiarism/checks/chk-live/events").get_data()
+    assert "Last-Event-ID" not in route.calls.last.request.headers
+
+
+@respx.mock
+def test_events_proxy_does_not_turn_an_upstream_error_into_a_200_stream(client):
+    respx.get(f"{API_BASE}/v1/plagiarism/checks/chk-nope/progress").mock(
+        return_value=httpx.Response(
+            404,
+            json={
+                "error": {
+                    "code": "plagiarism_check_not_found",
+                    "message": "no such check",
+                    "detail": {},
+                }
+            },
+        )
+    )
+    response = client.get("/plagiarism/checks/chk-nope/events")
+    assert response.status_code == 404
+    assert not response.headers["Content-Type"].startswith("text/event-stream")
+
+
+@respx.mock
+def test_progress_script_ships_only_with_javascript_enabled(client, config):
+    stub_check("chk-live", "running")
+    body = html(client.get("/plagiarism/checks/chk-live"))
+    assert ("check.js" in body) is not config.nojs
+    # The refresh fallback is the inverse: present exactly when scripts are not.
+    assert ('http-equiv="refresh"' in body) is config.nojs

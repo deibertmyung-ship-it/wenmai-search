@@ -8,9 +8,20 @@ logic to get wrong.
 
 from __future__ import annotations
 
+import time
 import uuid
+from contextlib import ExitStack
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    Response,
+    flash,
+    redirect,
+    render_template,
+    request,
+    stream_with_context,
+    url_for,
+)
 
 from ..errors import BackendError
 from ..report import attach_excerpts, duplication_ratio, numbered_sources, query_spans
@@ -139,7 +150,51 @@ def _explain(exc: BackendError) -> str:
     return f"提交失败：{exc.message}"
 
 
+# Well under kbsvc's plag_sse_max_seconds (900): one stream pins one waitress
+# thread for its whole life, so the cap must come from this side. EventSource
+# reconnects on its own and carries Last-Event-ID, which kbsvc resumes from
+# exactly - so cutting the stream costs the reader nothing.
+PROXY_MAX_SECONDS = 120
+
+
 @bp.get("/checks/<check_id>/events")
 def events(check_id: str):
-    """Filled in by the SSE task; the route exists now so `url_for` resolves."""
-    return "", 204
+    api = client()
+    last_event_id = request.headers.get("Last-Event-ID", "")
+
+    # Enter upstream before committing the downstream 200 headers. Otherwise a
+    # backend 404/503 becomes a fake successful SSE response whose body happens
+    # to contain JSON or a late generator exception.
+    stack = ExitStack()
+    try:
+        upstream = stack.enter_context(
+            api.stream_progress(check_id, last_event_id=last_event_id)
+        )
+    except Exception:
+        stack.close()
+        raise
+
+    @stream_with_context
+    def relay():
+        # stream_with_context matters: without it the app context pops when
+        # this view returns and teardown closes the client mid-stream.
+        try:
+            deadline = time.monotonic() + PROXY_MAX_SECONDS
+            for line in upstream.iter_lines():
+                # iter_lines drops the newline; SSE needs it back, and blank
+                # lines are what delimit frames.
+                yield f"{line}\n"
+                if time.monotonic() >= deadline:
+                    return
+        finally:
+            stack.close()
+
+    response = Response(
+        relay(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+    # Covers clients/middleware that close the response without iterating the
+    # generator, in addition to relay()'s finally block.
+    response.call_on_close(stack.close)
+    return response
