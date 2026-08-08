@@ -102,6 +102,52 @@ def filesize(value: int | None) -> str:
     return f"{size:.1f}GB"
 
 
+def coverage_segments(
+    text: str, spans: list[tuple[int, int, int]]
+) -> list[tuple[str, frozenset[int]]]:
+    """Split text into (fragment, source ordinals) pairs.
+
+    Deliberately *not* `highlight_segments`: that one drops a span overlapping
+    the previous hit, which is right for search snippets and wrong here. One
+    passage matching several sources is exactly what a plagiarism report exists
+    to show, so overlaps are kept and merged instead.
+
+    Ordinals are 1-based and match the numbering of the source list.
+    """
+    if not text:
+        return []
+    valid = [
+        (start, end, ordinal)
+        for start, end, ordinal in spans or []
+        if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(text)
+    ]
+    if not valid:
+        return [(text, frozenset())]
+
+    # Between two adjacent boundaries the covering set cannot change, so each
+    # slice has exactly one answer. Sweeping boundaries is what lets overlaps
+    # survive; a left-to-right cursor cannot express them.
+    edges = sorted({0, len(text)} | {pos for start, end, _ in valid for pos in (start, end)})
+    sliced = [
+        (
+            text[left:right],
+            frozenset(
+                ordinal for start, end, ordinal in valid if start <= left and right <= end
+            ),
+        )
+        for left, right in zip(edges, edges[1:])
+    ]
+
+    # Runs with identical owners become one <mark> rather than one per boundary.
+    merged: list[tuple[str, frozenset[int]]] = []
+    for fragment, owners in sliced:
+        if merged and merged[-1][1] == owners:
+            merged[-1] = (merged[-1][0] + fragment, owners)
+        else:
+            merged.append((fragment, owners))
+    return merged
+
+
 def register(app) -> None:
     app.jinja_env.filters.update(
         {
@@ -115,3 +161,4 @@ def register(app) -> None:
         }
     )
     app.jinja_env.globals["highlight_segments"] = highlight_segments
+    app.jinja_env.globals["coverage_segments"] = coverage_segments
