@@ -526,3 +526,109 @@ def test_unknown_check_is_a_normal_404_page(client):
         )
     )
     assert client.get("/plagiarism/checks/chk-nope").status_code == 404
+
+
+def stub_report(check_id: str, **extra):
+    payload = {
+        "check_id": check_id,
+        "status": "completed",
+        "snapshot_at": "2026-08-08T10:00:00",
+        "algorithm_config_hash": "cfg-abc123",
+        "query_chars": 1000,
+        "matched_chars": 234,
+        "checked_chunks": 40,
+        "total_chunks": 40,
+        "coverage_reason": None,
+        "is_complete": True,
+        "sources": [
+            {
+                "document_id": "doc-1111-2222",
+                "version_id": "ver-1",
+                "version": 1,
+                "content_hash": "abc",
+                "title": "春夜宴从弟桃花园序",
+                "matched_chars": 142,
+                "score": 0.94,
+                "passages": [
+                    {
+                        "query_start": 0,
+                        "query_end": 11,
+                        "source_start": 100,
+                        "source_end": 111,
+                        "score": 0.94,
+                        "preview": "夫天地者，万物之逆旅也",
+                    }
+                ],
+            }
+        ],
+        "unique_passages": [[0, 11]],
+    }
+    payload.update(extra)
+    respx.get(f"{API_BASE}/v1/plagiarism/checks/{check_id}/report").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+
+
+@respx.mock
+def test_complete_report_states_the_ratio_plainly(client, chunks_payload):
+    stub_check("chk-done", "completed")
+    stub_report("chk-done")
+    respx.get(f"{API_BASE}/v1/documents/doc-1111-2222/chunks").mock(
+        return_value=httpx.Response(200, json=chunks_payload)
+    )
+    body = html(client.get("/plagiarism/checks/chk-done"))
+    assert "23.4%" in body
+    assert "已查完整篇" in body
+    assert "≥" not in body
+    assert "春夜宴从弟桃花园序" in body
+
+
+@respx.mock
+def test_partial_report_states_the_ratio_as_a_floor_and_warns(client, chunks_payload):
+    """The whole point of COMPLETED_PARTIAL is that it is not a verdict."""
+    stub_check("chk-part", "completed_partial")
+    stub_report(
+        "chk-part",
+        status="completed_partial",
+        checked_chunks=12,
+        total_chunks=40,
+        coverage_reason="time_cap",
+        is_complete=False,
+    )
+    respx.get(f"{API_BASE}/v1/documents/doc-1111-2222/chunks").mock(
+        return_value=httpx.Response(200, json=chunks_payload)
+    )
+    body = html(client.get("/plagiarism/checks/chk-part"))
+    assert "≥" in body
+    assert "未检查部分不代表没有重复" in body
+    assert "12" in body and "40" in body
+
+
+@respx.mock
+def test_report_page_does_not_keep_refreshing(client, chunks_payload):
+    stub_check("chk-done", "completed")
+    stub_report("chk-done")
+    respx.get(f"{API_BASE}/v1/documents/doc-1111-2222/chunks").mock(
+        return_value=httpx.Response(200, json=chunks_payload)
+    )
+    assert 'http-equiv="refresh"' not in html(client.get("/plagiarism/checks/chk-done"))
+
+
+@respx.mock
+def test_visibility_change_gets_a_dedicated_409_page(client):
+    stub_check("chk-hidden", "completed")
+    respx.get(f"{API_BASE}/v1/plagiarism/checks/chk-hidden/report").mock(
+        return_value=httpx.Response(
+            409,
+            json={
+                "error": {
+                    "code": "report_visibility_changed",
+                    "message": "a source is no longer visible",
+                    "detail": {"check_id": "chk-hidden"},
+                }
+            },
+        )
+    )
+    response = client.get("/plagiarism/checks/chk-hidden")
+    assert response.status_code == 409
+    assert "来源访问权限已变化" in html(response)

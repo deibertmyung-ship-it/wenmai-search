@@ -1,1 +1,36 @@
-<p class="flash">报告渲染尚未接入。</p>
+{# The verdict bar. When coverage stopped early the number must read as a
+   floor: a clean percentage on a judgement-oriented page is a conclusion,
+   and kbsvc built COMPLETED_PARTIAL precisely so we would not draw one. #}
+<div class="verdict{% if not report.is_complete %} verdict--partial{% endif %}">
+  <p class="verdict__figure">
+    {% if not report.is_complete %}<span class="verdict__floor">≥</span>{% endif %}{{ ratio }}%
+  </p>
+  <p class="verdict__label">
+    {{ sources | length }} 个来源 ·
+    {% if report.is_complete %}已查完整篇{% else %}覆盖不全{% endif %}
+  </p>
+</div>
+
+{% if not report.is_complete %}
+  <p class="flash flash--warn">
+    仅检查了 {{ "{:,}".format(report.checked_chunks) }} / {{ "{:,}".format(report.total_chunks) }} 段（{% if report.coverage_reason == 'time_cap' %}时间预算用尽{% else %}检测被取消{% endif %}）。<strong>未检查部分不代表没有重复。</strong>
+  </p>
+{% endif %}
+
+<h2 class="section-title">来源</h2>
+<ol class="sources">
+  {% for source in sources %}
+    <li class="source" id="source-{{ source.ordinal }}">
+      <p class="source__title">
+        <span class="source__ordinal">{{ source.ordinal }}</span>
+        <a href="{{ url_for('library.read', document_id=source.document_id) }}">{{ source.title }}</a>
+      </p>
+      <p class="source__meta">
+        命中 {{ "{:,}".format(source.matched_chars) }} 字 · score {{ source.score | score(2) }} ·
+        {{ source.passages | length }} 处
+      </p>
+    </li>
+  {% else %}
+    <li class="source"><p>没有找到重复来源。</p></li>
+  {% endfor %}
+</ol>

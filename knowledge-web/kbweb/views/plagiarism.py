@@ -13,6 +13,7 @@ import uuid
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from ..errors import BackendError
+from ..report import duplication_ratio, numbered_sources
 from ._common import client
 
 bp = Blueprint("plagiarism", __name__, url_prefix="/plagiarism")
@@ -74,14 +75,32 @@ def submit_document(document_id: str):
 
 @bp.get("/checks/<check_id>")
 def detail(check_id: str):
-    check = client().get_check(check_id)
-    return render_template(
+    api = client()
+    check = api.get_check(check_id)
+    status = check["status"]
+
+    report = None
+    report_error = None
+    if status in REPORTABLE:
+        try:
+            report = api.get_plag_report(check_id)
+        except BackendError as exc:
+            if exc.code != "report_visibility_changed":
+                raise
+            report_error = "来源访问权限已变化，出于安全原因无法显示这份报告。"
+    sources = numbered_sources(report) if report else []
+
+    rendered = render_template(
         "check.html",
         check=check,
-        report=None,
-        live=check["status"] not in TERMINAL,
+        report=report,
+        report_error=report_error,
+        sources=sources,
+        ratio=duplication_ratio(report) if report else 0.0,
+        live=status not in TERMINAL,
         nojs_refresh_seconds=5,
     )
+    return (rendered, 409) if report_error else rendered
 
 
 @bp.post("/checks/<check_id>/delete")

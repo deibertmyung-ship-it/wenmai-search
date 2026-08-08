@@ -12,6 +12,8 @@
 
 {% if live %}
   {% include "partials/_check_progress.html" %}
+{% elif report_error %}
+  <p class="flash flash--warn">{{ report_error }}</p>
 {% elif check.status in ('completed', 'completed_partial') %}
   {% include "partials/_check_report.html" %}
 {% elif check.status == 'failed' %}

@@ -28,3 +28,30 @@ def source_excerpt(chunks: list[dict], start: int, end: int) -> str:
         if left < right:
             parts.append(text[left:right])
     return "".join(parts)
+
+
+def numbered_sources(report: dict) -> list[dict]:
+    """Sources in display order, each carrying its 1-based `ordinal`.
+
+    The ordinal is the only thing tying a marker in the text to a row in the
+    list, so ordering and numbering must be decided in one place - which is
+    here, not in the template.
+    """
+    ordered = sorted(
+        report.get("sources") or [],
+        key=lambda source: source.get("matched_chars") or 0,
+        reverse=True,
+    )
+    return [dict(source, ordinal=index) for index, source in enumerate(ordered, start=1)]
+
+
+def duplication_ratio(report: dict) -> float:
+    """Matched share of the submission, as a percentage.
+
+    Callers must pair this with `is_complete`: when coverage stopped early the
+    number is a floor, not a verdict.
+    """
+    query_chars = report.get("query_chars") or 0
+    if query_chars <= 0:
+        return 0.0
+    return round((report.get("matched_chars") or 0) / query_chars * 100, 1)

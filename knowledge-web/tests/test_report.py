@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from kbweb.report import source_excerpt
+from kbweb.report import duplication_ratio, numbered_sources, source_excerpt
 
 
 def chunk(ordinal: int, text: str, char_start: int) -> dict:
@@ -12,6 +12,49 @@ def chunk(ordinal: int, text: str, char_start: int) -> dict:
         "char_start": char_start,
         "char_end": char_start + len(text),
     }
+
+
+def a_report(**extra) -> dict:
+    base = {
+        "check_id": "chk-1",
+        "status": "completed",
+        "query_chars": 1000,
+        "matched_chars": 234,
+        "checked_chunks": 40,
+        "total_chunks": 40,
+        "coverage_reason": None,
+        "is_complete": True,
+        "sources": [],
+        "unique_passages": [],
+    }
+    base.update(extra)
+    return base
+
+
+def test_sources_are_numbered_by_matched_chars_descending():
+    report = a_report(
+        sources=[
+            {"document_id": "d-small", "matched_chars": 58, "passages": []},
+            {"document_id": "d-big", "matched_chars": 142, "passages": []},
+        ]
+    )
+    numbered = numbered_sources(report)
+    assert [s["ordinal"] for s in numbered] == [1, 2]
+    assert numbered[0]["document_id"] == "d-big"
+
+
+def test_numbering_is_one_based_to_match_the_marker_glyphs():
+    report = a_report(sources=[{"document_id": "d", "matched_chars": 1, "passages": []}])
+    assert numbered_sources(report)[0]["ordinal"] == 1
+
+
+def test_ratio_is_matched_over_query_chars():
+    assert duplication_ratio(a_report(query_chars=1000, matched_chars=234)) == 23.4
+
+
+def test_ratio_is_zero_when_nothing_was_submitted():
+    """Never divide by zero just because a check failed before counting."""
+    assert duplication_ratio(a_report(query_chars=0, matched_chars=0)) == 0.0
 
 
 def test_excerpt_slices_within_a_single_chunk():
