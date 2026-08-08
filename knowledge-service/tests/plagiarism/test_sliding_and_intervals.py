@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from kbsvc.plagiarism.chunking.sliding import chunk_document
-from kbsvc.plagiarism.intervals import merge_intervals
+from kbsvc.plagiarism.intervals import dedupe_passage_indexes, merge_intervals
 
 pysbd = pytest.importorskip(
     "pysbd", reason="chunking needs the `plagiarism` extra: pip install '.[plagiarism]'"
@@ -137,3 +137,31 @@ def test_input_not_mutated():
     snapshot = list(src)
     merge_intervals(src)
     assert src == snapshot
+
+
+# --- cross-chunk passage dedupe ----------------------------------------
+
+
+def test_nested_passages_from_overlapping_source_chunks_keep_one():
+    """The same document span can be emitted once per overlapping corpus chunk."""
+    passages = [
+        (0, 140, 1066, 1206),
+        (73, 140, 1139, 1206),
+    ]
+    assert dedupe_passage_indexes(passages) == [0]
+
+
+def test_same_query_text_at_disjoint_source_positions_stays_two_hits():
+    passages = [
+        (0, 70, 100, 170),
+        (0, 70, 900, 970),
+    ]
+    assert dedupe_passage_indexes(passages) == [0, 1]
+
+
+def test_nested_passages_keep_the_highest_scoring_representative():
+    passages = [
+        (0, 140, 1066, 1206),
+        (73, 140, 1139, 1206),
+    ]
+    assert dedupe_passage_indexes(passages, [0.8, 1.0]) == [1]

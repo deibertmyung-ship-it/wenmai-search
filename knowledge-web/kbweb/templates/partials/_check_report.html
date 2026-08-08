@@ -6,7 +6,7 @@
     {% if not report.is_complete %}<span class="verdict__floor">≥</span>{% endif %}{{ ratio }}%
   </p>
   <p class="verdict__label">
-    {{ sources | length }} 个来源 ·
+    {{ sources | length }} 个来源文档 ·
     {% if report.is_complete %}已查完整篇{% else %}覆盖不全{% endif %}
   </p>
 </div>
@@ -19,6 +19,7 @@
 
 <div class="report-layout">
   <section class="report-layout__submission" aria-label="待检全文">
+    <h2 class="section-title">待检文本</h2>
     {% if report.query_text %}
       <div class="submission">
         {% for fragment, owners in coverage_segments(report.query_text, spans) %}
@@ -46,7 +47,7 @@
           </p>
           <p class="source__meta">
             命中 {{ "{:,}".format(source.matched_chars) }} 字 · score {{ source.score | score(2) }} ·
-            {{ source.passages | length }} 处
+            {{ source.passages | length }} 个独立命中位置
           </p>
           {% for passage in source.passages %}
             <details class="passage" id="passage-{{ source.ordinal }}-{{ loop.index }}">

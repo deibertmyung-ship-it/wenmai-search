@@ -703,6 +703,8 @@ def test_passage_cards_show_both_sides(client, chunks_payload):
     )
     body = html(client.get("/plagiarism/checks/chk-done"))
     assert "<details" in body          # openable with no script at all
+    assert "待检文本" in body
+    assert "1 个来源文档" in body
     assert "夫天地者，万物之逆旅也" in body   # the query-side preview
     assert "到书里看" in body
 

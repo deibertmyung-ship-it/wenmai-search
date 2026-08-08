@@ -25,7 +25,7 @@ from . import repository as repo
 from .alignment.seed_extend import AlignedPassage, align
 from .chunking.sliding import chunk_document
 from .fingerprinting import fingerprint
-from .intervals import merge_intervals
+from .intervals import dedupe_passage_indexes, merge_intervals
 from .language import pysbd_language
 from .models import PlagCheck, PlagCheckPassage, PlagCheckSource
 from .retrieval import stop_list
@@ -279,6 +279,16 @@ class CheckRunner:
         for projection_id, passages in passages_by_projection.items():
             projection = session.get(repo.PlagCorpusProjection, projection_id)
             if projection is None:
+                continue
+            keep = dedupe_passage_indexes(
+                [
+                    (p.query_start, p.query_end, p.candidate_start, p.candidate_end)
+                    for p in passages
+                ],
+                [p.score for p in passages],
+            )
+            passages = [passages[index] for index in keep]
+            if not passages:
                 continue
             document = session.get(Document, projection.document_id)
             # The real ordinal, not a placeholder: Task 7 fetches source

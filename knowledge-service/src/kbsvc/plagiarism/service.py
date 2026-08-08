@@ -16,6 +16,7 @@ from ..config import Settings, get_settings
 from ..db.models import Document
 from ..errors import KbError, NotFoundError, ValidationError
 from . import repository as repo
+from .intervals import dedupe_passage_indexes, merge_intervals
 from .models import PlagCheck, PlagCheckPassage, PlagCheckSource, utcnow
 from .types import (
     CheckReport,
@@ -293,7 +294,15 @@ class PlagiarismService:
         matched_sources = []
         all_spans: list[tuple[int, int]] = []
         for source in sources:
-            passages = session.query(PlagCheckPassage).filter_by(source_id=source.id).all()
+            passage_rows = session.query(PlagCheckPassage).filter_by(source_id=source.id).all()
+            keep = dedupe_passage_indexes(
+                [
+                    (p.query_start, p.query_end, p.source_start, p.source_end)
+                    for p in passage_rows
+                ],
+                [p.score for p in passage_rows],
+            )
+            passages = [passage_rows[index] for index in keep]
             all_spans.extend((p.query_start, p.query_end) for p in passages)
             matched_sources.append(
                 MatchedSource(
@@ -317,8 +326,6 @@ class PlagiarismService:
                     ],
                 )
             )
-
-        from .intervals import merge_intervals
 
         return CheckReport(
             check_id=check.id,
