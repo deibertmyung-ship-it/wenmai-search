@@ -478,6 +478,28 @@ def test_ingest_page_loads_all_jobs_across_backend_pages(client, sources_payload
 
 
 @respx.mock
+def test_jobs_polling_checks_all_pages(client, jobs_payload):
+    all_jobs = [
+        dict(jobs_payload[0], id=f"job-{index:03d}", state="completed")
+        for index in range(205)
+    ]
+    all_jobs[-1]["state"] = "pending"
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        offset = int(request.url.params.get("offset", "0"))
+        limit = int(request.url.params.get("limit", "200"))
+        return httpx.Response(200, json=all_jobs[offset : offset + limit])
+
+    route = respx.get(f"{API_BASE}/v1/jobs").mock(side_effect=respond)
+
+    payload = client.get("/api/jobs").get_json()
+
+    assert len(payload["jobs"]) == 205
+    assert payload["counts"]["pending"] == 1
+    assert route.call_count == 2
+
+
+@respx.mock
 def test_upload_forwards_the_file_and_redirects_to_import_jobs(
     client, sources_payload, document_payload
 ):

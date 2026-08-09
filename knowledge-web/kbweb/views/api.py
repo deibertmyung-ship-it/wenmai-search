@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
 
-from ._common import as_int, client, settings
+from ._common import as_int, client, job_context, settings
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -29,8 +29,5 @@ def chunks(document_id: str):
 @bp.get("/jobs")
 def jobs():
     state = (request.args.get("state") or "").strip()
-    rows = client().list_jobs(state=state or None, limit=200)
-    counts: dict[str, int] = {}
-    for job in rows:
-        counts[job["state"]] = counts.get(job["state"], 0) + 1
-    return jsonify({"jobs": rows, "counts": counts})
+    context = job_context(client(), state=state, limit=200)
+    return jsonify({"jobs": context["jobs"], "counts": context["counts"]})
