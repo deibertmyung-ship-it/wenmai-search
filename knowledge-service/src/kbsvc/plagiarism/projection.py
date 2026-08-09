@@ -21,7 +21,7 @@ from ..db.models import Document, DocumentVersion
 from . import repository as repo
 from .chunking.sliding import chunk_document
 from .fingerprinting import fingerprint
-from .language import pysbd_language
+from .language import has_cjk, pysbd_language
 from .matching_policy import resolve_match_policy
 from .models import PlagCorpusChunk, PlagCorpusProjection
 from .types import CorpusJobStatus
@@ -29,13 +29,9 @@ from .types import CorpusJobStatus
 logger = logging.getLogger(__name__)
 
 
-def _has_han(text: str) -> bool:
-    return any("\u3400" <= char <= "\u9fff" for char in text)
-
-
 def _chunk_fingerprints(text: str, settings: Settings) -> list[int]:
     """Store both profiles for mixed-script chunks so either query can recall."""
-    profiles = ("generic", "zh") if _has_han(text) else ("generic",)
+    profiles = ("generic", "zh") if has_cjk(text) else ("generic",)
     fingerprints: set[int] = set()
     for profile in profiles:
         fingerprints.update(

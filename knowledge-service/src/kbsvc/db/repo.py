@@ -273,30 +273,51 @@ def claim_job(session: Session, *, owner: str, lease_seconds: int) -> IngestJob 
     """Atomically lease one runnable job.
 
     Runnable = pending/retry_wait and due, or an expired lease left by a dead worker.
+
+    On PostgreSQL uses ``FOR UPDATE SKIP LOCKED`` so multiple workers can poll
+    without contention.  On SQLite (typically single-worker) falls back to
+    compare-and-swap with an immediate commit, since SQLite does not support
+    row-level locking.
     """
     now = utcnow()
-    stmt = (
-        select(IngestJob)
-        .where(
-            IngestJob.scheduled_at <= now,
-            (
-                IngestJob.state.in_(["pending", "retry_wait"])
-                | (
-                    IngestJob.state.in_(["parsing", "chunking", "embedding", "indexing"])
-                    & (IngestJob.lease_expires_at < now)
-                )
-            ),
-        )
-        .order_by(IngestJob.scheduled_at)
-        .limit(1)
+    runnable = (
+        IngestJob.scheduled_at <= now,
+        (
+            IngestJob.state.in_(["pending", "retry_wait"])
+            | (
+                IngestJob.state.in_(["parsing", "chunking", "embedding", "indexing"])
+                & (IngestJob.lease_expires_at < now)
+            )
+        ),
     )
-    job = session.scalars(stmt).first()
+
+    is_postgres = session.bind.dialect.name == "postgresql"  # type: ignore[union-attr]
+
+    if is_postgres:
+        job = session.scalars(
+            select(IngestJob)
+            .where(*runnable)
+            .order_by(IngestJob.scheduled_at)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        ).first()
+        if job is None:
+            return None
+        job.state = "parsing"
+        job.lease_owner = owner
+        job.lease_expires_at = now + timedelta(seconds=lease_seconds)
+        job.attempts += 1
+        job.updated_at = now
+        session.flush()
+        return job
+
+    # SQLite: CAS.  updated_at alone is not enough on a coarse clock; state and
+    # lease_owner always change on a claim, so they are part of the predicate.
+    job = session.scalars(
+        select(IngestJob).where(*runnable).order_by(IngestJob.scheduled_at).limit(1)
+    ).first()
     if job is None:
         return None
-
-    # Compare-and-swap on the full pre-read tuple. updated_at alone is not enough:
-    # on a coarse clock the winner can rewrite it to the same value, letting a second
-    # worker's WHERE still match. state and lease_owner always change on a claim.
     result = session.execute(
         update(IngestJob)
         .where(

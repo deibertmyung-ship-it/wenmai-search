@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from typing import Literal
 
 from ..config import Settings
-from .language import detect_language
+from .language import detect_language, is_chinese_dominant
 from .normalization import NORMALIZER_VERSION, normalize_with_offsets
 
 MATCHER_VERSION = "seed-extend-v2"
@@ -45,14 +45,6 @@ class MatchPolicy:
         )
 
 
-def _looks_chinese(text: str) -> bool:
-    meaningful = [char for char in text if not char.isspace()]
-    if not meaningful:
-        return False
-    han = sum("\u3400" <= char <= "\u9fff" for char in meaningful)
-    return han / len(meaningful) >= 0.5
-
-
 def resolve_match_policy(text: str, declared_language: str, settings: Settings) -> MatchPolicy:
     detected = declared_language if declared_language != "auto" else detect_language(text)
     base_language = detected.split("-", 1)[0]
@@ -61,7 +53,7 @@ def resolve_match_policy(text: str, declared_language: str, settings: Settings) 
     # language detectors to misclassify.
     profile: Literal["zh", "generic"] = (
         "zh"
-        if base_language == "zh" or (declared_language == "auto" and _looks_chinese(text))
+        if base_language == "zh" or (declared_language == "auto" and is_chinese_dominant(text))
         else "generic"
     )
     normalized = normalize_with_offsets(text, profile=profile)

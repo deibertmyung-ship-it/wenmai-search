@@ -789,5 +789,4 @@ __all__ = [
     "replace_projection_chunks",
     "replay_events",
     "request_digest",
-    "cleanup_expired",
 ]

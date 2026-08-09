@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from flask import Blueprint, redirect, render_template, request, url_for
 
+from ..errors import BackendError, BackendUnavailable
 from ._common import as_int, client, settings
 
+logger = logging.getLogger(__name__)
 bp = Blueprint("library", __name__, url_prefix="")
 
 # How many chunks of run-up to show before a focused hit, so it lands in context
@@ -35,7 +38,8 @@ def shelf():
     ]
     try:
         stats = api.stats()
-    except Exception:  # stats are decoration here, never a reason to fail the page
+    except (BackendError, BackendUnavailable):
+        logger.warning("stats unavailable for library shelf", exc_info=True)
         stats = None
 
     return render_template(

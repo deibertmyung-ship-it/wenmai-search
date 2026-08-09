@@ -20,17 +20,23 @@ logger = logging.getLogger(__name__)
 
 
 class KbClient:
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, http: httpx.Client | None = None) -> None:
         self.config = config
-        headers = {"Accept": "application/json"}
-        if config.api_key:
-            headers["Authorization"] = f"Bearer {config.api_key}"
-        self._client = httpx.Client(
-            base_url=config.api_base, timeout=config.timeout, headers=headers
-        )
+        if http is not None:
+            self._client = http
+            self._owns_client = False
+        else:
+            headers = {"Accept": "application/json"}
+            if config.api_key:
+                headers["Authorization"] = f"Bearer {config.api_key}"
+            self._client = httpx.Client(
+                base_url=config.api_base, timeout=config.timeout, headers=headers
+            )
+            self._owns_client = True
 
     def close(self) -> None:
-        self._client.close()
+        if self._owns_client:
+            self._client.close()
 
     # --- plumbing -------------------------------------------------------
 

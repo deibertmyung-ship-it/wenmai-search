@@ -1,0 +1,10 @@
+# Docker build context excludes.
+.venv
+__pycache__
+*.pyc
+.ruff_cache
+.pytest_cache
+tests
+deploy
+.git
+.gitignore

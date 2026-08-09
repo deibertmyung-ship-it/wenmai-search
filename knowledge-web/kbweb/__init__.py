@@ -5,11 +5,13 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import httpx
 from flask import Flask, g, render_template
 
 from . import filters
 from .client import KbClient
 from .config import Config
+from .csrf import init_csrf
 from .errors import BackendError, BackendUnavailable
 
 logger = logging.getLogger(__name__)
@@ -23,7 +25,9 @@ def create_app(config: Config | None = None) -> Flask:
     app.config.update(app.config["KBWEB"].as_flask_mapping())
 
     filters.register(app)
+    _register_http_client(app)
     _register_client(app)
+    init_csrf(app)
     _register_errors(app)
     _register_blueprints(app)
 
@@ -60,19 +64,39 @@ def _webfonts_present(app: Flask) -> bool:
     )
 
 
+def _register_http_client(app: Flask) -> None:
+    """Create a shared httpx.Client with connection pooling for the app lifetime."""
+    config: Config = app.config["KBWEB"]
+    headers = {"Accept": "application/json"}
+    if config.api_key:
+        headers["Authorization"] = f"Bearer {config.api_key}"
+    http = httpx.Client(
+        base_url=config.api_base,
+        timeout=config.timeout,
+        headers=headers,
+        limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+    )
+    app.extensions["kb_http"] = http
+
+    @app.teardown_appcontext
+    def _close_http(_exception: BaseException | None) -> None:
+        # The shared httpx.Client is closed at process exit, not per request.
+        # Per-request KbClient instances are lightweight wrappers that borrow it.
+        pass
+
+
 def _register_client(app: Flask) -> None:
-    """One client per request context; the config object is shared."""
+    """One KbClient per request context, sharing the app-level httpx.Client."""
 
     def get_client() -> KbClient:
         if "kb_client" not in g:
-            g.kb_client = KbClient(app.config["KBWEB"])
+            http: httpx.Client = app.extensions["kb_http"]
+            g.kb_client = KbClient(app.config["KBWEB"], http)
         return g.kb_client
 
     @app.teardown_appcontext
     def _close_client(_exception: BaseException | None) -> None:
-        client = g.pop("kb_client", None)
-        if client is not None:
-            client.close()
+        g.pop("kb_client", None)
 
     app.extensions["kb_client"] = get_client
 

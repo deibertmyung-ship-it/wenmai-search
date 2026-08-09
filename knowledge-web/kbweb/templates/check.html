@@ -24,6 +24,7 @@
 
 <form method="post" action="{{ url_for('plagiarism.delete', check_id=check.check_id) }}"
       style="margin-top: var(--space-6)">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
   <button class="btn btn--ghost btn--sm" type="submit">
     {% if live %}取消检测{% else %}删除记录{% endif %}
   </button>

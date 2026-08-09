@@ -6,9 +6,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-load_dotenv()
+# Explicit path: under systemd/waitress the cwd may not be the project root,
+# which would silently skip .env and leave the app misconfigured.
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from kbweb import create_app  # noqa: E402  (after load_dotenv, by design)
 

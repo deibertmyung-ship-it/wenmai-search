@@ -1,0 +1,41 @@
+# Development override for docker-compose.yml.
+#
+# Production keeps source code inside immutable images. This file is an
+# explicit development profile: source edits are visible through read-only
+# bind mounts, while persistent service data continues to use the named
+# volumes declared by docker-compose.yml.
+
+services:
+  api:
+    command: ["kbsvc", "serve", "--host", "0.0.0.0", "--port", "8077", "--reload"]
+    environment:
+      PYTHONPATH: /app/src
+    volumes:
+      - ../src:/app/src:ro
+
+  worker:
+    environment:
+      PYTHONPATH: /app/src
+    volumes:
+      - ../src:/app/src:ro
+
+  plagiarism-worker:
+    environment:
+      PYTHONPATH: /app/src
+    volumes:
+      - ../src:/app/src:ro
+
+  mcp:
+    environment:
+      PYTHONPATH: /app/src
+    volumes:
+      - ../src:/app/src:ro
+
+  web:
+    command: ["flask", "--app", "wsgi", "run", "--host", "0.0.0.0", "--port", "5055", "--debug"]
+    environment:
+      FLASK_DEBUG: "1"
+      KBWEB_TEMPLATE_RELOAD: "true"
+    volumes:
+      - ../../knowledge-web/kbweb:/app/kbweb:ro
+      - ../../knowledge-web/wsgi.py:/app/wsgi.py:ro

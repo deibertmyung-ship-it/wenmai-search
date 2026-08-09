@@ -37,9 +37,11 @@ class OpenAiDenseEmbedder:
             f"{self.base_url}/embeddings", json={"model": self.model, "input": inputs}
         )
         if response.status_code >= 400:
+            # Sanitize: never echo the response body, which may contain the
+            # API key on misconfigured proxies.
             raise KbError(
                 f"embedding endpoint returned {response.status_code}",
-                {"body": response.text[:500]},
+                {"status": response.status_code},
             )
         payload = response.json()
         rows = sorted(payload["data"], key=lambda item: item.get("index", 0))

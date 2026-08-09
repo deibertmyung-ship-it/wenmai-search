@@ -71,6 +71,11 @@ services:
       KB_DENSE_PROVIDER: ${KB_DENSE_PROVIDER:-fastembed}
       KB_DENSE_MODEL: ${KB_DENSE_MODEL:-BAAI/bge-small-zh-v1.5}
       KB_AUTH_REQUIRED: "true"
+      # Restrict /v1/ingest/path to the mounted corpus root. The volume is
+      # read-only, so this is defense-in-depth against path traversal.
+      KB_INGEST_ALLOWED_ROOTS: /corpus
+      # Global per-IP rate limit (requests/min). 0 = disabled.
+      KB_RATE_LIMIT_PER_MINUTE: ${KB_RATE_LIMIT_PER_MINUTE:-0}
       # Plagiarism (PostgreSQL-only, default-off). The two switches are
       # independent so the corpus can be built while the API stays shut.
       KB_PLAG_ENABLED: ${KB_PLAG_ENABLED:-false}

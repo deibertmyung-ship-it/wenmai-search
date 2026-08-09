@@ -40,10 +40,12 @@
   <h2>维护</h2>
   <p class="form-row__hint">重建索引会从对象存储中已保存的原始文件重新解析与嵌入，无需重新上传。</p>
   <form method="post" action="{{ url_for('library.reindex', document_id=document.id) }}" style="margin-top: var(--space-3)">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <button class="btn btn--ghost btn--sm" type="submit">重建此文档索引</button>
   </form>
   <form method="post" action="{{ url_for('plagiarism.submit_document', document_id=document.id) }}"
         style="margin-top: var(--space-4)">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="form_token" value="{{ plagiarism_form_token }}">
     <button class="btn btn--sm" type="submit">查重</button>
   </form>

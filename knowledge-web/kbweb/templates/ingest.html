@@ -7,6 +7,7 @@
 <div class="panel">
   <h2>新建目录</h2>
   <form class="form-grid" method="post" action="{{ url_for('ingest.create_source') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <div class="form-row">
       <label class="rail__label" for="src-name">名称</label>
       <input class="field field--sm" id="src-name" name="name" required placeholder="guji">
@@ -31,6 +32,7 @@
 <div class="panel">
   <h2>上传单个文件</h2>
   <form class="form-grid" method="post" action="{{ url_for('ingest.upload') }}" enctype="multipart/form-data">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <div class="form-row">
       <label class="rail__label" for="up-source">目录</label>
       <select class="field field--sm" id="up-source" name="source_id" required>
@@ -54,6 +56,7 @@
   <h2>按路径批量导入</h2>
   <p class="form-row__hint">路径必须是 <strong>kbsvc 服务端</strong>可读的位置。大批量语料走这条，避免经 HTTP 传输。</p>
   <form class="form-grid" method="post" action="{{ url_for('ingest.ingest_path') }}" style="margin-top: var(--space-3)">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <div class="form-row">
       <label class="rail__label" for="path-source">目录</label>
       <select class="field field--sm" id="path-source" name="source_id" required>

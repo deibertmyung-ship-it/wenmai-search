@@ -48,6 +48,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from ..language import is_chinese_dominant
 from ..normalization import NormalizedText, normalize_with_offsets
 
 # Lookahead width for the tolerant-extend stage (chars). Small enough to react
@@ -130,7 +131,7 @@ def align(
         return []
 
     if normalizer_profile == "auto":
-        normalizer_profile = "zh" if _looks_chinese(query_text) else "generic"
+        normalizer_profile = "zh" if is_chinese_dominant(query_text) else "generic"
     if normalizer_profile == "zh" and (min_seed_len, min_passage_len) == (30, 50):
         # Keep direct callers safe while the worker supplies an explicit
         # language policy. English callers retain the historical 30/50 gates.
@@ -196,14 +197,6 @@ def align(
     return passages
 
 
-def _looks_chinese(text: str) -> bool:
-    meaningful = [char for char in text if not char.isspace()]
-    if not meaningful:
-        return False
-    han = sum("\u3400" <= char <= "\u9fff" for char in meaningful)
-    return han / len(meaningful) >= 0.5
-
-
 def _short_exact_matches(
     query_chunk_id: str,
     query_text: str,
@@ -224,21 +217,21 @@ def _short_exact_matches(
         if normalized_start < 0:
             break
         normalized_end = normalized_start + len(needle)
-        q_start, q_end = normalized_query.original_span_with_boundaries(
-            0, len(needle), query_text
-        )
+        # The query side always spans the full text: the needle is
+        # ``normalized_query.text`` in its entirety, so there is nothing to
+        # offset.  The candidate side needs boundary mapping because the
+        # match may start at any position inside the candidate.
         c_start, c_end = normalized_candidate.original_span_with_boundaries(
             normalized_start, normalized_end, candidate_text
         )
         if normalized_start == 0 and normalized_end == len(normalized_candidate.text):
             c_start, c_end = 0, len(candidate_text)
-        q_start, q_end = 0, len(query_text)
         passages.append(
             AlignedPassage(
                 query_chunk_id=query_chunk_id,
                 candidate_chunk_id=candidate_chunk_id,
-                query_start=q_start,
-                query_end=q_end,
+                query_start=0,
+                query_end=len(query_text),
                 candidate_start=c_start,
                 candidate_end=c_end,
                 score=1.0,

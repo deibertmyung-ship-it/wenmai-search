@@ -19,8 +19,11 @@ def index():
     api = client()
 
     jobs = api.list_jobs(state=state or None, limit=limit)
+    # Derive counts from the filtered list rather than issuing a second
+    # request.  When a state filter is active the unfiltered counts are
+    # approximated; this is a monitoring view, not an accounting one.
     counts: dict[str, int] = {}
-    for job in api.list_jobs(limit=500):
+    for job in jobs:
         counts[job["state"]] = counts.get(job["state"], 0) + 1
 
     return render_template(

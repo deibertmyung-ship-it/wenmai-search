@@ -17,11 +17,14 @@ import socket
 from datetime import timedelta
 from threading import Event
 
+from sqlalchemy.orm import Session
+
 from ..config import Settings, get_settings
 from ..db.session import session_scope
 from . import repository as repo
 from .projection import ProjectionBuilder
 from .runner import CheckRunner
+from .service import InputTooShortError
 from .states import advance_check
 from .types import CheckStage, CheckStatus, CorpusJobStatus
 
@@ -144,7 +147,7 @@ class PlagiarismWorker:
 
     # --- settlement -----------------------------------------------------
 
-    def _settle(self, session, check, result: dict) -> None:
+    def _settle(self, session: Session, check, result: dict) -> None:
         """Write the terminal status and its event in one transaction.
 
         Same transaction on purpose: if the status committed without the event,
@@ -181,14 +184,14 @@ class PlagiarismWorker:
             },
         )
 
-    def _fail(self, session, check, tenant_id: str, exc: Exception) -> None:
+    def _fail(self, session: Session, check, tenant_id: str, exc: Exception) -> None:
         """Retry while attempts remain; otherwise park in failed."""
         message = f"{type(exc).__name__}: {exc}"
         check.last_error = message[:2000]
         check.leased_by = ""
         check.lease_expires_at = None
 
-        non_retryable = getattr(exc, "code", "") == "plagiarism_text_too_short"
+        non_retryable = isinstance(exc, InputTooShortError)
         if check.attempts < check.max_attempts and not non_retryable:
             check.status = str(CheckStatus.PENDING)
             check.available_at = repo.utcnow() + _backoff(self.settings, check.attempts)

@@ -1,0 +1,15 @@
+# Docker build context excludes.  Keeps the context small and prevents
+# __pycache__ / venv artifacts from leaking into the image.
+.venv
+__pycache__
+*.pyc
+.ruff_cache
+.pytest_cache
+.kbdata
+logs
+deploy
+tests
+docs
+.git
+.gitignore
+.env

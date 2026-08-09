@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.orm import Session
 
+from ...config import get_settings
 from ...db import repo
 from ...errors import NotFoundError, ValidationError
 from ...ingest.uploader import register_bytes, register_path
@@ -59,9 +60,15 @@ def ingest_path(
 ) -> BatchRegistrationOut:
     """Bulk-register files the server can already read. Avoids HTTP for big corpora."""
     _require_source(session, principal.tenant_id, body.source_id)
-    root = Path(body.path).expanduser()
+    root = Path(body.path).expanduser().resolve()
     if not root.exists():
         raise ValidationError("path does not exist", {"path": str(root)})
+
+    settings = get_settings()
+    if settings.ingest_allowed_roots:
+        allowed = [Path(p).resolve() for p in settings.ingest_allowed_roots]
+        if not any(root == a or root.is_relative_to(a) for a in allowed):
+            raise ValidationError("path outside allowed roots", {"path": str(root)})
 
     files = _collect_files(root, body.patterns, body.recursive)[: body.limit]
     items: list[RegistrationOut] = []

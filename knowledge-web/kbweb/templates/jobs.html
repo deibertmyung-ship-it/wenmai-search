@@ -41,6 +41,7 @@
             {% if job.last_error %}<div class="table__error">{{ job.last_error }}</div>{% endif %}
             {% if job.state in ('failed', 'cancelled') %}
               <form method="post" action="{{ url_for('jobs.retry', job_id=job.id) }}" style="margin-top: var(--space-2)">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <button class="btn btn--seal btn--sm" type="submit">重试</button>
               </form>
             {% endif %}

@@ -17,6 +17,7 @@
   {% endif %}
 
   <form class="panel" method="post" action="{{ url_for('plagiarism.submit') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="form_token" value="{{ form_token }}">
     <label class="field">
       <span class="field__label">待检文字</span>

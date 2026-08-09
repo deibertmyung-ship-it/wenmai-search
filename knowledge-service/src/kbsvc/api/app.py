@@ -16,10 +16,13 @@ from ..embedding import get_dense_embedder
 from ..errors import KbError
 from ..ingest.worker import IngestWorker
 from ..lexical import get_lexical_store, reset_lexical_store
+from ..ratelimit import SlidingWindowLimiter
 from ..vector import get_vector_store, reset_vector_store
 from .routers import admin, documents, ingest, plagiarism, search, sources
 
 logger = logging.getLogger(__name__)
+
+_limiter: SlidingWindowLimiter | None = None
 
 
 @asynccontextmanager
@@ -93,6 +96,29 @@ def create_app() -> FastAPI:
             "error": {"code": "internal_error", "message": "internal error", "detail": {}}
         }
         return JSONResponse(status_code=500, content=envelope)
+
+    # Rate limiting (opt-in via KB_RATE_LIMIT_PER_MINUTE).
+    global _limiter
+    if settings.rate_limit_per_minute > 0:
+        _limiter = SlidingWindowLimiter(
+            max_requests=settings.rate_limit_per_minute, window_seconds=60.0
+        )
+
+        @app.middleware("http")
+        async def _rate_limit_middleware(request: Request, call_next):
+            client_ip = request.client.host if request.client else "unknown"
+            if not _limiter or not _limiter.allow(client_ip):
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "error": {
+                            "code": "rate_limited",
+                            "message": "too many requests",
+                            "detail": {},
+                        }
+                    },
+                )
+            return await call_next(request)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict:

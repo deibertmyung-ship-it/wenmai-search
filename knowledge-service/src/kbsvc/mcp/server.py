@@ -33,6 +33,11 @@ def _principal() -> tuple[str, list[str] | None]:
         with session_scope() as session:
             principal = resolve_principal(session, raw_key)
         return principal.tenant_id, principal.acl_filter
+    if settings.auth_required:
+        raise KbError(
+            "KB_MCP_API_KEY is required when auth_required is true",
+            {"hint": "set KB_MCP_API_KEY or disable auth_required"},
+        )
     return settings.default_tenant, None
 
 

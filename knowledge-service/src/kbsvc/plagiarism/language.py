@@ -53,6 +53,20 @@ def detect_language(text: str) -> str:
         return _FALLBACK
 
 
+def has_cjk(text: str) -> bool:
+    """True when *text* contains at least one CJK Unified Ideograph character."""
+    return any("㐀" <= char <= "鿿" for char in text)
+
+
+def is_chinese_dominant(text: str, *, threshold: float = 0.5) -> bool:
+    """True when at least *threshold* of non-space chars are CJK ideographs."""
+    meaningful = [char for char in text if not char.isspace()]
+    if not meaningful:
+        return False
+    han = sum("㐀" <= char <= "鿿" for char in meaningful)
+    return han / len(meaningful) >= threshold
+
+
 def pysbd_language(code: str) -> str:
     """Map a detected language code to one pysbd can segment.
 

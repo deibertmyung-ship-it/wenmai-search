@@ -5,10 +5,10 @@ from __future__ import annotations
 import hashlib
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Profile = Literal["local", "server"]
 DenseProvider = Literal["hash", "fastembed", "openai"]
@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     chunk_max_chars: int = 4000
 
     # --- parsing --------------------------------------------------------
-    parser_chain: list[str] = Field(default_factory=lambda: ["docling", "unstructured", "marker"])
+    parser_chain: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["docling", "unstructured", "marker"])
 
     # --- retrieval ------------------------------------------------------
     retrieval_overfetch: int = 4
@@ -106,9 +106,15 @@ class Settings(BaseSettings):
     # --- api ------------------------------------------------------------
     auth_required: bool = False
     max_upload_bytes: int = 200 * 1024 * 1024
-    allowed_mimes: list[str] = Field(default_factory=list)  # empty -> allow all
+    allowed_mimes: Annotated[list[str], NoDecode] = Field(default_factory=list)  # empty -> allow all
     api_host: str = "127.0.0.1"
     api_port: int = 8077
+    # Comma-separated list of root directories the /v1/ingest/path endpoint may
+    # read from. Empty (default) allows any path -- safe for local dev, but
+    # should be set in production to prevent arbitrary file reads.
+    ingest_allowed_roots: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    # Global rate limit per client IP (requests per minute). 0 disables.
+    rate_limit_per_minute: int = 0
 
     # --- plagiarism (PostgreSQL-only, default-off - see ADR-0001) --------
     # Two independent switches on purpose: indexing can run and backfill the
@@ -166,7 +172,7 @@ class Settings(BaseSettings):
     # projections.
     plag_retention_days: int = 30
 
-    @field_validator("parser_chain", "allowed_mimes", mode="before")
+    @field_validator("parser_chain", "allowed_mimes", "ingest_allowed_roots", mode="before")
     @classmethod
     def _split_csv(cls, value: object) -> object:
         if isinstance(value, str):

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -17,6 +19,11 @@ from ..deps import get_principal, get_session
 from ..schemas import JobOut, StatsOut
 
 router = APIRouter(tags=["admin"])
+
+# Simple TTL cache for vector/lexical counts: these trigger full scans on
+# Qdrant/Tantivy and are called on every /stats and /readyz hit.
+_count_cache: dict[str, tuple[float, int]] = {}
+_COUNT_TTL = 30.0
 
 
 def _job_out(job: IngestJob) -> JobOut:
@@ -95,12 +102,12 @@ def stats(
     ).all()
 
     try:
-        vector_points = get_vector_store().count(tenant)
+        vector_points = _cached_count("vector", tenant)
     except Exception:
         vector_points = -1
 
     try:
-        lexical_docs = get_lexical_store().count(tenant)
+        lexical_docs = _cached_count("lexical", tenant)
     except Exception:
         lexical_docs = -1
 
@@ -114,3 +121,18 @@ def stats(
         lexical_docs=lexical_docs,
         jobs_by_state=dict(job_rows),
     )
+
+
+def _cached_count(kind: str, tenant: str) -> int:
+    """Vector/lexical count with a short TTL to avoid full scans on every /stats."""
+    cache_key = f"{kind}:{tenant}"
+    now = time.monotonic()
+    hit = _count_cache.get(cache_key)
+    if hit is not None and now - hit[0] < _COUNT_TTL:
+        return hit[1]
+    if kind == "vector":
+        value = get_vector_store().count(tenant)
+    else:
+        value = get_lexical_store().count(tenant)
+    _count_cache[cache_key] = (now, value)
+    return value
