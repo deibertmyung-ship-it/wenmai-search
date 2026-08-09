@@ -7,6 +7,8 @@ from flask import current_app
 from ..client import KbClient
 from ..config import Config
 
+TERMINAL_JOB_STATES = frozenset({"completed", "failed", "cancelled"})
+
 
 def client() -> KbClient:
     return current_app.extensions["kb_client"]()
@@ -27,3 +29,19 @@ def as_int(value: str | None, default: int, *, low: int, high: int) -> int:
         return max(low, min(int(value), high))
     except (TypeError, ValueError):
         return default
+
+
+def job_context(api: KbClient, *, state: str = "", limit: int = 100) -> dict:
+    """Return the shared task table context used by import and legacy jobs pages."""
+    jobs = api.list_jobs(state=state or None, limit=limit)
+    all_jobs = jobs if not state else api.list_jobs(limit=limit)
+    counts: dict[str, int] = {}
+    for job in all_jobs:
+        counts[job["state"]] = counts.get(job["state"], 0) + 1
+    return {
+        "jobs": jobs,
+        "counts": counts,
+        "total_count": len(all_jobs),
+        "active": state,
+        "live": any(job["state"] not in TERMINAL_JOB_STATES for job in jobs),
+    }

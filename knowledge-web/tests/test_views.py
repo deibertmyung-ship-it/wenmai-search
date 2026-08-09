@@ -412,6 +412,21 @@ def test_retry_posts_to_the_backend_and_redirects(client, jobs_payload):
     )
     response = client.post("/jobs/job-bad/retry")
     assert response.status_code == 302
+    assert response.headers["Location"].endswith("/ingest/#jobs")
+    assert route.called
+
+
+@respx.mock
+def test_legacy_jobs_retry_returns_to_the_jobs_page(client, jobs_payload):
+    route = respx.post(f"{API_BASE}/v1/jobs/job-bad/retry").mock(
+        return_value=httpx.Response(200, json=jobs_payload[1])
+    )
+    response = client.post(
+        "/jobs/job-bad/retry",
+        data={"return_to": "jobs.index", "state": "failed"},
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/jobs/?state=failed")
     assert route.called
 
 
@@ -419,9 +434,12 @@ def test_retry_posts_to_the_backend_and_redirects(client, jobs_payload):
 
 
 @respx.mock
-def test_ingest_page_has_a_no_script_step_sidebar(client, sources_payload):
+def test_ingest_page_includes_import_steps_and_jobs(client, sources_payload, jobs_payload):
     respx.get(f"{API_BASE}/v1/sources").mock(
         return_value=httpx.Response(200, json=sources_payload)
+    )
+    respx.get(f"{API_BASE}/v1/jobs").mock(
+        return_value=httpx.Response(200, json=jobs_payload)
     )
     body = html(client.get("/ingest/"))
     assert 'aria-label="导入步骤"' in body
@@ -430,10 +448,15 @@ def test_ingest_page_has_a_no_script_step_sidebar(client, sources_payload):
     assert 'href="#ingest-path"' in body
     assert 'class="sidebar-metric"' in body
     assert "当前可选目录" in body
+    assert 'aria-label="任务筛选"' in body
+    assert 'data-jobs-table' in body
+    assert "no parser could handle" in body
 
 
 @respx.mock
-def test_upload_forwards_the_file_and_redirects_to_jobs(client, sources_payload, document_payload):
+def test_upload_forwards_the_file_and_redirects_to_import_jobs(
+    client, sources_payload, document_payload
+):
     respx.get(f"{API_BASE}/v1/sources").mock(return_value=httpx.Response(200, json=sources_payload))
     respx.get(f"{API_BASE}/v1/documents").mock(
         return_value=httpx.Response(200, json=[document_payload])
@@ -458,6 +481,7 @@ def test_upload_forwards_the_file_and_redirects_to_jobs(client, sources_payload,
         content_type="multipart/form-data",
     )
     assert response.status_code == 302
+    assert response.headers["Location"].endswith("/ingest/#jobs")
     assert route.called
 
 

@@ -10,6 +10,7 @@
       <li><a href="#create-source"><small>01</small><span>新建目录</span></a></li>
       <li><a href="#upload-file"><small>02</small><span>上传单个文件</span></a></li>
       <li><a href="#ingest-path"><small>03</small><span>按路径批量导入</span></a></li>
+      <li><a href="#jobs"><small>04</small><span>查看导入任务</span><small>{{ total_count }}</small></a></li>
     </ol>
     <div class="sidebar-metric">
       <span>当前可选目录</span>
@@ -91,6 +92,12 @@
     <button class="btn" type="submit" style="justify-self: start">登记并入队</button>
   </form>
 </section>
+{% set job_page_endpoint = 'ingest.index' %}
+{% include "partials/_jobs_panel.html" %}
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/jobs.js') }}" defer></script>
 {% endblock %}

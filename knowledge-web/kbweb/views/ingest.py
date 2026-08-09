@@ -5,14 +5,22 @@ from __future__ import annotations
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from ..errors import BackendError
-from ._common import client
+from ._common import as_int, client, job_context
 
 bp = Blueprint("ingest", __name__, url_prefix="/ingest")
 
 
 @bp.get("/")
 def index():
-    return render_template("ingest.html", sources=client().list_sources())
+    state = (request.args.get("state") or "").strip()
+    limit = as_int(request.args.get("limit"), 100, low=1, high=500)
+    api = client()
+    context = job_context(api, state=state, limit=limit)
+    return render_template(
+        "ingest.html",
+        sources=api.list_sources(),
+        **context,
+    )
 
 
 @bp.post("/source")
@@ -57,8 +65,8 @@ def upload():
     if result.get("deduplicated"):
         flash("内容未变化，已跳过（未产生新版本）", "")
     else:
-        flash("已登记并入队，可在任务页查看进度", "ok")
-    return redirect(url_for("jobs.index"))
+        flash("已登记并入队，可在导入页的任务区查看进度", "ok")
+    return redirect(url_for("ingest.index", _anchor="jobs"))
 
 
 @bp.post("/path")
@@ -86,4 +94,4 @@ def ingest_path():
         f"失败 {result['failed']} 项",
         "ok" if not result["failed"] else "error",
     )
-    return redirect(url_for("jobs.index"))
+    return redirect(url_for("ingest.index", _anchor="jobs"))

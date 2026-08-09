@@ -38,8 +38,6 @@
        {% if request.endpoint and request.endpoint.startswith('ingest.') %}aria-current="page"{% endif %}>导入</a>
     <a class="masthead__link" href="{{ url_for('plagiarism.index') }}"
        {% if request.endpoint and request.endpoint.startswith('plagiarism.') %}aria-current="page"{% endif %}>查重</a>
-    <a class="masthead__link" href="{{ url_for('jobs.index') }}"
-       {% if request.endpoint and request.endpoint.startswith('jobs.') %}aria-current="page"{% endif %}>任务</a>
   </nav>
   <div class="masthead__meta">
     <span>v{{ kbweb_version }}</span>

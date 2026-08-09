@@ -1,0 +1,73 @@
+<section class="panel anchored-section jobs-panel" id="jobs">
+  <div class="jobs-panel__heading">
+    <div>
+      <p class="workspace__eyebrow">后台处理</p>
+      <h2>导入任务</h2>
+    </div>
+    {% if live %}<p class="workspace__note">队列处理中，状态会自动更新。</p>{% endif %}
+  </div>
+
+  <nav class="jobs-panel__filters" aria-label="任务筛选">
+    <a href="{{ url_for(job_page_endpoint, _anchor='jobs' if job_page_endpoint == 'ingest.index' else none) }}"
+       {% if not active %}aria-current="page"{% endif %}>
+      <span>全部任务</span><small>{{ total_count }}</small>
+    </a>
+    {% for state, count in counts.items() %}
+      <a href="{{ url_for(job_page_endpoint, state=state, _anchor='jobs' if job_page_endpoint == 'ingest.index' else none) }}"
+         {% if active == state %}aria-current="page"{% endif %}>
+        <span>{{ state }}</span><small>{{ count }}</small>
+      </a>
+    {% endfor %}
+  </nav>
+
+  <div class="stats" data-job-counts>
+    {% for state, count in counts.items() %}
+      <div class="stat">
+        <span class="stat__value">{{ count }}</span>
+        <span class="stat__label">{{ state }}</span>
+      </div>
+    {% else %}
+      <div class="stat"><span class="stat__value">0</span><span class="stat__label">暂无任务</span></div>
+    {% endfor %}
+  </div>
+
+  {% if active %}
+    <p><a class="btn btn--ghost btn--sm"
+          href="{{ url_for(job_page_endpoint, _anchor='jobs' if job_page_endpoint == 'ingest.index' else none) }}">清除筛选（{{ active }}）</a></p>
+  {% endif %}
+
+  <div class="table-wrap">
+    <table class="table" data-jobs-table data-live="{{ 'true' if live else 'false' }}"
+           data-poll-url="{{ url_for('api.jobs', state=active) }}">
+      <thead>
+        <tr><th>状态</th><th>类型</th><th>文档</th><th>尝试</th><th>创建</th><th>错误 / 操作</th></tr>
+      </thead>
+      <tbody>
+        {% for job in jobs %}
+          <tr>
+            <td><span class="pill{% if job.state | job_tone %} pill--{{ job.state | job_tone }}{% endif %}">{{ job.state }}</span></td>
+            <td class="table__mono">{{ job.job_type }}</td>
+            <td class="table__mono">
+              <a href="{{ url_for('library.read', document_id=job.document_id) }}">{{ job.document_id | short_id }}</a>
+            </td>
+            <td class="table__mono">{{ job.attempts }}/{{ job.max_attempts }}</td>
+            <td class="table__mono" title="{{ job.created_at }}">{{ job.created_at | timeago }}</td>
+            <td>
+              {% if job.last_error %}<div class="table__error">{{ job.last_error }}</div>{% endif %}
+              {% if job.state in ('failed', 'cancelled') %}
+                <form method="post" action="{{ url_for('jobs.retry', job_id=job.id) }}" style="margin-top: var(--space-2)">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="return_to" value="{{ job_page_endpoint }}">
+                  {% if active %}<input type="hidden" name="state" value="{{ active }}">{% endif %}
+                  <button class="btn btn--seal btn--sm" type="submit">重试</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="table__mono">暂无任务</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>

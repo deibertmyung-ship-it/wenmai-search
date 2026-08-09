@@ -136,11 +136,14 @@ def test_job_retry_is_a_real_form_post(client, jobs_payload):
 
 
 @respx.mock
-def test_upload_form_posts_multipart_without_scripts(client, sources_payload, document_payload):
+def test_upload_form_posts_multipart_without_scripts(
+    client, sources_payload, document_payload, jobs_payload
+):
     respx.get(f"{API_BASE}/v1/sources").mock(return_value=httpx.Response(200, json=sources_payload))
     respx.get(f"{API_BASE}/v1/documents").mock(
         return_value=httpx.Response(200, json=[document_payload])
     )
+    respx.get(f"{API_BASE}/v1/jobs").mock(return_value=httpx.Response(200, json=jobs_payload))
     body = html(client.get("/ingest/"))
     assert 'enctype="multipart/form-data"' in body
     assert 'type="file"' in body
