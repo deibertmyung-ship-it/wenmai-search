@@ -2,7 +2,30 @@
 {% block title %}任务{% endblock %}
 
 {% block content %}
-<h1 class="section-title">导入任务</h1>
+<div class="workspace">
+  <nav class="workspace__rail" aria-label="任务筛选">
+    <p class="workspace__eyebrow">任务队列</p>
+    <p class="workspace__intro">按状态查看后台处理；运行中的页面会自动更新。</p>
+    <ol class="sidebar-list">
+      <li>
+        <a href="{{ url_for('jobs.index') }}" {% if not active %}aria-current="page"{% endif %}>
+          <span>全部任务</span><small>{{ total_count }}</small>
+        </a>
+      </li>
+      {% for state, count in counts.items() %}
+        <li>
+          <a href="{{ url_for('jobs.index', state=state) }}"
+             {% if active == state %}aria-current="page"{% endif %}>
+            <span>{{ state }}</span><small>{{ count }}</small>
+          </a>
+        </li>
+      {% endfor %}
+    </ol>
+    {% if live %}<p class="workspace__note">队列处理中，页面将自动刷新状态。</p>{% endif %}
+  </nav>
+
+  <div class="workspace__main">
+    <h1 class="section-title">导入任务</h1>
 
 <div class="stats" data-job-counts>
   {% for state, count in counts.items() %}
@@ -52,6 +75,8 @@
       {% endfor %}
     </tbody>
   </table>
+</div>
+  </div>
 </div>
 {% endblock %}
 

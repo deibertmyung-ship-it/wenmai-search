@@ -45,7 +45,7 @@ def test_rail_stacks_above_results_on_narrow_screens(page: Page, live_server: st
     page.set_viewport_size({"width": 320, "height": 720})
     page.goto(live_server + SEARCH_URL)
 
-    rail = page.locator(".rail").bounding_box()
+    rail = page.locator(".search-rail").bounding_box()
     results = page.locator(".results").bounding_box()
     assert rail["y"] + rail["height"] <= results["y"] + 1, "rail should stack, not sit beside"
 
@@ -54,7 +54,7 @@ def test_rail_sits_beside_results_on_wide_screens(page: Page, live_server: str):
     page.set_viewport_size({"width": 1440, "height": 1000})
     page.goto(live_server + SEARCH_URL)
 
-    rail = page.locator(".rail").bounding_box()
+    rail = page.locator(".search-rail").bounding_box()
     results = page.locator(".results").bounding_box()
     assert results["x"] > rail["x"] + rail["width"] - 1, "expected a two-column layout"
 
@@ -66,6 +66,27 @@ def test_long_error_text_scrolls_inside_its_container(page: Page, live_server: s
         "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
     )
     assert overflow <= 1
+
+
+def test_search_button_is_visible_without_scrolling_the_filter_rail(
+    page: Page, live_server: str
+):
+    """The primary action belongs beside the query, not below every filter."""
+    page.set_viewport_size({"width": 1024, "height": 720})
+    page.goto(live_server)
+    button = page.get_by_role("button", name="检索")
+    expect(button).to_be_visible()
+    box = button.bounding_box()
+    assert box["y"] + box["height"] <= 720
+
+
+def test_library_directory_groups_are_collapsible(page: Page, live_server: str):
+    page.set_viewport_size({"width": 1024, "height": 900})
+    page.goto(f"{live_server}/library")
+    group = page.locator("details.shelf__group").first
+    expect(group).to_have_attribute("open", "")
+    group.locator("summary").click()
+    expect(group).not_to_have_attribute("open", "")
 
 
 # --- accessibility ------------------------------------------------------
@@ -153,7 +174,12 @@ def test_capture_reader(page: Page, live_server: str):
 
 def test_capture_library_and_jobs(page: Page, live_server: str):
     page.set_viewport_size({"width": 1440, "height": 1000})
-    for path, name in (("/library", "library"), ("/jobs/", "jobs"), ("/ingest/", "ingest")):
+    for path, name in (
+        ("/library", "library"),
+        ("/jobs/", "jobs"),
+        ("/ingest/", "ingest"),
+        ("/plagiarism/", "plagiarism"),
+    ):
         page.goto(live_server + path)
         page.wait_for_timeout(150)
         page.screenshot(path=str(SHOTS / f"{name}.png"))

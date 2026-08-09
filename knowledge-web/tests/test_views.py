@@ -27,6 +27,10 @@ def test_landing_page_renders_without_a_query(client, sources_payload, document_
     body = html(response)
     assert "在典籍中查找" in body
     assert "guji" in body  # source filter populated
+    assert 'class="workspace workspace--search"' in body
+    # The primary action must be reachable before the long advanced-filter
+    # list; this is the regression that prompted the sidebar redesign.
+    assert body.index("search-rail__submit") < body.index("范围与策略")
 
 
 @respx.mock
@@ -258,6 +262,9 @@ def test_library_groups_documents_under_their_source(
     body = html(client.get("/library"))
     assert "guji" in body and "六壬指南" in body
     assert "42" in body
+    assert 'aria-label="书库目录"' in body
+    assert 'class="shelf__group"' in body
+    assert "source_id=src-1" in body
 
 
 # --- jobs ---------------------------------------------------------------
@@ -270,6 +277,25 @@ def test_jobs_table_shows_errors_and_a_retry_button(client, jobs_payload):
     assert "no parser could handle" in body
     assert "/jobs/job-bad/retry" in body
     assert "/jobs/job-ok/retry" not in body  # completed jobs are not retryable
+    assert 'aria-label="任务筛选"' in body
+
+
+@respx.mock
+def test_filtered_jobs_keep_global_sidebar_navigation(client, jobs_payload):
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("state") == "failed":
+            payload = [job for job in jobs_payload if job["state"] == "failed"]
+        else:
+            payload = jobs_payload
+        return httpx.Response(200, json=payload)
+
+    respx.get(f"{API_BASE}/v1/jobs").mock(side_effect=respond)
+
+    body = html(client.get("/jobs/?state=failed"))
+
+    assert "全部任务</span><small>2</small>" in body
+    assert "state=completed" in body
+    assert "state=failed" in body
 
 
 @respx.mock
@@ -283,6 +309,18 @@ def test_retry_posts_to_the_backend_and_redirects(client, jobs_payload):
 
 
 # --- ingest -------------------------------------------------------------
+
+
+@respx.mock
+def test_ingest_page_has_a_no_script_step_sidebar(client, sources_payload):
+    respx.get(f"{API_BASE}/v1/sources").mock(
+        return_value=httpx.Response(200, json=sources_payload)
+    )
+    body = html(client.get("/ingest/"))
+    assert 'aria-label="导入步骤"' in body
+    assert 'href="#create-source"' in body
+    assert 'href="#upload-file"' in body
+    assert 'href="#ingest-path"' in body
 
 
 @respx.mock

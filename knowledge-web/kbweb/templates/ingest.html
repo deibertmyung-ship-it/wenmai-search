@@ -2,9 +2,22 @@
 {% block title %}导入{% endblock %}
 
 {% block content %}
-<h1 class="section-title">导入</h1>
+<div class="workspace">
+  <nav class="workspace__rail" aria-label="导入步骤">
+    <p class="workspace__eyebrow">导入流程</p>
+    <p class="workspace__intro">先准备目录，再选择单文件上传或服务端批量登记。</p>
+    <ol class="sidebar-list sidebar-list--steps">
+      <li><a href="#create-source"><small>01</small><span>新建目录</span></a></li>
+      <li><a href="#upload-file"><small>02</small><span>上传单个文件</span></a></li>
+      <li><a href="#ingest-path"><small>03</small><span>按路径批量导入</span></a></li>
+    </ol>
+    <p class="workspace__note">当前可选目录：<strong>{{ sources | length }}</strong></p>
+  </nav>
 
-<div class="panel">
+  <div class="workspace__main">
+    <h1 class="section-title">导入</h1>
+
+<section class="panel anchored-section" id="create-source">
   <h2>新建目录</h2>
   <form class="form-grid" method="post" action="{{ url_for('ingest.create_source') }}">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -27,9 +40,9 @@
     </div>
     <button class="btn" type="submit" style="justify-self: start">创建</button>
   </form>
-</div>
+</section>
 
-<div class="panel">
+<section class="panel anchored-section" id="upload-file">
   <h2>上传单个文件</h2>
   <form class="form-grid" method="post" action="{{ url_for('ingest.upload') }}" enctype="multipart/form-data">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -50,9 +63,9 @@
     </div>
     <button class="btn" type="submit" style="justify-self: start">上传并入队</button>
   </form>
-</div>
+</section>
 
-<div class="panel">
+<section class="panel anchored-section" id="ingest-path">
   <h2>按路径批量导入</h2>
   <p class="form-row__hint">路径必须是 <strong>kbsvc 服务端</strong>可读的位置。大批量语料走这条，避免经 HTTP 传输。</p>
   <form class="form-grid" method="post" action="{{ url_for('ingest.ingest_path') }}" style="margin-top: var(--space-3)">
@@ -74,5 +87,7 @@
     <label class="check"><input type="checkbox" name="recursive" checked> 递归子目录</label>
     <button class="btn" type="submit" style="justify-self: start">登记并入队</button>
   </form>
+</section>
+  </div>
 </div>
 {% endblock %}

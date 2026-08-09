@@ -19,17 +19,18 @@ def index():
     api = client()
 
     jobs = api.list_jobs(state=state or None, limit=limit)
-    # Derive counts from the filtered list rather than issuing a second
-    # request.  When a state filter is active the unfiltered counts are
-    # approximated; this is a monitoring view, not an accounting one.
+    # The rail is persistent navigation, so its state links and counts must
+    # remain global even while the table itself is filtered.
+    all_jobs = jobs if not state else api.list_jobs(limit=limit)
     counts: dict[str, int] = {}
-    for job in jobs:
+    for job in all_jobs:
         counts[job["state"]] = counts.get(job["state"], 0) + 1
 
     return render_template(
         "jobs.html",
         jobs=jobs,
         counts=counts,
+        total_count=len(all_jobs),
         active=state,
         # Poll only while something can still change.
         live=any(job["state"] not in TERMINAL for job in jobs),

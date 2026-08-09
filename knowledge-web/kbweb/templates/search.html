@@ -2,83 +2,90 @@
 {% block title %}{{ form.q or '检索' }}{% endblock %}
 
 {% block content %}
-<div class="search-layout">
+<div class="workspace workspace--search">
 
-  <form class="rail" method="get" action="{{ url_for('search.index') }}">
+  <form class="workspace__rail search-rail" method="get" action="{{ url_for('search.index') }}">
     {# Marks the request as "came from this form", so an unchecked box reads as
        an explicit off rather than as an absent parameter. #}
     <input type="hidden" name="f" value="1">
-    <div class="rail__group">
-      <label class="rail__label" for="q">检索词</label>
-      <input class="field" type="search" id="q" name="q" value="{{ form.q }}"
-             placeholder="贼克如何取用神" autofocus autocomplete="off">
-    </div>
-
-    <div class="rail__group">
-      <span class="rail__label">模式</span>
-      <div class="segmented" role="radiogroup" aria-label="检索模式">
-        {% for mode, label in [('hybrid','混合'), ('dense','语义'), ('sparse','字面')] %}
-          <input type="radio" id="mode-{{ mode }}" name="mode" value="{{ mode }}"
-                 {% if form.mode == mode %}checked{% endif %}>
-          <label for="mode-{{ mode }}">{{ label }}</label>
-        {% endfor %}
+    <div class="search-rail__primary">
+      <p class="workspace__eyebrow">典籍检索</p>
+      <div class="rail__group">
+        <label class="rail__label" for="q">检索词</label>
+        <input class="field" type="search" id="q" name="q" value="{{ form.q }}"
+               placeholder="贼克如何取用神" autofocus autocomplete="off">
       </div>
+      <button class="btn search-rail__submit" type="submit">检索</button>
     </div>
 
-    <div class="rail__group">
-      <label class="rail__label" for="source_id">目录</label>
-      <select class="field field--sm" id="source_id" name="source_id">
-        <option value="">全部</option>
-        {% for source in sources %}
-          <option value="{{ source.id }}" {% if form.source_id == source.id %}selected{% endif %}>
-            {{ source.name }}（{{ source.document_count }}）
-          </option>
-        {% endfor %}
-      </select>
-    </div>
+    <details class="rail-disclosure" open>
+      <summary>范围与策略</summary>
+      <div class="rail-disclosure__body">
+        <div class="rail__group">
+          <span class="rail__label">模式</span>
+          <div class="segmented" role="radiogroup" aria-label="检索模式">
+            {% for mode, label in [('hybrid','混合'), ('dense','语义'), ('sparse','字面')] %}
+              <input type="radio" id="mode-{{ mode }}" name="mode" value="{{ mode }}"
+                     {% if form.mode == mode %}checked{% endif %}>
+              <label for="mode-{{ mode }}">{{ label }}</label>
+            {% endfor %}
+          </div>
+        </div>
 
-    <div class="rail__group">
-      <label class="rail__label" for="document_id">限定书名</label>
-      {# data-source lets the directory dropdown narrow this list in the browser.
-         Without JS every book stays selectable, which is still correct: the
-         backend intersects the two filters. #}
-      <select class="field field--sm" id="document_id" name="document_id">
-        <option value="">全部</option>
-        {% for source in sources %}
-          {% set books = documents | selectattr('source_id', 'equalto', source.id) | list %}
-          {% if books %}
-            <optgroup label="{{ source.name }}" data-source="{{ source.id }}">
-              {% for book in books %}
-                <option value="{{ book.id }}" data-source="{{ source.id }}"
-                        {% if form.document_id == book.id %}selected{% endif %}>{{ book.title }}</option>
-              {% endfor %}
-            </optgroup>
+        <div class="rail__group">
+          <label class="rail__label" for="source_id">目录</label>
+          <select class="field field--sm" id="source_id" name="source_id">
+            <option value="">全部</option>
+            {% for source in sources %}
+              <option value="{{ source.id }}" {% if form.source_id == source.id %}selected{% endif %}>
+                {{ source.name }}（{{ source.document_count }}）
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="rail__group">
+          <label class="rail__label" for="document_id">限定书名</label>
+          {# data-source lets the directory dropdown narrow this list in the browser.
+             Without JS every book stays selectable, which is still correct: the
+             backend intersects the two filters. #}
+          <select class="field field--sm" id="document_id" name="document_id">
+            <option value="">全部</option>
+            {% for source in sources %}
+              {% set books = documents | selectattr('source_id', 'equalto', source.id) | list %}
+              {% if books %}
+                <optgroup label="{{ source.name }}" data-source="{{ source.id }}">
+                  {% for book in books %}
+                    <option value="{{ book.id }}" data-source="{{ source.id }}"
+                            {% if form.document_id == book.id %}selected{% endif %}>{{ book.title }}</option>
+                  {% endfor %}
+                </optgroup>
+              {% endif %}
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="rail__group">
+          <label class="rail__label" for="top_k">返回条数</label>
+          <input class="field field--sm" type="number" id="top_k" name="top_k"
+                 value="{{ form.top_k }}" min="1" max="50">
+        </div>
+
+        <div class="rail__group rail__checks">
+          <label class="check"><input type="checkbox" name="rerank" value="1"
+            {% if form.rerank %}checked{% endif %}> 重排</label>
+          <label class="check"><input type="checkbox" name="rewrite" value="1"
+            {% if form.rewrite %}checked{% endif %}> 查询改写</label>
+          {% if debug_ui_enabled %}
+          <label class="check"><input type="checkbox" name="debug" value="1"
+            {% if form.debug %}checked{% endif %}> 检索调试</label>
           {% endif %}
-        {% endfor %}
-      </select>
-    </div>
-
-    <div class="rail__group">
-      <label class="rail__label" for="top_k">返回条数</label>
-      <input class="field field--sm" type="number" id="top_k" name="top_k"
-             value="{{ form.top_k }}" min="1" max="50">
-    </div>
-
-    <div class="rail__group">
-      <label class="check"><input type="checkbox" name="rerank" value="1"
-        {% if form.rerank %}checked{% endif %}> 重排</label>
-      <label class="check"><input type="checkbox" name="rewrite" value="1"
-        {% if form.rewrite %}checked{% endif %}> 查询改写</label>
-      {% if debug_ui_enabled %}
-      <label class="check"><input type="checkbox" name="debug" value="1"
-        {% if form.debug %}checked{% endif %}> 检索调试</label>
-      {% endif %}
-    </div>
-
-    <button class="btn" type="submit">检索</button>
+        </div>
+      </div>
+    </details>
   </form>
 
-  <section>
+  <section class="workspace__main" aria-label="检索结果">
     {% if payload is none %}
       <div class="empty">
         <span class="empty__mark">卷</span>
