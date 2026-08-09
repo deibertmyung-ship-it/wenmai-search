@@ -93,6 +93,26 @@ def test_get_chunks_omits_the_version_param_when_not_given():
 
 
 @respx.mock
+def test_get_passage_window_forwards_frozen_version_and_offsets():
+    route = respx.get(
+        f"{API_BASE}/v1/documents/doc-1111-2222/passage-window"
+    ).mock(return_value=httpx.Response(200, json={"exact": True, "chunks": []}))
+    api = make_client()
+
+    api.get_passage_window(
+        "doc-1111-2222", version=3, start=12580, end=12624, context=2
+    )
+
+    assert route.calls.last.request.url.params == {
+        "version": "3",
+        "start": "12580",
+        "end": "12624",
+        "context": "2",
+    }
+    api.close()
+
+
+@respx.mock
 def test_stream_progress_raises_backend_error_on_upstream_4xx():
     respx.get(f"{API_BASE}/v1/plagiarism/checks/chk-1/progress").mock(
         return_value=httpx.Response(

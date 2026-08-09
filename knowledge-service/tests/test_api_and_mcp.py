@@ -119,6 +119,16 @@ def test_chunks_are_returned_in_order_with_provenance(api_client, indexed_corpus
     assert any(chunk["heading_path"] for chunk in chunks)
 
 
+def test_passage_window_rejects_an_empty_half_open_range(api_client, indexed_corpus):
+    response = api_client.get(
+        f"/v1/documents/{indexed_corpus['document_id']}/passage-window",
+        params={"version": 1, "start": 10, "end": 10},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_passage_range"
+
+
 def test_unknown_document_returns_the_error_envelope(api_client):
     response = api_client.get("/v1/documents/00000000-0000-0000-0000-000000000000")
     assert response.status_code == 404
