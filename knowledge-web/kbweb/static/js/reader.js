@@ -92,7 +92,8 @@
         // Fall back to full-page navigation rather than stranding the reader.
         var link = document.createElement('a');
         link.className = 'btn btn--ghost';
-        link.href = pageUrl(nextFrom);
+        link.href = window.location.pathname + '?from=' + nextFrom +
+          (reader.dataset.version ? '&version=' + encodeURIComponent(reader.dataset.version) : '');
         link.textContent = '续读下一段';
         moreBox.replaceChildren(link);
       })
