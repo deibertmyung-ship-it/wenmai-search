@@ -264,8 +264,10 @@ class KbClient:
 
     # --- jobs & ops -----------------------------------------------------
 
-    def list_jobs(self, *, state: str | None = None, limit: int = 50) -> list[dict]:
-        params: dict[str, Any] = {"limit": limit}
+    def list_jobs(
+        self, *, state: str | None = None, limit: int = 50, offset: int = 0
+    ) -> list[dict]:
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
         if state:
             params["state"] = state
         return self._request("GET", "/v1/jobs", params=params) or []

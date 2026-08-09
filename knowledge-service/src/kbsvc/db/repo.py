@@ -393,12 +393,17 @@ def claim_job(session: Session, *, owner: str, lease_seconds: int) -> IngestJob 
 
 
 def list_jobs(
-    session: Session, *, tenant_id: str, state: str | None = None, limit: int = 50
+    session: Session,
+    *,
+    tenant_id: str,
+    state: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> list[IngestJob]:
     stmt = select(IngestJob).where(IngestJob.tenant_id == tenant_id)
     if state:
         stmt = stmt.where(IngestJob.state == state)
-    stmt = stmt.order_by(IngestJob.created_at.desc()).limit(limit)
+    stmt = stmt.order_by(IngestJob.created_at.desc()).offset(offset).limit(limit)
     return list(session.scalars(stmt))
 
 

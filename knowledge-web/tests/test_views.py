@@ -454,6 +454,30 @@ def test_ingest_page_includes_import_steps_and_jobs(client, sources_payload, job
 
 
 @respx.mock
+def test_ingest_page_loads_all_jobs_across_backend_pages(client, sources_payload, jobs_payload):
+    all_jobs = [
+        dict(jobs_payload[0], id=f"job-{index:03d}", state="completed")
+        for index in range(205)
+    ]
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        offset = int(request.url.params.get("offset", "0"))
+        limit = int(request.url.params.get("limit", "100"))
+        return httpx.Response(200, json=all_jobs[offset : offset + limit])
+
+    respx.get(f"{API_BASE}/v1/sources").mock(
+        return_value=httpx.Response(200, json=sources_payload)
+    )
+    route = respx.get(f"{API_BASE}/v1/jobs").mock(side_effect=respond)
+
+    body = html(client.get("/ingest/"))
+
+    assert "<small>205</small>" in body
+    assert route.call_count == 3
+    assert [call.request.url.params["offset"] for call in route.calls] == ["0", "100", "200"]
+
+
+@respx.mock
 def test_upload_forwards_the_file_and_redirects_to_import_jobs(
     client, sources_payload, document_payload
 ):

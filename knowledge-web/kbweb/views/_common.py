@@ -33,8 +33,18 @@ def as_int(value: str | None, default: int, *, low: int, high: int) -> int:
 
 def job_context(api: KbClient, *, state: str = "", limit: int = 100) -> dict:
     """Return the shared task table context used by import and legacy jobs pages."""
-    jobs = api.list_jobs(state=state or None, limit=limit)
-    all_jobs = jobs if not state else api.list_jobs(limit=limit)
+    def list_all(*, job_state: str | None = None) -> list[dict]:
+        rows: list[dict] = []
+        offset = 0
+        while True:
+            page = api.list_jobs(state=job_state, limit=limit, offset=offset)
+            rows.extend(page)
+            if len(page) < limit:
+                return rows
+            offset += len(page)
+
+    jobs = list_all(job_state=state or None)
+    all_jobs = jobs if not state else list_all()
     counts: dict[str, int] = {}
     for job in all_jobs:
         counts[job["state"]] = counts.get(job["state"], 0) + 1

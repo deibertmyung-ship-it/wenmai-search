@@ -98,7 +98,9 @@ Base: `/v1`。认证：`Authorization: Bearer <api_key>`（`KB_AUTH_REQUIRED=fal
 ### POST /v1/ingest/path
 `{"source_id":"…","path":"C:/…/book","recursive":true,"patterns":["*.txt"]}` → 批量登记 + 入队（服务端可访问路径时使用，避免大批量走 HTTP）
 
-### GET /v1/jobs/{job_id} / GET /v1/jobs?state=&limit=
+### GET /v1/jobs/{job_id} / GET /v1/jobs?state=&limit=&offset=
+任务列表按 `created_at` 倒序返回；`limit` 最大 500，调用方可递增 `offset` 分页，直到
+返回条数小于 `limit`，以取得租户下的全量任务。
 ### POST /v1/jobs/{job_id}/retry → 失败任务重置为 pending
 
 ## 运维

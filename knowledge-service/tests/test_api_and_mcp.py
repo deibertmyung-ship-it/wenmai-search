@@ -91,6 +91,12 @@ def test_job_can_be_inspected_after_completion(api_client, indexed_corpus):
     assert job["attempts"] >= 1
 
 
+def test_jobs_endpoint_supports_offset_pagination(api_client, indexed_corpus):
+    response = api_client.get("/v1/jobs", params={"limit": 1, "offset": 1})
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
 def test_retry_rejects_a_completed_job(api_client, indexed_corpus):
     response = api_client.post(f"/v1/jobs/{indexed_corpus['job_id']}/retry")
     assert response.status_code == 400

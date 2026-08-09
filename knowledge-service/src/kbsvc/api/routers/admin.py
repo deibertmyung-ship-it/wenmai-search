@@ -46,10 +46,17 @@ def _job_out(job: IngestJob) -> JobOut:
 def list_jobs(
     state: str | None = None,
     limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     principal: Principal = Depends(get_principal),
     session: Session = Depends(get_session),
 ) -> list[JobOut]:
-    jobs = repo.list_jobs(session, tenant_id=principal.tenant_id, state=state, limit=limit)
+    jobs = repo.list_jobs(
+        session,
+        tenant_id=principal.tenant_id,
+        state=state,
+        limit=limit,
+        offset=offset,
+    )
     return [_job_out(job) for job in jobs]
 
 

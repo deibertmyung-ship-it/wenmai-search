@@ -377,9 +377,11 @@ class FakeKbClient:
     def ingest_path(self, **kwargs) -> dict:
         return {"registered": 12, "deduplicated": 3, "failed": 0, "items": [], "errors": []}
 
-    def list_jobs(self, *, state: str | None = None, limit: int = 50) -> list[dict]:
+    def list_jobs(
+        self, *, state: str | None = None, limit: int = 50, offset: int = 0
+    ) -> list[dict]:
         rows = JOBS if not state else [job for job in JOBS if job["state"] == state]
-        return rows[:limit]
+        return rows[offset : offset + limit]
 
     def retry_job(self, job_id: str) -> dict:
         return {**JOBS[1], "state": "pending"}
