@@ -38,7 +38,7 @@
     <input type="hidden" name="form_token" value="{{ form_token }}">
     <label class="field">
       <span class="field__label">待检文字</span>
-      <textarea class="field__input" name="text" rows="14"
+      <textarea class="field__input" name="text" rows="7"
                 maxlength="{{ max_chars }}"
                 placeholder="粘贴要检测的稿件……"
                 {% if not ready %}disabled{% endif %}></textarea>

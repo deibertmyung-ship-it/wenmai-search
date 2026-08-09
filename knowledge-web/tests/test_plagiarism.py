@@ -199,6 +199,7 @@ def test_submit_page_renders_the_form_and_history(
     assert 'aria-label="查重导航"' in body
     assert 'href="#submit-check"' in body
     assert 'href="#check-history"' in body
+    assert 'rows="7"' in body
 
 
 @respx.mock

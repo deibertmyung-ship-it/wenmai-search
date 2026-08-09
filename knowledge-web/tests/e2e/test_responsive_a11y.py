@@ -79,6 +79,11 @@ def test_search_button_is_visible_without_scrolling_the_filter_rail(
     box = button.bounding_box()
     assert box["y"] + box["height"] <= 720
 
+    disclosure = page.locator("details.rail-disclosure")
+    expect(disclosure).not_to_have_attribute("open", "")
+    disclosure.locator("summary").click()
+    expect(disclosure).to_have_attribute("open", "")
+
 
 def test_library_directory_groups_are_collapsible(page: Page, live_server: str):
     page.set_viewport_size({"width": 1024, "height": 900})

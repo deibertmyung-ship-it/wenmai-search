@@ -31,6 +31,8 @@ def test_landing_page_renders_without_a_query(client, sources_payload, document_
     # The primary action must be reachable before the long advanced-filter
     # list; this is the regression that prompted the sidebar redesign.
     assert body.index("search-rail__submit") < body.index("范围与策略")
+    assert '<details class="rail-disclosure">' in body
+    assert '<details class="rail-disclosure" open>' not in body
 
 
 @respx.mock
@@ -321,6 +323,8 @@ def test_ingest_page_has_a_no_script_step_sidebar(client, sources_payload):
     assert 'href="#create-source"' in body
     assert 'href="#upload-file"' in body
     assert 'href="#ingest-path"' in body
+    assert 'class="sidebar-metric"' in body
+    assert "当前可选目录" in body
 
 
 @respx.mock
