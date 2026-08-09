@@ -611,6 +611,10 @@ mark {
 .reader__title { font-family: var(--font-kai); font-size: var(--text-2xl);
                  color: var(--ink-strong); margin: 0 0 var(--space-2); line-height: var(--leading-tight); }
 .reader__sub { font-size: var(--text-sm); color: var(--ink-soft); margin: 0; }
+.reader__notice {
+  margin: 0 0 var(--space-5); padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--seal); background: var(--seal-wash); color: var(--ink-soft);
+}
 
 .chunk { display: grid; grid-template-columns: 3.5rem minmax(0, 1fr);
          gap: var(--space-4); padding: var(--space-4) 0; scroll-margin-top: var(--space-8); }
@@ -646,6 +650,11 @@ mark {
   display: flex; align-items: baseline; gap: var(--space-3);
   border-bottom: 2px solid var(--ink-strong); padding-bottom: var(--space-2);
   margin-bottom: var(--space-3); cursor: pointer; list-style: none;
+}
+.reader__hit {
+  background: var(--seal-wash); color: var(--ink-strong);
+  border-bottom: 2px solid var(--seal); scroll-margin-top: calc(var(--space-8) + 4rem);
+  box-decoration-break: clone; -webkit-box-decoration-break: clone;
 }
 .shelf__source::-webkit-details-marker { display: none; }
 .shelf__source::after {

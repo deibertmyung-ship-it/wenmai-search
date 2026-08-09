@@ -137,6 +137,21 @@ class KbClient:
             or []
         )
 
+    def get_passage_window(
+        self,
+        document_id: str,
+        *,
+        version: int,
+        start: int,
+        end: int,
+        context: int = 2,
+    ) -> dict:
+        return self._request(
+            "GET",
+            f"/v1/documents/{document_id}/passage-window",
+            params={"version": version, "start": start, "end": end, "context": context},
+        )
+
     def reindex_document(self, document_id: str) -> dict:
         return self._request("POST", f"/v1/documents/{document_id}/reindex")
 

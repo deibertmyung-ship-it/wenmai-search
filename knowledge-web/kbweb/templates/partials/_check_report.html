@@ -66,8 +66,13 @@
                   <p class="passage__missing">来源正文未预取。</p>
                 {% endif %}
                 <p>
-                  <a class="btn btn--ghost btn--sm"
-                     href="{{ url_for('library.read', document_id=source.document_id) }}">到书里看 →</a>
+                  {% if source.version is defined and source.version is not none and passage.source_start is defined and passage.source_start is not none and passage.source_end is defined and passage.source_end is not none %}
+                    <a class="btn btn--ghost btn--sm"
+                       href="{{ url_for('library.read', document_id=source.document_id, version=source.version, hit_start=passage.source_start, hit_end=passage.source_end, _anchor='match') }}">到书里看 →</a>
+                  {% else %}
+                    <a class="btn btn--ghost btn--sm"
+                       href="{{ url_for('library.read', document_id=source.document_id) }}">到书里看 →</a>
+                  {% endif %}
                 </p>
               </div>
             </details>

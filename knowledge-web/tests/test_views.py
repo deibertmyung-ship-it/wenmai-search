@@ -236,6 +236,72 @@ def test_reader_keeps_a_no_js_next_page_link(client, document_payload, chunks_pa
     assert "from=3" in body  # page_size is 3 in the test config
 
 
+@respx.mock
+def test_reader_renders_a_historical_passage_mark(client, document_payload):
+    respx.get(f"{API_BASE}/v1/documents/doc-1111-2222").mock(
+        return_value=httpx.Response(200, json=document_payload)
+    )
+    passage = {
+        "document_id": "doc-1111-2222",
+        "version_id": "ver-3",
+        "version": 3,
+        "requested_start": 102,
+        "requested_end": 106,
+        "focus_ordinal": 2,
+        "from_ordinal": 1,
+        "next_from": 4,
+        "has_more": False,
+        "exact": True,
+        "chunks": [
+            {
+                "chunk_id": "chunk-2",
+                "document_id": "doc-1111-2222",
+                "version_id": "ver-3",
+                "ordinal": 2,
+                "kind": "text",
+                "text": "历史命中正文",
+                "token_count": 6,
+                "char_start": 100,
+                "char_end": 106,
+                "page_from": None,
+                "page_to": None,
+                "heading_path": ["卷一"],
+                "content_hash": "h3",
+                "highlights": [
+                    {"local_start": 2, "local_end": 6, "document_start": 102, "document_end": 106}
+                ],
+            }
+        ],
+    }
+    route = respx.get(
+        f"{API_BASE}/v1/documents/doc-1111-2222/passage-window"
+    ).mock(return_value=httpx.Response(200, json=passage))
+
+    body = html(
+        client.get(
+            "/read/doc-1111-2222?version=3&hit_start=102&hit_end=106#match"
+        )
+    )
+
+    assert route.called
+    assert 'id="match"' in body
+    assert ">命中正文</mark>" in body
+    assert "检测快照版本 3" in body
+    assert "version=3" in body
+
+
+@respx.mock
+def test_chunks_proxy_preserves_the_historical_version(client, chunks_payload):
+    route = respx.get(f"{API_BASE}/v1/documents/doc-1111-2222/chunks").mock(
+        return_value=httpx.Response(200, json=chunks_payload)
+    )
+
+    response = client.get("/api/chunks/doc-1111-2222?from=3&limit=3&version=3")
+
+    assert response.status_code == 200
+    assert route.calls.last.request.url.params["version"] == "3"
+
+
 # --- library ------------------------------------------------------------
 
 

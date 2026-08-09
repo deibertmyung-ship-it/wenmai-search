@@ -103,12 +103,11 @@ def test_get_passage_window_forwards_frozen_version_and_offsets():
         "doc-1111-2222", version=3, start=12580, end=12624, context=2
     )
 
-    assert route.calls.last.request.url.params == {
-        "version": "3",
-        "start": "12580",
-        "end": "12624",
-        "context": "2",
-    }
+    params = route.calls.last.request.url.params
+    assert params["version"] == "3"
+    assert params["start"] == "12580"
+    assert params["end"] == "12624"
+    assert params["context"] == "2"
     api.close()
 
 
@@ -759,6 +758,7 @@ def test_passage_cards_show_both_sides(client, chunks_payload):
     assert "1 个来源文档" in body
     assert "夫天地者，万物之逆旅也" in body   # the query-side preview
     assert "到书里看" in body
+    assert "/read/doc-1111-2222?version=1&amp;hit_start=100&amp;hit_end=111#match" in body
 
 
 @respx.mock

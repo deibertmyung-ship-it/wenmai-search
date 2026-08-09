@@ -18,7 +18,11 @@ def chunks(document_id: str):
     config = settings()
     start = as_int(request.args.get("from"), 0, low=0, high=1_000_000)
     limit = as_int(request.args.get("limit"), config.reader_page_size, low=1, high=50)
-    rows = client().get_chunks(document_id, from_ordinal=start, limit=limit)
+    version_raw = request.args.get("version")
+    version = int(version_raw) if version_raw and version_raw.isdigit() else None
+    rows = client().get_chunks(
+        document_id, from_ordinal=start, limit=limit, version=version
+    )
     return jsonify({"chunks": rows, "next_from": start + limit, "has_more": len(rows) == limit})
 
 

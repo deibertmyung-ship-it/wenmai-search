@@ -8,16 +8,22 @@
          data-next-from="{{ next_from }}"
          data-has-more="{{ 'true' if has_more else 'false' }}"
          data-page-size="{{ page_size }}"
-         data-chunks-url="{{ url_for('api.chunks', document_id=document.id) }}">
+         data-chunks-url="{{ url_for('api.chunks', document_id=document.id, version=reader_version) if reader_version is not none else url_for('api.chunks', document_id=document.id) }}"
+         {% if reader_version is not none %}data-version="{{ reader_version }}"{% endif %}>
 
   <header class="reader__head">
     <h1 class="reader__title">{{ document.title }}</h1>
     <p class="reader__sub">
-      共 {{ document.chunk_count }} 段 · 版本 {{ document.version_count }} ·
+      共 {{ document.chunk_count }} 段 ·
+      {% if reader_version is not none %}检测快照版本 {{ reader_version }}{% else %}版本 {{ document.version_count }}{% endif %} ·
       <a href="{{ url_for('library.document', document_id=document.id) }}">详情</a> ·
       <a href="{{ url_for('search.index', q='', source_id=document.source_id) }}">在本目录中检索</a>
     </p>
   </header>
+
+  {% if reader_error %}
+    <div class="reader__notice" role="status">{{ reader_error }}</div>
+  {% endif %}
 
   <div data-chunks>
     {% set ns = namespace(last_heading=None) %}
@@ -32,7 +38,13 @@
             <p class="chunk__heading">{{ crumb }}</p>
           {% endif %}
           {% set ns.last_heading = crumb if chunk.heading_path else ns.last_heading %}
-          <p class="chunk__text">{{ chunk.text }}</p>
+          <p class="chunk__text">
+            {% if chunk.fragments %}
+              {% for fragment in chunk.fragments %}
+                {% if fragment.highlighted %}<mark class="reader__hit"{% if fragment.anchor %} id="match"{% endif %}>{{ fragment.text }}</mark>{% else %}{{ fragment.text }}{% endif %}
+              {% endfor %}
+            {% else %}{{ chunk.text }}{% endif %}
+          </p>
         </div>
       </section>
     {% else %}
@@ -48,7 +60,7 @@
   {% if has_more %}
     <div class="reader__more" data-more>
       <a class="btn btn--ghost"
-         href="{{ url_for('library.read', document_id=document.id, **{'from': next_from}) }}">
+         href="{{ url_for('library.read', document_id=document.id, **({'from': next_from, 'version': reader_version} if reader_version is not none else {'from': next_from})) }}">
         续读下一段
       </a>
     </div>
@@ -57,7 +69,7 @@
   {% if start > 0 %}
     <div class="reader__more">
       <a class="btn btn--ghost"
-         href="{{ url_for('library.read', document_id=document.id, **{'from': [start - page_size, 0] | max}) }}">
+         href="{{ url_for('library.read', document_id=document.id, **({'from': [start - page_size, 0] | max, 'version': reader_version} if reader_version is not none else {'from': [start - page_size, 0] | max})) }}">
         返回上一段
       </a>
     </div>

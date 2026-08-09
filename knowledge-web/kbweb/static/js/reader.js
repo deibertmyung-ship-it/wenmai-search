@@ -27,6 +27,10 @@
   button.textContent = '续读下一段';
   moreBox.replaceChildren(button);
 
+  function pageUrl(from) {
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'from=' + from + '&limit=' + pageSize;
+  }
+
   function render(chunk) {
     var section = document.createElement('section');
     section.className = 'chunk';
@@ -65,7 +69,7 @@
     button.disabled = true;
     button.textContent = '读取中…';
 
-    fetch(url + '?from=' + nextFrom + '&limit=' + pageSize, {
+    fetch(pageUrl(nextFrom), {
       headers: { Accept: 'application/json' }
     })
       .then(function (response) {
@@ -88,7 +92,7 @@
         // Fall back to full-page navigation rather than stranding the reader.
         var link = document.createElement('a');
         link.className = 'btn btn--ghost';
-        link.href = '?from=' + nextFrom;
+        link.href = pageUrl(nextFrom);
         link.textContent = '续读下一段';
         moreBox.replaceChildren(link);
       })

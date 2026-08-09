@@ -8,6 +8,7 @@ import uuid
 from flask import Blueprint, redirect, render_template, request, url_for
 
 from ..errors import BackendError, BackendUnavailable
+from ..reader import decorate_chunks
 from ._common import as_int, client, settings
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,13 @@ def read(document_id: str):
     api = client()
     start = as_int(request.args.get("from"), 0, low=0, high=1_000_000)
     focus = request.args.get("focus")
+    version_raw = request.args.get("version")
+    version = int(version_raw) if version_raw and version_raw.isdigit() else None
+    hit_start_raw = request.args.get("hit_start")
+    hit_end_raw = request.args.get("hit_end")
+    hit_mode = hit_start_raw is not None or hit_end_raw is not None
+    hit_start = int(hit_start_raw) if hit_start_raw and hit_start_raw.isdigit() else None
+    hit_end = int(hit_end_raw) if hit_end_raw and hit_end_raw.isdigit() else None
 
     # A search hit deep in a book links here with ?focus=N. Opening at ordinal 0
     # would strand the reader at the top with nothing highlighted, so centre the
@@ -98,18 +106,60 @@ def read(document_id: str):
         start = max(focus_ordinal - READER_LEAD_IN, 0)
 
     doc = api.get_document(document_id)
-    chunks = api.get_chunks(document_id, from_ordinal=start, limit=config.reader_page_size)
-    has_more = len(chunks) == config.reader_page_size
+    reader_error = None
+    focus_ordinal = int(focus) if (focus or "").isdigit() else None
+    if hit_mode and (version is None or hit_start is None or hit_end is None):
+        reader_error = "链接中的历史版本或命中坐标无效，无法精确定位。"
+        chunks = []
+        has_more = False
+        next_from = 0
+    elif hit_mode:
+        try:
+            window = api.get_passage_window(
+                document_id,
+                version=version,
+                start=hit_start,
+                end=hit_end,
+                context=READER_LEAD_IN,
+            )
+            chunks = window.get("chunks") or []
+            chunks = decorate_chunks(chunks)
+            start = int(window.get("from_ordinal", start))
+            next_from = int(window.get("next_from", start + len(chunks)))
+            has_more = bool(window.get("has_more"))
+            focus_ordinal = int(window["focus_ordinal"])
+        except BackendError as exc:
+            if exc.code not in {"passage_location_unavailable", "version_not_found"}:
+                raise
+            reader_error = "该检测版本的正文已无法精确定位，您仍可打开该版本的普通阅读内容。"
+            chunks = api.get_chunks(
+                document_id, from_ordinal=0, limit=config.reader_page_size, version=version
+            )
+            start = 0
+            next_from = config.reader_page_size
+            has_more = len(chunks) == config.reader_page_size
+    else:
+        chunks = api.get_chunks(
+            document_id,
+            from_ordinal=start,
+            limit=config.reader_page_size,
+            version=version,
+        )
+        next_from = start + config.reader_page_size
+        has_more = len(chunks) == config.reader_page_size
 
     return render_template(
         "reader.html",
         document=doc,
         chunks=chunks,
         start=start,
-        next_from=start + config.reader_page_size,
+        next_from=next_from,
         has_more=has_more,
         focus=focus_ordinal,
         page_size=config.reader_page_size,
+        reader_version=version,
+        hit_mode=hit_mode,
+        reader_error=reader_error,
     )
 
 
