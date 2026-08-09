@@ -6,20 +6,53 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ...access import document_is_visible
 from ...db import repo
 from ...db.models import Chunk, Document, DocumentVersion
 from ...errors import NotFoundError
 from ...ingest.uploader import enqueue_delete, enqueue_reindex
+from ...reading import PassageLocator
 from ..auth import Principal
 from ..deps import get_principal, get_session
-from ..schemas import ChunkOut, DocumentOut
+from ..schemas import (
+    ChunkOut,
+    DocumentOut,
+    HighlightRangeOut,
+    PassageChunkOut,
+    PassageWindowOut,
+)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
-def _load_document(session: Session, tenant_id: str, document_id: str) -> Document:
+def _chunk_payload(chunk: Chunk) -> dict:
+    return {
+        "chunk_id": chunk.id,
+        "document_id": chunk.document_id,
+        "version_id": chunk.version_id,
+        "ordinal": chunk.ordinal,
+        "kind": chunk.kind,
+        "text": chunk.text,
+        "token_count": chunk.token_count,
+        "char_start": chunk.char_start,
+        "char_end": chunk.char_end,
+        "page_from": chunk.page_from,
+        "page_to": chunk.page_to,
+        "heading_path": list(chunk.heading_path or []),
+        "content_hash": chunk.content_hash,
+    }
+
+
+def _load_document(
+    session: Session, tenant_id: str, document_id: str, allowed_acl: list[str] | None = None
+) -> Document:
     document = session.get(Document, document_id)
-    if document is None or document.tenant_id != tenant_id or document.deleted_at is not None:
+    if (
+        document is None
+        or document.tenant_id != tenant_id
+        or document.deleted_at is not None
+        or not document_is_visible(document.acl, allowed_acl)
+    ):
         raise NotFoundError("document not found", {"document_id": document_id})
     return document
 
@@ -101,7 +134,9 @@ def get_document(
     principal: Principal = Depends(get_principal),
     session: Session = Depends(get_session),
 ) -> DocumentOut:
-    return _to_out(session, _load_document(session, principal.tenant_id, document_id))
+    return _to_out(
+        session, _load_document(session, principal.tenant_id, document_id, principal.acl)
+    )
 
 
 @router.get("/{document_id}/chunks")
@@ -113,7 +148,7 @@ def get_chunks(
     principal: Principal = Depends(get_principal),
     session: Session = Depends(get_session),
 ) -> list[ChunkOut]:
-    document = _load_document(session, principal.tenant_id, document_id)
+    document = _load_document(session, principal.tenant_id, document_id, principal.acl)
     version_id = document.current_version_id
     if version is not None:
         row = session.scalars(
@@ -152,6 +187,55 @@ def get_chunks(
     ]
 
 
+@router.get("/{document_id}/passage-window")
+def get_passage_window(
+    document_id: str,
+    version: int = Query(..., ge=1),
+    start: int = Query(..., ge=0),
+    end: int = Query(..., gt=0),
+    context: int = Query(default=2, ge=0, le=10),
+    principal: Principal = Depends(get_principal),
+    session: Session = Depends(get_session),
+) -> PassageWindowOut:
+    window = PassageLocator().locate(
+        session,
+        tenant_id=principal.tenant_id,
+        document_id=document_id,
+        version=version,
+        start=start,
+        end=end,
+        context=context,
+        allowed_acl=principal.acl,
+    )
+    return PassageWindowOut(
+        document_id=window.document_id,
+        version_id=window.version_id,
+        version=window.version,
+        requested_start=window.requested_start,
+        requested_end=window.requested_end,
+        focus_ordinal=window.focus_ordinal,
+        from_ordinal=window.from_ordinal,
+        next_from=window.next_from,
+        has_more=window.has_more,
+        exact=True,
+        chunks=[
+            PassageChunkOut(
+                **_chunk_payload(item.chunk),
+                highlights=[
+                    HighlightRangeOut(
+                        local_start=highlight.local_start,
+                        local_end=highlight.local_end,
+                        document_start=highlight.document_start,
+                        document_end=highlight.document_end,
+                    )
+                    for highlight in item.highlights
+                ],
+            )
+            for item in window.chunks
+        ],
+    )
+
+
 @router.post("/{document_id}/reindex", status_code=202)
 def reindex_document(
     document_id: str,
@@ -163,7 +247,7 @@ def reindex_document(
     This is the path to take after changing the embedding model or chunk sizes -
     no re-upload needed, because the raw file is still in object storage.
     """
-    document = _load_document(session, principal.tenant_id, document_id)
+    document = _load_document(session, principal.tenant_id, document_id, principal.acl)
     if not document.current_version_id:
         raise NotFoundError("document has no indexed version", {"document_id": document_id})
     job_id = enqueue_reindex(
@@ -181,6 +265,6 @@ def delete_document(
     principal: Principal = Depends(get_principal),
     session: Session = Depends(get_session),
 ) -> dict:
-    document = _load_document(session, principal.tenant_id, document_id)
+    document = _load_document(session, principal.tenant_id, document_id, principal.acl)
     job_id = enqueue_delete(session, tenant_id=principal.tenant_id, document_id=document.id)
     return {"job_id": job_id, "document_id": document.id, "state": "pending"}

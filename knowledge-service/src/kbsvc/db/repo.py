@@ -242,6 +242,55 @@ def fetch_chunks(
     return list(session.scalars(stmt))
 
 
+def find_chunks_overlapping(
+    session: Session,
+    *,
+    version_id: str,
+    start: int,
+    end: int,
+    limit: int = 201,
+) -> list[Chunk]:
+    """Fetch only chunks intersecting a document-global half-open range."""
+
+    stmt = (
+        select(Chunk)
+        .where(
+            Chunk.version_id == version_id,
+            Chunk.char_end > start,
+            Chunk.char_start < end,
+        )
+        .order_by(Chunk.ordinal)
+        .limit(limit)
+    )
+    return list(session.scalars(stmt))
+
+
+def fetch_chunk_ordinal_window(
+    session: Session,
+    *,
+    version_id: str,
+    first_ordinal: int,
+    last_ordinal: int,
+) -> list[Chunk]:
+    """Fetch a bounded context window using the version/ordinal index."""
+
+    stmt = (
+        select(Chunk)
+        .where(
+            Chunk.version_id == version_id,
+            Chunk.ordinal >= first_ordinal,
+            Chunk.ordinal <= last_ordinal,
+        )
+        .order_by(Chunk.ordinal)
+    )
+    return list(session.scalars(stmt))
+
+
+def has_chunks_after(session: Session, *, version_id: str, ordinal: int) -> bool:
+    stmt = select(Chunk.id).where(Chunk.version_id == version_id, Chunk.ordinal > ordinal).limit(1)
+    return session.scalar(stmt) is not None
+
+
 # --- jobs ---------------------------------------------------------------
 
 

@@ -21,6 +21,20 @@ class NotFoundError(KbError):
     http_status = 404
 
 
+class VersionNotFoundError(NotFoundError):
+    code = "version_not_found"
+
+
+class InvalidPassageRangeError(KbError):
+    code = "invalid_passage_range"
+    http_status = 422
+
+
+class PassageLocationUnavailableError(KbError):
+    code = "passage_location_unavailable"
+    http_status = 409
+
+
 class ValidationError(KbError):
     code = "validation_error"
     http_status = 400

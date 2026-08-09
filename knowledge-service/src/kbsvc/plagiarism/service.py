@@ -12,6 +12,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from .. import ids
+from ..access import document_is_visible
 from ..config import Settings, get_settings
 from ..db.models import Document
 from ..errors import KbError, NotFoundError, ValidationError
@@ -93,10 +94,9 @@ class CheckNotFoundError(NotFoundError):
     code = "plagiarism_check_not_found"
 
 
-def _acl_allows(document_acl: list | None, allowed: set[str]) -> bool:
-    """Existing ACL semantics: overlap with the caller, or explicitly public."""
-    tags = set(document_acl or ["public"])
-    return bool(tags & allowed) or "public" in tags
+# Kept as a compatibility alias for existing plagiarism tests/imports. The
+# documents and plagiarism read paths now share one visibility implementation.
+_acl_allows = document_is_visible
 
 
 class PlagiarismService:

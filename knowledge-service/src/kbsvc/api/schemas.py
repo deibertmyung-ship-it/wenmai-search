@@ -113,6 +113,31 @@ class ChunkOut(BaseModel):
     content_hash: str
 
 
+class HighlightRangeOut(BaseModel):
+    local_start: int
+    local_end: int
+    document_start: int
+    document_end: int
+
+
+class PassageChunkOut(ChunkOut):
+    highlights: list[HighlightRangeOut]
+
+
+class PassageWindowOut(BaseModel):
+    document_id: str
+    version_id: str
+    version: int
+    requested_start: int
+    requested_end: int
+    focus_ordinal: int
+    from_ordinal: int
+    next_from: int
+    has_more: bool
+    exact: bool
+    chunks: list[PassageChunkOut]
+
+
 class StatsOut(BaseModel):
     tenant_id: str
     sources: int
