@@ -129,6 +129,34 @@ def test_passage_window_rejects_an_empty_half_open_range(api_client, indexed_cor
     assert response.json()["error"]["code"] == "invalid_passage_range"
 
 
+def test_passage_window_returns_exact_local_ranges(api_client, indexed_corpus):
+    chunks = api_client.get(
+        f"/v1/documents/{indexed_corpus['document_id']}/chunks", params={"limit": 50}
+    ).json()
+    target = next(
+        chunk
+        for chunk in chunks
+        if chunk["char_end"] == chunk["char_start"] + len(chunk["text"])
+        and len(chunk["text"]) >= 4
+    )
+    start = target["char_start"] + 1
+    end = start + 3
+
+    response = api_client.get(
+        f"/v1/documents/{indexed_corpus['document_id']}/passage-window",
+        params={"version": 1, "start": start, "end": end, "context": 1},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["exact"] is True
+    assert payload["version"] == 1
+    marks = [mark for chunk in payload["chunks"] for mark in chunk["highlights"]]
+    assert marks
+    assert marks[0]["document_start"] == start
+    assert marks[0]["document_end"] == end
+
+
 def test_unknown_document_returns_the_error_envelope(api_client):
     response = api_client.get("/v1/documents/00000000-0000-0000-0000-000000000000")
     assert response.status_code == 404

@@ -323,6 +323,42 @@ class FakeKbClient:
             for i in range(from_ordinal, end)
         ]
 
+    def get_passage_window(
+        self,
+        document_id: str,
+        *,
+        version: int,
+        start: int,
+        end: int,
+        context: int = 2,
+    ) -> dict:
+        chunks = [
+            _chunk(i, document_id=document_id, version=version)
+            for i in range(max(0, 0 - context), min(context + 1, TOTAL_CHUNKS))
+        ]
+        chunks[0]["highlights"] = [
+            {
+                "local_start": start,
+                "local_end": end,
+                "document_start": start,
+                "document_end": end,
+            }
+        ]
+        chunks[0]["text"] = "夫天地者，万物之逆旅也。贼克者，取用之首法也。"
+        return {
+            "document_id": document_id,
+            "version_id": f"ver-{version}",
+            "version": version,
+            "requested_start": start,
+            "requested_end": end,
+            "focus_ordinal": 0,
+            "from_ordinal": 0,
+            "next_from": len(chunks),
+            "has_more": len(chunks) < TOTAL_CHUNKS,
+            "exact": True,
+            "chunks": chunks,
+        }
+
     def reindex_document(self, document_id: str) -> dict:
         return {"job_id": "job-reindex", "document_id": document_id, "state": "pending"}
 

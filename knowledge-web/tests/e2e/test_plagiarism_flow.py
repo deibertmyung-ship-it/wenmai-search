@@ -89,3 +89,20 @@ def test_sse_failure_falls_back_to_the_report(page, live_server):
         assert "57.9%" in page.inner_text(".verdict__figure")
     finally:
         _reset_state()
+
+
+def test_report_source_button_opens_and_highlights_the_frozen_passage(page, live_server):
+    _reset_state()
+    _CHECK_STATE["done"] = True
+    try:
+        page.goto(f"{live_server}/plagiarism/checks/chk-e2e")
+        page.wait_for_selector(".passage__summary")
+        page.locator(".passage__summary").first.click()
+        page.locator('a[href*="hit_start"]').first.click()
+        page.wait_for_url("**/read/doc-1111-2222?version=1&hit_start=0&hit_end=11#match")
+        mark = page.locator("#match")
+        assert mark.count() == 1
+        assert mark.is_visible()
+        assert "夫天地者" in mark.inner_text()
+    finally:
+        _reset_state()
