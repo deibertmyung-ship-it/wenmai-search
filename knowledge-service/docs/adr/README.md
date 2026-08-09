@@ -14,12 +14,14 @@
 | [0004](0004-additive-column-migration-without-a-framework.md) | 加列迁移写在 init_db 中，不引入迁移框架 | Accepted | 2026-08-07 |
 | [0005](0005-pushdown-document-filter-instead-of-post-fusion.md) | 书名筛选先解析为 document_ids 再下推 | Accepted | 2026-08-07 |
 | [0006](0006-return-owner-query-text-in-plagiarism-report.md) | 报告接口向检测创建者回显查询侧原文（`ReportOut.query_text`） | Accepted | 2026-08-08 |
+| [0007](0007-vector-recall-for-plagiarism-candidate-retrieval.md) | 抄袭检测候选检索引入向量召回 | Proposed | 2026-08-09 |
 
 ## 关联
 
 - 0002 与 0003 都指向同一个缺口：**项目没有检索质量评测集**。排序相关的调优（reranker、`retrieval_overfetch`、`rewrite`、RRF 权重）目前都无法量化验证。0003 之所以选择「打分完全等价」的方案而放弃更快的替代，正是因为这个缺口。
 - 0003 的加列需求触发了 0004。
 - 0004 与 0001 都把「引入正式 migration 工具」列为后续决策，应合并考虑。
+- 0007 依赖 0002 的实测数据确认 embedding ≠ cross-encoder 的算力约束差异，并复用 0001 建立的投影生命周期管理框架。0007 的验证要求同样指向**检索质量评测集**这一共同缺口。
 
 ## 格式
 
