@@ -60,6 +60,9 @@ def test_scripts_are_emitted_only_when_javascript_is_enabled(
     _stub_everything(sources_payload, document_payload, jobs_payload)
     body = html(client.get(path))
     assert ("<script" in body) is not config.nojs
+    if path == "/library":
+        assert ("library-filter.js" in body) is not config.nojs
+        assert 'library-filter__submit' in body
 
 
 @respx.mock

@@ -209,6 +209,7 @@ select:focus-visible, textarea:focus-visible {
 
 .workspace__rail .field { margin-bottom: 0; }
 .sidebar-form .btn { justify-self: start; }
+[data-library-filter][data-auto-submit-ready] .library-filter__submit { display: none; }
 
 .rail-disclosure {
   border-top: var(--rule);

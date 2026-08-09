@@ -22,10 +22,20 @@ READER_LEAD_IN = 2
 def shelf():
     query = (request.args.get("q") or "").strip()
     source_id = (request.args.get("source_id") or "").strip()
+    document_id = (request.args.get("document_id") or "").strip()
     api = client()
 
     sources = api.list_sources()
-    documents = api.list_documents(source_id=source_id or None, q=query or None, limit=500)
+    filter_documents = api.list_documents(source_id=source_id or None, limit=500)
+    documents = (
+        [document for document in filter_documents if document["id"] == document_id]
+        if document_id
+        else (
+            filter_documents
+            if not query
+            else api.list_documents(source_id=source_id or None, q=query, limit=500)
+        )
+    )
 
     by_source: dict[str, list[dict]] = {}
     for document in documents:
@@ -36,6 +46,14 @@ def shelf():
         for source in sources
         if by_source.get(source["id"]) or not (query or source_id)
     ]
+    filter_by_source: dict[str, list[dict]] = {}
+    for document in filter_documents:
+        filter_by_source.setdefault(document["source_id"], []).append(document)
+    filter_groups = [
+        {"source": source, "documents": filter_by_source.get(source["id"], [])}
+        for source in sources
+        if filter_by_source.get(source["id"])
+    ]
     try:
         stats = api.stats()
     except (BackendError, BackendUnavailable):
@@ -45,9 +63,10 @@ def shelf():
     return render_template(
         "library.html",
         groups=groups,
+        filter_groups=filter_groups,
         sources=sources,
         stats=stats,
-        form={"q": query, "source_id": source_id},
+        form={"q": query, "source_id": source_id, "document_id": document_id},
     )
 
 

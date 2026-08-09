@@ -7,26 +7,36 @@
     <p class="workspace__eyebrow">书库导航</p>
     <p class="workspace__intro">按书名或目录缩小范围，目录中的书架可独立展开、收起。</p>
 
-    <form method="get" class="sidebar-form">
+    <form method="get" class="sidebar-form" data-library-filter>
       {% if form.source_id %}<input type="hidden" name="source_id" value="{{ form.source_id }}">{% endif %}
-      <label class="rail__label" for="lib-q">按书名筛选</label>
-      <input class="field field--sm" type="search" id="lib-q" name="q" value="{{ form.q }}"
-             placeholder="六壬">
-      <button class="btn btn--ghost btn--sm" type="submit">筛选</button>
+      <label class="rail__label" for="lib-document">按书名筛选</label>
+      <select class="field field--sm" id="lib-document" name="document_id" data-library-title-filter>
+        <option value="">{% if form.source_id %}当前目录全部书名{% else %}全部书名{% endif %}</option>
+        {% for group in filter_groups %}
+          <optgroup label="{{ group.source.name }}">
+            {% for document in group.documents %}
+              <option value="{{ document.id }}" {% if form.document_id == document.id %}selected{% endif %}>
+                {{ document.title }}
+              </option>
+            {% endfor %}
+          </optgroup>
+        {% endfor %}
+      </select>
+      <button class="btn btn--ghost btn--sm library-filter__submit" type="submit">筛选</button>
     </form>
 
     <details class="rail-disclosure" open>
       <summary>目录 <span>{{ sources | length }}</span></summary>
       <ol class="sidebar-list">
         <li>
-          <a href="{{ url_for('library.shelf', q=form.q) }}"
+          <a href="{{ url_for('library.shelf') }}"
              {% if not form.source_id %}aria-current="page"{% endif %}>
             <span>全部目录</span>
           </a>
         </li>
         {% for source in sources %}
           <li>
-            <a href="{{ url_for('library.shelf', q=form.q, source_id=source.id) }}"
+            <a href="{{ url_for('library.shelf', source_id=source.id) }}"
                {% if form.source_id == source.id %}aria-current="page"{% endif %}>
               <span>{{ source.name }}</span><small>{{ source.document_count }}</small>
             </a>
@@ -77,4 +87,8 @@
     {% endfor %}
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/library-filter.js') }}" defer></script>
 {% endblock %}

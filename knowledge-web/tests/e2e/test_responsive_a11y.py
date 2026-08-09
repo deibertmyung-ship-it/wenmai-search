@@ -8,6 +8,7 @@ not assertions — the assertions here are the machine-checkable properties
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -92,6 +93,20 @@ def test_library_directory_groups_are_collapsible(page: Page, live_server: str):
     expect(group).to_have_attribute("open", "")
     group.locator("summary").click()
     expect(group).not_to_have_attribute("open", "")
+
+
+def test_library_title_selection_submits_automatically(page: Page, live_server: str):
+    page.goto(f"{live_server}/library")
+    title_filter = page.get_by_label("按书名筛选")
+
+    expect(title_filter).to_be_visible()
+    document_id = title_filter.locator("option:not([value=''])").first.get_attribute("value")
+    assert document_id
+    title_filter.select_option(value=document_id)
+    page.wait_for_url("**/library?*")
+
+    assert parse_qs(urlparse(page.url).query)["document_id"] == [document_id]
+    expect(page.locator(".library-filter__submit")).to_be_hidden()
 
 
 # --- accessibility ------------------------------------------------------

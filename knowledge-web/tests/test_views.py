@@ -267,6 +267,45 @@ def test_library_groups_documents_under_their_source(
     assert 'aria-label="书库目录"' in body
     assert 'class="shelf__group"' in body
     assert "source_id=src-1" in body
+    assert 'data-library-title-filter' in body
+    assert '<option value="doc-1111-2222"' in body
+    assert 'class="btn btn--ghost btn--sm library-filter__submit"' in body
+
+
+@respx.mock
+def test_library_document_filter_is_exact_and_options_remain_complete(
+    client, sources_payload, document_payload
+):
+    same_title = {
+        **document_payload,
+        "id": "doc-3333-4444",
+    }
+    longer_title = {
+        **document_payload,
+        "id": "doc-5555-6666",
+        "title": "六壬指南集解",
+    }
+
+    respx.get(f"{API_BASE}/v1/sources").mock(
+        return_value=httpx.Response(200, json=sources_payload)
+    )
+    respx.get(f"{API_BASE}/v1/documents").mock(
+        return_value=httpx.Response(
+            200,
+            json=[document_payload, same_title, longer_title],
+        )
+    )
+    respx.get(f"{API_BASE}/v1/stats").mock(return_value=httpx.Response(500, json={}))
+
+    body = html(client.get("/library?source_id=src-1&document_id=doc-1111-2222"))
+    select_start = body.index('<select class="field field--sm" id="lib-document"')
+    select = body[select_start : body.index("</select>", select_start)]
+
+    assert 'value="doc-1111-2222" selected' in select
+    assert 'value="doc-3333-4444"' in select
+    assert 'value="doc-5555-6666"' in select
+    assert body.count('class="book__title"') == 1
+    assert 'href="/library?source_id=src-1"' in body
 
 
 # --- jobs ---------------------------------------------------------------
