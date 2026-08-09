@@ -776,6 +776,8 @@ def test_a_source_disappearing_after_report_fetch_degrades_its_card(client):
     body = html(response)
     assert "来源已不可访问" in body
     assert "23.4%" in body      # the rest of the report still renders
+    assert "到书里看" not in body
+    assert "/read/doc-1111-2222" not in body
 
 
 @respx.mock

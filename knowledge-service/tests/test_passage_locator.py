@@ -58,3 +58,24 @@ def test_coordinate_length_mismatch_is_not_clamped() -> None:
     assert result.exact is False
     assert result.by_ordinal == {}
     assert result.uncovered == ((0, 3),)
+
+
+def test_known_projection_gap_is_not_treated_as_missing_source() -> None:
+    chunks = [span(4, "abcd", 0), span(5, "efgh", 6)]
+
+    result = resolve_highlights(chunks, start=2, end=8)
+
+    assert result.exact is True
+    assert result.uncovered == ()
+    assert result.projection_gaps == ((4, 6),)
+    assert result.by_ordinal[4][0].local_start == 2
+    assert result.by_ordinal[5][0].local_end == 2
+
+
+def test_passage_entirely_inside_projection_gap_is_unavailable() -> None:
+    chunks = [span(4, "abcd", 0), span(5, "efgh", 6)]
+
+    result = resolve_highlights(chunks, start=4, end=6)
+
+    assert result.exact is False
+    assert result.by_ordinal == {}

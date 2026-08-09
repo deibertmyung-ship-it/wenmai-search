@@ -53,6 +53,26 @@ Base: `/v1`。认证：`Authorization: Bearer <api_key>`（`KB_AUTH_REQUIRED=fal
 ### GET /v1/documents/{document_id}/chunks?from_ordinal=0&limit=20&version=
 返回连续 chunk（含 text 全文与追溯字段），用于取上下文。
 
+### GET /v1/documents/{document_id}/passage-window?version=1&start=100&end=111&context=2
+按历史版本的文档坐标解析一个来源段落，并返回可直接渲染的上下文窗口：
+
+```json
+{
+  "document_id": "…", "version": 1,
+  "from_ordinal": 8, "next_from": 12, "has_more": true,
+  "focus_ordinal": 9,
+  "chunks": [{
+    "ordinal": 9, "text": "…", "char_start": 96, "char_end": 120,
+    "highlights": [{"local_start": 4, "local_end": 15,
+                    "document_start": 100, "document_end": 111}]
+  }]
+}
+```
+
+`start`/`end` 是半开区间 `[start, end)`，必须完全落在可追溯的 chunk 文本中；
+服务端只高亮精确覆盖的字符，重叠 chunk 不会重复高亮。`version` 必须固定为报告
+保存的快照版本，不能省略后改读当前版本。接口同样执行文档 ACL 检查。
+
 ### GET /v1/documents?source_id=&q=&limit=&offset=
 ### GET /v1/documents/{document_id}
 ### POST /v1/documents/{document_id}/reindex → 202，入队 `reindex` job
@@ -202,6 +222,9 @@ data: {"check_id":"…","status":"…","progress":0.35,"detail":{},"created_at":
 | `plagiarism_concurrency_limit` | 429 | 该凭据活动任务超限（默认 2） |
 | `plagiarism_input_too_large` | 413 | 超过 `KB_PLAG_MAX_INPUT_CHARS`（默认 50 万） |
 | `plagiarism_check_not_found` | 404 | 不存在，或不属于调用方 |
+| `version_not_found` | 404 | 请求的历史版本不存在或不属于调用方 |
+| `invalid_passage_range` | 422 | `start`/`end`/`context` 超出约束 |
+| `passage_location_unavailable` | 409 | 该版本没有完整的可追溯文本覆盖该段落 |
 
 ## MCP 工具
 

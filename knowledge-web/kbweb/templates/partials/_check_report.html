@@ -43,7 +43,11 @@
         <li class="source" id="source-{{ source.ordinal }}">
           <p class="source__title">
             <span class="source__ordinal">{{ source.ordinal }}</span>
-            <a href="{{ url_for('library.read', document_id=source.document_id) }}">{{ source.title }}</a>
+            {% if source.fetch_error %}
+              <span>{{ source.title }}</span>
+            {% else %}
+              <a href="{{ url_for('library.read', document_id=source.document_id) }}">{{ source.title }}</a>
+            {% endif %}
           </p>
           <p class="source__meta">
             命中 {{ "{:,}".format(source.matched_chars) }} 字 · score {{ source.score | score(2) }} ·
@@ -66,7 +70,9 @@
                   <p class="passage__missing">来源正文未预取。</p>
                 {% endif %}
                 <p>
-                  {% if source.version is defined and source.version is not none and passage.source_start is defined and passage.source_start is not none and passage.source_end is defined and passage.source_end is not none %}
+                  {% if source.fetch_error %}
+                    <span class="passage__missing">来源不可访问，暂时无法定位。</span>
+                  {% elif source.version is defined and source.version is not none and passage.source_start is defined and passage.source_start is not none and passage.source_end is defined and passage.source_end is not none %}
                     <a class="btn btn--ghost btn--sm"
                        href="{{ url_for('library.read', document_id=source.document_id, version=source.version, hit_start=passage.source_start, hit_end=passage.source_end, _anchor='match') }}">到书里看 →</a>
                   {% else %}

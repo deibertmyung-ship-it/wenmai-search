@@ -42,6 +42,7 @@ class HighlightRange:
 class HighlightAllocation:
     by_ordinal: dict[int, tuple[HighlightRange, ...]]
     uncovered: tuple[tuple[int, int], ...]
+    projection_gaps: tuple[tuple[int, int], ...] = ()
 
     @property
     def exact(self) -> bool:
@@ -137,8 +138,37 @@ def resolve_highlights(
         for piece_start, piece_end in pieces:
             _merge_interval(covered, piece_start, piece_end)
 
-    uncovered = tuple(_subtract_interval(start, end, covered))
-    return HighlightAllocation(by_ordinal=by_ordinal, uncovered=uncovered)
+    uncovered = _subtract_interval(start, end, covered)
+    # ProjectionBuilder pads gaps between adjacent knowledge-base chunks with
+    # spaces to preserve absolute offsets.  Those synthetic characters have
+    # no source chunk to mark, but are explainable when both sides are valid
+    # neighbouring chunks.  Keep them separate from genuinely missing data.
+    known_gaps = [
+        (previous.char_end, current.char_start)
+        for previous, current in zip(ordered, ordered[1:], strict=False)
+        if (
+            previous.char_start >= 0
+            and previous.char_end == previous.char_start + len(previous.text)
+            and current.char_start >= 0
+            and current.char_end == current.char_start + len(current.text)
+            and previous.ordinal + 1 == current.ordinal
+            and previous.char_end < current.char_start
+        )
+    ]
+    explainable = [
+        interval
+        for interval in uncovered
+        if any(
+            gap_start <= interval[0] and interval[1] <= gap_end
+            for gap_start, gap_end in known_gaps
+        )
+    ]
+    unresolved = tuple(interval for interval in uncovered if interval not in explainable)
+    return HighlightAllocation(
+        by_ordinal=by_ordinal,
+        uncovered=unresolved,
+        projection_gaps=tuple(explainable),
+    )
 
 
 def _validate_range(start: int, end: int, context: int) -> None:
