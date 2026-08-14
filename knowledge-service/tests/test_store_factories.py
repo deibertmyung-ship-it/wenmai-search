@@ -1,8 +1,8 @@
 """The two store factories dispatch on KB_VECTOR_BACKEND / KB_LEXICAL_BACKEND.
 
 ADR-0008 keeps the old and new implementations side by side so the A/B gate can
-load both. Until the new ones land, every non-default switch value has to fail
-loudly at the factory rather than at the first query.
+load both. ``sqlite-vec`` is now implemented (ticket 03); backends that are not
+yet implemented must fail loudly at the factory rather than at the first query.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import pytest
 from kbsvc.config import reset_settings_cache
 from kbsvc.errors import KbError
 from kbsvc.lexical import TantivyLexicalStore, get_lexical_store, reset_lexical_store
-from kbsvc.vector import QdrantVectorStore, get_vector_store, reset_vector_store
+from kbsvc.vector import QdrantVectorStore, SqliteVecStore, get_vector_store, reset_vector_store
 
 _PG_URL = "postgresql+psycopg://kbsvc:secret@localhost:5432/kbsvc"
 
@@ -51,10 +51,17 @@ def test_stores_stay_singletons_until_reset() -> None:
     assert get_lexical_store() is get_lexical_store()
 
 
+def test_sqlite_vec_backend_builds_sqlite_vec_store(select_backend) -> None:
+    """sqlite-vec is implemented (ticket 03): the factory must return a
+    SqliteVecStore, not raise."""
+    select_backend(KB_VECTOR_BACKEND="sqlite-vec")
+    store = get_vector_store()
+    assert isinstance(store, SqliteVecStore)
+
+
 @pytest.mark.parametrize(
     ("env", "getter"),
     [
-        pytest.param({"KB_VECTOR_BACKEND": "sqlite-vec"}, get_vector_store, id="sqlite-vec"),
         pytest.param({"KB_LEXICAL_BACKEND": "fts5"}, get_lexical_store, id="fts5"),
         pytest.param(
             {"KB_VECTOR_BACKEND": "pgvector", "KB_PROFILE": "server", "KB_DATABASE_URL": _PG_URL},
@@ -80,11 +87,11 @@ def test_backends_without_an_implementation_fail_at_the_factory(
 def test_reset_rebuilds_the_vector_store_against_the_current_switch(select_backend) -> None:
     original = get_vector_store()
 
-    select_backend(KB_VECTOR_BACKEND="sqlite-vec")
+    select_backend(KB_VECTOR_BACKEND="pgvector", KB_PROFILE="server", KB_DATABASE_URL=_PG_URL)
     with pytest.raises(KbError):
         get_vector_store()
 
-    select_backend(KB_VECTOR_BACKEND="qdrant")
+    select_backend(KB_VECTOR_BACKEND="qdrant", KB_PROFILE="local")
     rebuilt = get_vector_store()
 
     assert isinstance(rebuilt, QdrantVectorStore)
@@ -106,7 +113,7 @@ def test_reset_rebuilds_the_lexical_store_against_the_current_switch(select_back
 
 
 def test_a_failed_build_leaves_no_half_initialised_singleton(select_backend) -> None:
-    select_backend(KB_VECTOR_BACKEND="sqlite-vec")
+    select_backend(KB_VECTOR_BACKEND="pgvector", KB_PROFILE="server", KB_DATABASE_URL=_PG_URL)
 
     with pytest.raises(KbError):
         get_vector_store()

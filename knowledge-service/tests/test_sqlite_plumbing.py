@@ -289,8 +289,13 @@ class TestTransactionalAtomicity:
                 ")"
             )
             vec_insert = (
-                "INSERT INTO chunk_vec(rowid, embedding, document_id, tenant) "
-                "VALUES (1, x'0000803f00000000', 'd1', 't')"
+                "INSERT INTO chunk_vec("
+                "rowid, embedding, chunk_id, document_id, version_id, "
+                "source_id, kind, is_current, tenant"
+                ") VALUES ("
+                "1, x'0000803f00000000', 'c1', 'd1', 'v1', "
+                "'s1', 'section', 1, 't'"
+                ")"
             )
             new_row = {
                 "chunk_id": "c1", "tenant_id": "t",

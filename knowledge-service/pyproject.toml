@@ -30,6 +30,10 @@ dependencies = [
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.2"]
 s3 = ["boto3>=1.35"]
+# KB_VECTOR_BACKEND=sqlite-vec (ADR-0008, local profile only). Optional so
+# deployments still on qdrant don't need it - see db/session.py's extension
+# loader for the runtime error a missing install produces.
+sqlite-vec = ["sqlite-vec>=0.1.9"]
 fastembed = ["fastembed>=0.4"]
 rerank = ["sentence-transformers>=3.3"]
 # Plagiarism detection (PostgreSQL-only, default-off - see ADR-0001).
