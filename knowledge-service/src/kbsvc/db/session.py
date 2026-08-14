@@ -25,6 +25,39 @@ _ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("chunk", "analyzed", "TEXT NOT NULL DEFAULT ''"),
 )
 
+# FTS5 virtual table DDL.  Created in `init_db` alongside the metadata tables
+# because it has no runtime-discovered dimension.  `unicode61` keeps contiguous
+# CJK characters as a single term (五行 stays one token), matching Tantivy's
+# whitespace analyser on pre-analysed text.
+_FTS5_DDL = (
+    "CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5("
+    "chunk_id UNINDEXED, tenant_id, document_id, source_id, kind, acl, "
+    "is_current, body, tokenize='unicode61'"
+    ")"
+)
+
+
+def _load_sqlite_vec_extension(dbapi_conn) -> None:
+    """Load the sqlite-vec extension onto *dbapi_conn*.
+
+    Called from the ``connect`` event listener on every new SQLite connection.
+    If ``sqlite_vec`` is not installed the error is actionable: it names the
+    package and the install command, rather than letting the first query fail
+    with an opaque ``no such module: vec0``.
+    """
+    try:
+        import sqlite_vec
+    except ImportError as exc:
+        raise RuntimeError(
+            "sqlite-vec extension is required for KB_VECTOR_BACKEND=sqlite-vec "
+            "but the Python package 'sqlite-vec' is not installed. "
+            "Install it with:  pip install sqlite-vec  "
+            f"(original error: {exc})"
+        ) from exc
+    dbapi_conn.enable_load_extension(True)
+    sqlite_vec.load(dbapi_conn)
+    dbapi_conn.enable_load_extension(False)
+
 
 def _make_engine(url: str) -> Engine:
     is_sqlite = url.startswith("sqlite")
@@ -33,6 +66,12 @@ def _make_engine(url: str) -> Engine:
         kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
     engine = create_engine(url, **kwargs)
     if is_sqlite:
+        # Whether to load sqlite-vec on each connection.  The extension is
+        # needed for KB_VECTOR_BACKEND=sqlite-vec; loading it unconditionally
+        # would make sqlite-vec a hard dependency for every local deployment,
+        # including those still on qdrant.  Read the switch once at engine
+        # creation - the listener runs per-connection and must stay cheap.
+        _load_vec = get_settings().vector_backend == "sqlite-vec"
 
         @event.listens_for(engine, "connect")
         def _set_sqlite_pragmas(dbapi_conn, _record):  # pragma: no cover - driver hook
@@ -41,6 +80,8 @@ def _make_engine(url: str) -> Engine:
             cursor.execute("PRAGMA synchronous=NORMAL")
             cursor.execute("PRAGMA busy_timeout=30000")
             cursor.close()
+            if _load_vec:
+                _load_sqlite_vec_extension(dbapi_conn)
 
     return engine
 
@@ -79,6 +120,10 @@ def init_db() -> None:
     engine = get_engine()
     Base.metadata.create_all(engine)
     _apply_additive_columns(engine)
+    # FTS5 virtual table: no runtime-discovered dimension, so it belongs here
+    # alongside the metadata tables.  Idempotent via IF NOT EXISTS.
+    with engine.begin() as conn:
+        conn.execute(text(_FTS5_DDL))
     tenant_id = get_settings().default_tenant
     with session_scope() as session:
         if session.get(Tenant, tenant_id) is None:

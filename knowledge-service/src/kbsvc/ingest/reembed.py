@@ -96,32 +96,33 @@ def reembed_tenant(
     documents: set[str] = set()
     last_id = resume_after or ""
 
-    # The lexical index commits once at the end, not per batch: committing on
-    # every batch makes tantivy merge segments while later batches are still
-    # writing, which on Windows races with an on-access scanner and kills the
-    # writer. If reembed is interrupted, the dense side resumes from
-    # `last_chunk_id` and the lexical side is rebuilt with `rebuild_lexical` -
-    # 20 seconds on a 22k-chunk corpus, so there is nothing to protect here.
-    with lexical.bulk():
-        while True:
-            with session_scope() as session:
-                rows = _next_batch(session, tenant_id, last_id, batch_size)
-                if not rows:
-                    break
-                points = _build_points(tenant_id, rows, dense)
-                last_id = rows[-1][0].id
+    # Commit per batch, not once at the end.  The original reason for a single
+    # deferred commit was Tantivy segment-merge contention (Windows on-access
+    # scanner kills the writer with PermissionDenied on .pos/.fieldnorm files
+    # when merge threads race the writer).  Under the SQLite single-file store
+    # (ADR-0008) there are no segment merges, and a single large commit would
+    # hold the write lock and block job-status updates.  If reembed is
+    # interrupted, the dense side resumes from `last_chunk_id` and the lexical
+    # side is rebuilt with `rebuild_lexical`.
+    while True:
+        with session_scope() as session:
+            rows = _next_batch(session, tenant_id, last_id, batch_size)
+            if not rows:
+                break
+            points = _build_points(tenant_id, rows, dense)
+            last_id = rows[-1][0].id
 
-            store.upsert(points)
-            lexical.upsert(
-                [
-                    LexicalDocument(id=point.id, text=point.payload["text"], payload=point.payload)
-                    for point in points
-                ]
-            )
-            done += len(points)
-            documents.update(point.payload["document_id"] for point in points)
-            if progress:
-                progress(already_done + done, total)
+        store.upsert(points)
+        lexical.upsert(
+            [
+                LexicalDocument(id=point.id, text=point.payload["text"], payload=point.payload)
+                for point in points
+            ]
+        )
+        done += len(points)
+        documents.update(point.payload["document_id"] for point in points)
+        if progress:
+            progress(already_done + done, total)
 
     with session_scope() as session:
         from ..db import repo
