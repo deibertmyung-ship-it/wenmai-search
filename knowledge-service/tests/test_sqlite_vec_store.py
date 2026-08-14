@@ -41,6 +41,34 @@ def _setup_store_env(monkeypatch, tmp_path: Path) -> str:
     return url
 
 
+@pytest.fixture(autouse=True)
+def _restore_global_environment(monkeypatch):
+    """Every test in this file points KB_DATABASE_URL/KB_DATA_DIR/
+    KB_VECTOR_BACKEND at a throwaway per-test database via `monkeypatch`.
+    That alone is not enough: `get_settings()`/`get_engine()` are
+    `lru_cache`d, and the relative teardown order between two independent
+    function-scoped fixtures (this one and pytest's own `monkeypatch`) is
+    not guaranteed - so a stale engine pointing at an already-deleted
+    tmp_path can otherwise survive past this file's tests and leak into
+    whatever runs next in the same session. `tests/test_fts5_lexical_store.py`
+    (ticket 04) hit exactly this leaking into `tests/test_ingest.py` and
+    fixed it with this same pattern; applying it here too since this file
+    has the identical setup shape and the same latent exposure, even though
+    it has not been observed to trigger here yet.
+
+    Mirrors `test_store_factories.py`'s `select_backend` fixture: call
+    `monkeypatch.undo()` explicitly and then reset the caches, both inside
+    this fixture's own teardown, so the ordering is guaranteed rather than
+    incidental.
+    """
+    yield
+    monkeypatch.undo()
+    from kbsvc.config import reset_settings_cache
+
+    reset_settings_cache()
+    reset_engine_cache()
+
+
 def _make_point(
     chunk_id: str,
     dense: list[float],
