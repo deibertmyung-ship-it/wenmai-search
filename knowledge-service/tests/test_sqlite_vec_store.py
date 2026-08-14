@@ -465,19 +465,25 @@ class TestNarrowFilterFaster:
 
         query = [random.uniform(-1, 1) for _ in range(16)]
 
-        # Time no-filter search.
-        flt_none = SearchFilter(tenant_id="t")
-        t0 = time.perf_counter()
-        for _ in range(20):
-            store.search_dense(query, limit=10, flt=flt_none)
-        t_none = time.perf_counter() - t0
+        def _best_of(flt: SearchFilter, trials: int = 7) -> float:
+            # Best-of-N rather than a single sum: this suite runs alongside
+            # everything else in the full-suite pytest process, and a single
+            # 20-iteration sum was observed flaky under that contention (an
+            # occasional scheduler hiccup during either block inflates its
+            # sum and trips the 1.5x tolerance either way). Contention can
+            # only make a trial slower than its true cost, never faster, so
+            # the minimum across trials is the noise-resistant estimate of
+            # the real cost.
+            best = float("inf")
+            for _ in range(trials):
+                t0 = time.perf_counter()
+                for _ in range(20):
+                    store.search_dense(query, limit=10, flt=flt)
+                best = min(best, time.perf_counter() - t0)
+            return best
 
-        # Time narrow filter (single document = 1/10 of corpus).
-        flt_narrow = SearchFilter(tenant_id="t", document_ids=["d3"])
-        t0 = time.perf_counter()
-        for _ in range(20):
-            store.search_dense(query, limit=10, flt=flt_narrow)
-        t_narrow = time.perf_counter() - t0
+        t_none = _best_of(SearchFilter(tenant_id="t"))
+        t_narrow = _best_of(SearchFilter(tenant_id="t", document_ids=["d3"]))
 
         # Narrow should be faster. With only 200 rows this is a weak signal,
         # so just assert it's not *slower* (the property that must not regress).
