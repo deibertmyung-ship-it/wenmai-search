@@ -16,6 +16,7 @@ from threading import RLock
 from ..config import get_settings
 from ..errors import KbError
 from .base import LexicalDocument, LexicalStore, SearchFilter, SearchHit
+from .fts5_store import Fts5LexicalStore
 from .tantivy_store import TantivyLexicalStore
 from .tokenizer import analyze, tokenize
 
@@ -34,7 +35,12 @@ def _build_store() -> LexicalStore:
     backend = get_settings().lexical_backend
     if backend == "tantivy":
         return TantivyLexicalStore()
-    raise KbError(f"KB_LEXICAL_BACKEND={backend!r} is not implemented yet; set it to 'tantivy'")
+    if backend == "fts5":
+        return Fts5LexicalStore()
+    raise KbError(
+        f"KB_LEXICAL_BACKEND={backend!r} is not implemented yet; "
+        f"set it to 'tantivy' or 'fts5'"
+    )
 
 
 def get_lexical_store() -> LexicalStore:
@@ -58,6 +64,7 @@ def reset_lexical_store() -> None:
 
 
 __all__ = [
+    "Fts5LexicalStore",
     "LexicalDocument",
     "LexicalStore",
     "SearchFilter",

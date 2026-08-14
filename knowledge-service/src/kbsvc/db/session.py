@@ -29,12 +29,43 @@ _ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
 # because it has no runtime-discovered dimension.  `unicode61` keeps contiguous
 # CJK characters as a single term (五行 stays one token), matching Tantivy's
 # whitespace analyser on pre-analysed text.
+#
+# `version_id` and `payload` were added for ADR-0008 ticket 04
+# (`Fts5LexicalStore`), edited into this DDL in place rather than migrated:
+# no deployment has data in `chunk_fts` yet (ticket 02 only just landed), and
+# FTS5 virtual tables reject `ALTER TABLE ... ADD COLUMN` outright ("virtual
+# tables may not be altered", confirmed against the installed SQLite) - an
+# ALTER-based migration was never on the table here.  `version_id` mirrors
+# Tantivy's `version_id` term field, needed for `delete_by_versions`.
+# `payload` is UNINDEXED (stored, not searched) and carries the same
+# denormalized JSON view `chunk_vec_payload` carries for the vector side (see
+# `db/vec_ddl.py`) - `ingest/reembed.py::_payload` calls this "the
+# denormalized view both indexes carry, so a hit renders without a join".
+# FTS5 has no companion-table restriction the way vec0 does, so it lives
+# right in the row instead of a second table.
 _FTS5_DDL = (
     "CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5("
-    "chunk_id UNINDEXED, tenant_id, document_id, source_id, kind, acl, "
-    "is_current, body, tokenize='unicode61'"
+    "chunk_id UNINDEXED, tenant_id, document_id, version_id, source_id, kind, acl, "
+    "is_current, body, payload UNINDEXED, tokenize='unicode61'"
     ")"
 )
+
+
+def ensure_fts5_table(engine: Engine | None = None) -> None:
+    """Create the `chunk_fts` FTS5 virtual table if it does not exist.
+
+    `init_db()` already does this as part of full schema setup.  This
+    standalone entry point lets `Fts5LexicalStore.ensure_ready()` be
+    self-sufficient the same way `ensure_vec0_table` lets `SqliteVecStore` be
+    - a store built directly against a fresh database, without an `init_db()`
+    call first (as the sqlite-vec and fts5 unit tests do, each pointing at a
+    throwaway per-test database), still ends up with a usable table.
+    Idempotent via `IF NOT EXISTS`.
+    """
+    if engine is None:
+        engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text(_FTS5_DDL))
 
 
 def _load_sqlite_vec_extension(dbapi_conn) -> None:
@@ -122,8 +153,7 @@ def init_db() -> None:
     _apply_additive_columns(engine)
     # FTS5 virtual table: no runtime-discovered dimension, so it belongs here
     # alongside the metadata tables.  Idempotent via IF NOT EXISTS.
-    with engine.begin() as conn:
-        conn.execute(text(_FTS5_DDL))
+    ensure_fts5_table(engine)
     tenant_id = get_settings().default_tenant
     with session_scope() as session:
         if session.get(Tenant, tenant_id) is None:
