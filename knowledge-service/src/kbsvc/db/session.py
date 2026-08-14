@@ -127,6 +127,33 @@ def get_session_factory() -> sessionmaker[Session]:
     return sessionmaker(bind=get_engine(), expire_on_commit=False, future=True)
 
 
+# PostgreSQL extensions the server profile needs: pgvector's `vector` type
+# (ticket 06) and pg_search's `bm25` index access method (ticket 07). ParadeDB
+# images ship both compiled in and already listed in
+# `shared_preload_libraries`, so `CREATE EXTENSION` only has to flip the
+# catalog entry on - no build step, near-instant either way.
+_POSTGRES_EXTENSIONS: tuple[str, ...] = ("pg_search", "vector")
+
+
+def ensure_postgres_extensions(engine: Engine | None = None) -> None:
+    """Create the pg_search and pgvector extensions if missing (ADR-0008 ticket 05).
+
+    No-op against SQLite: gated on `engine.dialect.name`, the same
+    dialect-driven distinction `_make_engine` uses for its `is_sqlite` branch,
+    rather than a second way of asking the same question - local profile must
+    stay completely unaffected. Idempotent via `IF NOT EXISTS`, the same
+    additive-only shape `_apply_additive_columns` and `ensure_fts5_table` use:
+    ADR-0004 forbids a migration framework.
+    """
+    if engine is None:
+        engine = get_engine()
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as conn:
+        for extension in _POSTGRES_EXTENSIONS:
+            conn.execute(text(f"CREATE EXTENSION IF NOT EXISTS {extension}"))
+
+
 def _apply_additive_columns(engine: Engine) -> None:
     """Add `_ADDITIVE_COLUMNS` to tables that predate them.
 
@@ -149,11 +176,22 @@ def _apply_additive_columns(engine: Engine) -> None:
 def init_db() -> None:
     """Create schema and ensure the default tenant exists."""
     engine = get_engine()
+    # Extensions before tables: tickets 06/07 add `vector`/bm25-typed columns
+    # through `_ADDITIVE_COLUMNS`-style ALTERs, which need the types to exist
+    # first. No-op on SQLite.
+    ensure_postgres_extensions(engine)
     Base.metadata.create_all(engine)
     _apply_additive_columns(engine)
     # FTS5 virtual table: no runtime-discovered dimension, so it belongs here
     # alongside the metadata tables.  Idempotent via IF NOT EXISTS.
-    ensure_fts5_table(engine)
+    #
+    # SQLite-only: `CREATE VIRTUAL TABLE ... USING fts5` is a syntax error on
+    # PostgreSQL. `init_db()` only ever ran against SQLite before ADR-0008
+    # ticket 05 made PostgreSQL a real, exercised target here (see
+    # `ensure_postgres_extensions` above) - guarded the same way, by dialect,
+    # since dialect is what actually determines which DDL is valid.
+    if engine.dialect.name == "sqlite":
+        ensure_fts5_table(engine)
     tenant_id = get_settings().default_tenant
     with session_scope() as session:
         if session.get(Tenant, tenant_id) is None:

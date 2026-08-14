@@ -2,7 +2,16 @@ name: kbsvc
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # ParadeDB: standard PostgreSQL 17 plus pg_search and pgvector, both
+    # pre-installed and already wired into shared_preload_libraries (ADR-0008
+    # ticket 05). `latest-pg17` is dev-only - production must pin a specific
+    # tag; see docs/04-runbook.md section 2 for why and for the PG16->17
+    # upgrade procedure (section 6).
+    image: paradedb/paradedb:latest-pg17
+    # Docker's default /dev/shm is 64MB. pgvector's parallel HNSW build fails
+    # against that ceiling - only at index-build time, never on ordinary
+    # queries. See docs/04-runbook.md section 2.
+    shm_size: 2gb
     environment:
       POSTGRES_USER: kbsvc
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
