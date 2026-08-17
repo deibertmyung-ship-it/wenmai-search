@@ -1,8 +1,12 @@
 """Lexical store factory.
 
 Tantivy takes a directory lock, so the process-wide singleton here is
-load-bearing, not just an optimisation - the same reason `vector/__init__.py`
-keeps one Qdrant client.
+load-bearing for that backend, not just an optimisation - the same reason
+`vector/__init__.py` keeps one Qdrant client. `Fts5LexicalStore` shares the
+SQLite engine and `PgSearchLexicalStore` shares the Postgres engine, so
+neither has an equivalent lock to defend, but the singleton stays - nothing
+else in the tree imports a store module directly, and the A/B gate needs one
+rebuild point regardless of backend.
 
 `KB_LEXICAL_BACKEND` picks the implementation. Replacing the BM25 half stops
 here: nothing else in the tree imports a store module directly.
@@ -17,6 +21,7 @@ from ..config import get_settings
 from ..errors import KbError
 from .base import LexicalDocument, LexicalStore, SearchFilter, SearchHit
 from .fts5_store import Fts5LexicalStore
+from .pg_search_store import PgSearchLexicalStore
 from .tantivy_store import TantivyLexicalStore
 from .tokenizer import analyze, tokenize
 
@@ -37,9 +42,11 @@ def _build_store() -> LexicalStore:
         return TantivyLexicalStore()
     if backend == "fts5":
         return Fts5LexicalStore()
+    if backend == "pg-search":
+        return PgSearchLexicalStore()
     raise KbError(
         f"KB_LEXICAL_BACKEND={backend!r} is not implemented yet; "
-        f"set it to 'tantivy' or 'fts5'"
+        f"set it to 'tantivy', 'fts5', or 'pg-search'"
     )
 
 
@@ -67,6 +74,7 @@ __all__ = [
     "Fts5LexicalStore",
     "LexicalDocument",
     "LexicalStore",
+    "PgSearchLexicalStore",
     "SearchFilter",
     "SearchHit",
     "TantivyLexicalStore",
