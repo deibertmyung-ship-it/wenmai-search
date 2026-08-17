@@ -10,9 +10,12 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from ..vector.base import SearchFilter, SearchHit
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 __all__ = ["LexicalDocument", "LexicalStore", "SearchFilter", "SearchHit"]
 
@@ -31,19 +34,35 @@ class LexicalDocument:
 
 
 class LexicalStore(Protocol):
-    def ensure_ready(self) -> None: ...
+    def ensure_ready(self, *, session: Session | None = None) -> None: ...
 
     def bulk(self) -> AbstractContextManager[None]:
         """Defer commits until the block exits; for full rebuilds only."""
         ...
 
-    def upsert(self, documents: list[LexicalDocument]) -> None: ...
+    def upsert(
+        self, documents: list[LexicalDocument], *, session: Session | None = None
+    ) -> None: ...
 
-    def delete_by_ids(self, ids: list[str]) -> None: ...
+    def delete_by_ids(
+        self, ids: list[str], *, session: Session | None = None
+    ) -> None: ...
 
-    def delete_by_document(self, tenant_id: str, document_id: str) -> None: ...
+    def delete_by_document(
+        self,
+        tenant_id: str,
+        document_id: str,
+        *,
+        session: Session | None = None,
+    ) -> None: ...
 
-    def delete_by_versions(self, tenant_id: str, version_ids: list[str]) -> None: ...
+    def delete_by_versions(
+        self,
+        tenant_id: str,
+        version_ids: list[str],
+        *,
+        session: Session | None = None,
+    ) -> None: ...
 
     def search(self, query: str, *, limit: int, flt: SearchFilter) -> list[SearchHit]: ...
 

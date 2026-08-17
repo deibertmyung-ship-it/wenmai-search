@@ -224,15 +224,20 @@ class Fts5LexicalStore:
 
     # --- lifecycle ------------------------------------------------------
 
-    def ensure_ready(self) -> None:
+    def ensure_ready(self, *, session: Session | None = None) -> None:
         """Create `chunk_fts` if it does not exist yet.
 
         `init_db()` already does this for a normal process start; this makes
         the store self-sufficient for callers/tests that build one directly
         against a fresh database, the same way `SqliteVecStore.ensure_
         collection` does not depend on `init_db()` having run first.
+
+        When *session* is given (ticket 08's transactional publish), the DDL
+        runs on that session's connection rather than opening a second one -
+        on SQLite a second connection doing DDL while the caller holds the
+        write lock deadlocks.
         """
-        ensure_fts5_table(self._engine)
+        ensure_fts5_table(session.connection() if session is not None else self._engine)
 
     def close(self) -> None:
         """No-op. The engine is shared and owned by `db.session`, same
@@ -375,12 +380,22 @@ class Fts5LexicalStore:
         return hits
 
     def count(self, tenant_id: str | None = None) -> int:
-        if tenant_id is None:
-            sql = text("SELECT count(*) FROM chunk_fts")
-            params: dict = {}
-        else:
-            sql = text("SELECT count(*) FROM chunk_fts WHERE chunk_fts MATCH :query")
-            params = {"query": f"tenant_id:{_quote(tenant_id)}"}
         with self._engine.connect() as conn:
-            result = conn.execute(sql, params).scalar()
+            # Tolerate a not-yet-created index (a fresh database, or one whose
+            # first publish rolled back before committing the CREATE) as empty -
+            # same contract SqliteVecStore.count gives. init_db normally creates
+            # chunk_fts, but a store built directly against an empty database
+            # must still answer 0 rather than "no such table".
+            exists = conn.execute(
+                text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='chunk_fts'")
+            ).first()
+            if exists is None:
+                return 0
+            if tenant_id is None:
+                result = conn.execute(text("SELECT count(*) FROM chunk_fts")).scalar()
+            else:
+                result = conn.execute(
+                    text("SELECT count(*) FROM chunk_fts WHERE chunk_fts MATCH :query"),
+                    {"query": f"tenant_id:{_quote(tenant_id)}"},
+                ).scalar()
         return int(result or 0)

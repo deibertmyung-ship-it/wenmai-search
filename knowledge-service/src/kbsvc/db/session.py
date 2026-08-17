@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import lru_cache
 
-from sqlalchemy import Engine, create_engine, event, inspect, text
+from sqlalchemy import Connection, Engine, create_engine, event, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import get_settings
@@ -51,7 +51,7 @@ _FTS5_DDL = (
 )
 
 
-def ensure_fts5_table(engine: Engine | None = None) -> None:
+def ensure_fts5_table(bind: Engine | Connection | None = None) -> None:
     """Create the `chunk_fts` FTS5 virtual table if it does not exist.
 
     `init_db()` already does this as part of full schema setup.  This
@@ -61,10 +61,18 @@ def ensure_fts5_table(engine: Engine | None = None) -> None:
     call first (as the sqlite-vec and fts5 unit tests do, each pointing at a
     throwaway per-test database), still ends up with a usable table.
     Idempotent via `IF NOT EXISTS`.
+
+    *bind* may be a live ``Connection`` (ticket 08's transactional publish,
+    which needs the table ensured inside the worker's existing transaction -
+    otherwise a second connection doing the DDL deadlocks on the first's
+    SQLite write lock) or an ``Engine``.
     """
-    if engine is None:
-        engine = get_engine()
-    with engine.begin() as conn:
+    if bind is None:
+        bind = get_engine()
+    if isinstance(bind, Connection):
+        bind.execute(text(_FTS5_DDL))
+        return
+    with bind.begin() as conn:
         conn.execute(text(_FTS5_DDL))
 
 

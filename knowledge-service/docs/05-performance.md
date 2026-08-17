@@ -179,16 +179,23 @@ Windows 上可能与按访问扫描的安全软件抢句柄，表现为写入中
 `.fieldnorm`）并杀掉 writer。单线程让全量重建慢约 2 倍（21 秒 vs 约 10 秒），增量写入无
 影响。Linux 上，或给数据目录加了杀软排除之后，可以调高。
 
-**批量路径走单次提交。** `rebuild-lexical` 与 `reembed` 都把整轮写入包在一次提交里：每批
-提交会让 Tantivy 在后续批次写入时并发合并段，正是上面那个竞争的高发场景。实测逐批提交在
-本机有约 40% 的概率以 `os error 5` 杀掉 writer，改为单次提交后连跑 8 轮零失败。
+**批量路径走单次提交（遗留 Tantivy 后端）。** 以 Tantivy 为词法后端时，`rebuild-lexical`
+与 `reembed` 都把整轮写入包在一次提交里：每批提交会让 Tantivy 在后续批次写入时并发合并
+段，正是上面那个竞争的高发场景。实测逐批提交在本机有约 40% 的概率以 `os error 5` 杀掉
+writer，改为单次提交后连跑 8 轮零失败。
 
 增量导入（worker 处理单个文档）仍然逐批提交——那里文档需要尽快可检索，而且单文档的段
 数量小得多。
 
-代价：`reembed` 中途被打断时，词法索引会停留在上一次提交的状态。稠密一路可以用
-`--resume-after` 续跑，词法一路直接 `rebuild-lexical` 重建即可（约 21 秒），不值得为它
-牺牲写入稳定性。
+**ADR-0008 整合后端改回逐批提交（事务化）。** 在 sqlite-vec+fts5（local）或 pgvector+
+pg-search（server）后端下，不再有 Tantivy 段合并竞争，而单文件 SQLite 下一次大提交会长
+时间持有写锁、阻塞作业状态写入。因此 `reembed` 改回**每批一个事务**，且每批内稠密与词法
+写入共享同一个事务（`ingest/reembed.py`，ticket 08）：一批里任一步失败，这一批的两边都
+回滚，不会留下「只有稠密、没有词法」的半批。嵌入调用在写事务之外（它是慢操作，不应持锁），
+行在一个事务里读出、在事务外嵌入、再在第二个短事务里把两个索引一起提交。`--resume-after`
+以已提交批次的最后一个 chunk id 为检查点，中断后续跑即可，不需要单独重建词法索引。
+发布路径（`ingest/worker.py`）同理：元数据、向量、词法在同一个事务里提交，进程在两步之间
+崩溃会整体回滚，不再退化成 dense-only 可召回。
 
 ## 当前架构与扩容信号
 
@@ -199,7 +206,7 @@ Windows 上可能与按访问扫描的安全软件抢句柄，表现为写入中
 | **chunk 数接近 10 万** | 稠密一路会到 1.4 秒（带过滤 4 秒）。切 Qdrant Server（HNSW）是唯一有效手段——嵌入式模式没有索引可调 |
 | 用户抱怨「加了过滤反而更慢」 | 这是嵌入式模式的真实行为，不是错觉。见上文「过滤条件会让检索变慢」 |
 | 词法检索超过 50ms | 先确认不是杀软干扰；Tantivy 在这个量级上应是个位数毫秒 |
-| `lexical_docs` ≠ `chunks` | 两个索引漂移了，跑 `kbsvc rebuild-lexical` |
+| `lexical_docs` ≠ `chunks`（遗留 Tantivy 后端） | 两个索引漂移了，跑 `kbsvc rebuild-lexical`。ADR-0008 整合后端（sqlite-vec+fts5 / pgvector+pg-search）下发布是单事务，不应再出现这种漂移；若出现说明有 bug，应排查而非当成常规运维 |
 | chunk 数超过百万级 | 使用完整 server profile、Qdrant payload 索引并独立规划容量 |
 | 需要真实语义召回 | `KB_DENSE_PROVIDER=fastembed` 或 `openai`，然后 reindex |
 

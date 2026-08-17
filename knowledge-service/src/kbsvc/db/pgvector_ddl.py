@@ -24,10 +24,27 @@ never by `init_db()`.
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
 
-from sqlalchemy import Engine, text
+from sqlalchemy import Connection, Engine, text
 
 from .session import get_engine
+
+Bind = Engine | Connection
+
+
+@contextmanager
+def _begin(bind: Bind):
+    """Run DDL on *bind*: a live Connection is used as-is (the caller owns
+    the transaction - ticket 08's transactional publish needs the schema
+    ensure to run inside the worker's existing transaction; on SQLite a second
+    connection doing DDL while the first holds the write lock deadlocks); an
+    Engine opens a short transaction the way this module always did."""
+    if isinstance(bind, Connection):
+        yield bind
+    else:
+        with bind.begin() as conn:
+            yield conn
 
 # The embedding column's width is a template parameter (runtime-discovered);
 # every other statement here is static and shared across all dimensions.
@@ -104,7 +121,7 @@ _DIMENSION_SQL = text(
 _DIMENSION_RE = re.compile(r"vector\((\d+)\)")
 
 
-def ensure_pgvector_schema(engine: Engine | None = None, *, dim: int) -> None:
+def ensure_pgvector_schema(bind: Bind | None = None, *, dim: int) -> None:
     """Add the dense-retrieval columns and indexes to `chunk` if missing.
 
     Idempotent: every `ALTER TABLE`/`CREATE INDEX` is `IF NOT EXISTS`-guarded,
@@ -115,10 +132,26 @@ def ensure_pgvector_schema(engine: Engine | None = None, *, dim: int) -> None:
     disagrees with an already-existing `embedding` column silently keeps the
     existing column (`ADD COLUMN IF NOT EXISTS` does not touch the type of an
     existing column).
+
+    *bind* may be a live ``Connection`` (ticket 08's publish transaction) or an
+    ``Engine``. With a Connection both the additive ALTERs and the HNSW build
+    run inline on that connection; the ``SET LOCAL`` tuning scopes to the
+    caller's transaction (only relevant on the very first publish that builds
+    the index - afterward every statement is an `IF NOT EXISTS` no-op).
     """
-    if engine is None:
-        engine = get_engine()
-    with engine.begin() as conn:
+    if bind is None:
+        bind = get_engine()
+    if isinstance(bind, Connection):
+        bind.execute(text(_ADD_EMBEDDING_COLUMN_SQL.format(dim=dim)))
+        for stmt in _ADD_METADATA_COLUMNS_SQL:
+            bind.execute(text(stmt))
+        for stmt in _ADD_FILTER_INDEXES_SQL:
+            bind.execute(text(stmt))
+        for stmt in _HNSW_BUILD_TUNING_SQL:
+            bind.execute(text(stmt))
+        bind.execute(text(_CREATE_HNSW_INDEX_SQL))
+        return
+    with bind.begin() as conn:
         conn.execute(text(_ADD_EMBEDDING_COLUMN_SQL.format(dim=dim)))
         for stmt in _ADD_METADATA_COLUMNS_SQL:
             conn.execute(text(stmt))
@@ -128,13 +161,13 @@ def ensure_pgvector_schema(engine: Engine | None = None, *, dim: int) -> None:
     # HNSW build alone, not leak onto the additive ALTERs (harmless either
     # way) or - worse - onto whatever the caller's connection pool hands out
     # next if this ran on a pooled connection outside its own transaction.
-    with engine.begin() as conn:
+    with bind.begin() as conn:
         for stmt in _HNSW_BUILD_TUNING_SQL:
             conn.execute(text(stmt))
         conn.execute(text(_CREATE_HNSW_INDEX_SQL))
 
 
-def drop_pgvector_embedding(engine: Engine | None = None) -> None:
+def drop_pgvector_embedding(bind: Bind | None = None) -> None:
     """Drop the `embedding` column and its HNSW index.
 
     Used by `recreate_collection`. Deliberately narrow: `chunk` is not this
@@ -145,14 +178,14 @@ def drop_pgvector_embedding(engine: Engine | None = None) -> None:
     dimension change means re-embedding everyone anyway, so losing the vectors
     is expected - losing the metadata would not be.
     """
-    if engine is None:
-        engine = get_engine()
-    with engine.begin() as conn:
+    if bind is None:
+        bind = get_engine()
+    with _begin(bind) as conn:
         conn.execute(text(f"DROP INDEX IF EXISTS {_HNSW_INDEX_NAME}"))
         conn.execute(text("ALTER TABLE chunk DROP COLUMN IF EXISTS embedding"))
 
 
-def get_pgvector_dimension(engine: Engine | None = None) -> int | None:
+def get_pgvector_dimension(bind: Bind | None = None) -> int | None:
     """Return the declared width of `chunk.embedding`, or `None` if absent.
 
     Parses `format_type()`'s rendering of the column (`'vector(512)'`) rather
@@ -161,10 +194,13 @@ def get_pgvector_dimension(engine: Engine | None = None) -> int | None:
     mirrors `get_vec0_dimension`'s role for sqlite-vec, reading
     `sqlite_master` rather than trusting a cached value for the same reason.
     """
-    if engine is None:
-        engine = get_engine()
-    with engine.connect() as conn:
-        row = conn.execute(_DIMENSION_SQL).first()
+    if bind is None:
+        bind = get_engine()
+    if isinstance(bind, Connection):
+        row = bind.execute(_DIMENSION_SQL).first()
+    else:
+        with bind.connect() as conn:
+            row = conn.execute(_DIMENSION_SQL).first()
     if row is None:
         return None
     match = _DIMENSION_RE.search(row[0] or "")

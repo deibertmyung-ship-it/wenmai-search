@@ -21,6 +21,7 @@ from collections.abc import Iterator
 from threading import RLock
 
 from qdrant_client import QdrantClient, models
+from sqlalchemy.orm import Session
 
 from ..config import Settings, get_settings
 from ..errors import KbError
@@ -67,7 +68,12 @@ class QdrantVectorStore:
 
     # --- lifecycle ------------------------------------------------------
 
-    def ensure_collection(self, dim: int) -> None:
+    def ensure_collection(
+        self, dim: int, *, session: Session | None = None
+    ) -> None:
+        # `session` accepted for Protocol/ADR-0008-ticket-08 parity; Qdrant is
+        # an external service and cannot enlist in a SQL transaction, so it is
+        # ignored. This legacy store is removed in ticket 13.
         with self._client_access():
             if self._ready:
                 return
@@ -87,7 +93,9 @@ class QdrantVectorStore:
                     self._create_index("is_current", models.PayloadSchemaType.BOOL)
             self._ready = True
 
-    def recreate_collection(self, dim: int) -> None:
+    def recreate_collection(
+        self, dim: int, *, session: Session | None = None
+    ) -> None:
         """Drop and rebuild the collection.
 
         Required whenever the dense model changes: vector dimension and vector
@@ -161,8 +169,17 @@ class QdrantVectorStore:
             self.client.close()
 
     # --- writes ---------------------------------------------------------
+    #
+    # The `session` kwarg exists for Protocol/ADR-0008-ticket-08 signature
+    # parity (the ingest worker passes one transaction to every store), but
+    # Qdrant is an external service that cannot enlist in a SQL transaction -
+    # it is accepted and ignored here. The atomic-publish guarantee only holds
+    # for the in-database backends (sqlite-vec/fts5/pgvector/pg-search); this
+    # legacy store is removed in ADR-0008 ticket 13.
 
-    def upsert(self, points: list[VectorPoint]) -> None:
+    def upsert(
+        self, points: list[VectorPoint], *, session: Session | None = None
+    ) -> None:
         if not points:
             return
         with self._client_access():
@@ -179,7 +196,9 @@ class QdrantVectorStore:
                 wait=True,
             )
 
-    def delete_by_ids(self, ids: list[str]) -> None:
+    def delete_by_ids(
+        self, ids: list[str], *, session: Session | None = None
+    ) -> None:
         if not ids:
             return
         with self._client_access():
@@ -189,7 +208,13 @@ class QdrantVectorStore:
                 wait=True,
             )
 
-    def delete_by_document(self, tenant_id: str, document_id: str) -> None:
+    def delete_by_document(
+        self,
+        tenant_id: str,
+        document_id: str,
+        *,
+        session: Session | None = None,
+    ) -> None:
         self._delete_where(
             [
                 models.FieldCondition(key="tenant_id", match=models.MatchValue(value=tenant_id)),
@@ -199,7 +224,13 @@ class QdrantVectorStore:
             ]
         )
 
-    def delete_by_versions(self, tenant_id: str, version_ids: list[str]) -> None:
+    def delete_by_versions(
+        self,
+        tenant_id: str,
+        version_ids: list[str],
+        *,
+        session: Session | None = None,
+    ) -> None:
         if not version_ids:
             return
         self._delete_where(

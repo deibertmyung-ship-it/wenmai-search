@@ -134,19 +134,35 @@ class IngestWorker:
         # -- index
         self._advance(session, job, JobState.INDEXING)
         store = get_vector_store()
-        store.ensure_collection(get_dense_embedder().dim)
-        store.upsert(points)
+        # Ensure the schema inside this transaction too (ticket 08): on SQLite
+        # the vec0 table is created lazily on first publish, and running that
+        # DDL on a second connection while this session already holds the write
+        # lock would deadlock. After the first publish every statement here is
+        # an IF NOT EXISTS no-op.
+        store.ensure_collection(get_dense_embedder().dim, session=session)
+        # Metadata, dense and lexical writes all share the caller's
+        # transaction (ADR-0008 ticket 08): if any step fails, the whole
+        # version rolls back together, never leaving chunks dense-only or
+        # lexical-only. The in-database stores (sqlite-vec/fts5/pgvector/
+        # pg-search) enlist via `session=`; the external legacy stores
+        # (qdrant/tantivy) accept and ignore it and are removed in ticket 13.
+        store.upsert(points, session=session)
 
         lexical = get_lexical_store()
+        # Same in-transaction schema ensure as the vector store above, for the
+        # pg-search server profile (its bm25 index is created lazily). An
+        # IF NOT EXISTS no-op once the index exists.
+        lexical.ensure_ready(session=session)
         # The SQL side replaces a version's chunks wholesale; the lexical index
         # must do the same, or a re-index that chunks differently leaves the
         # previous attempt's chunks searchable under their old ids.
-        lexical.delete_by_versions(document.tenant_id, [version.id])
+        lexical.delete_by_versions(document.tenant_id, [version.id], session=session)
         lexical.upsert(
             [
                 LexicalDocument(id=point.id, text=point.payload["text"], payload=point.payload)
                 for point in points
-            ]
+            ],
+            session=session,
         )
 
         version.status = "indexed"
@@ -196,8 +212,15 @@ class IngestWorker:
 
         version_ids = [version.id for version in repo.list_versions(session, document.id)]
         removed = repo.delete_chunks_for_versions(session, version_ids)
-        get_vector_store().delete_by_document(document.tenant_id, document.id)
-        get_lexical_store().delete_by_document(document.tenant_id, document.id)
+        # Share the delete transaction across both indexes (ticket 08): the
+        # metadata row deletion and the two index cleanups commit together or
+        # not at all.
+        get_vector_store().delete_by_document(
+            document.tenant_id, document.id, session=session
+        )
+        get_lexical_store().delete_by_document(
+            document.tenant_id, document.id, session=session
+        )
 
         # Same containment as the ingest path: a document delete succeeds
         # whether or not the plagiarism corpus can be updated.
@@ -306,8 +329,12 @@ class IngestWorker:
         if not stale:
             return []
         repo.delete_chunks_for_versions(session, stale)
-        get_vector_store().delete_by_versions(document.tenant_id, stale)
-        get_lexical_store().delete_by_versions(document.tenant_id, stale)
+        # Same single-transaction guarantee as the ingest path (ticket 08):
+        # the old version's chunk rows and both index entries retire together.
+        get_vector_store().delete_by_versions(document.tenant_id, stale, session=session)
+        get_lexical_store().delete_by_versions(
+            document.tenant_id, stale, session=session
+        )
         repo.mark_versions_superseded(session, stale)
         repo.record_event(
             session,

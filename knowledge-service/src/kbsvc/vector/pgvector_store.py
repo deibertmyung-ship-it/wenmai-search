@@ -152,23 +152,50 @@ class PgVectorStore:
 
     # --- lifecycle ------------------------------------------------------
 
-    def ensure_collection(self, dim: int) -> None:
+    def ensure_collection(
+        self, dim: int, *, session: Session | None = None
+    ) -> None:
         """Add the dense-retrieval columns/indexes to `chunk` if missing.
 
         If `embedding` already exists with a different dimension, raise so
         the caller can decide to `recreate_collection` instead of silently
         writing vectors of the wrong width.
+
+        When *session* is given (ticket 08), the dimension check and DDL run
+        on that connection so the schema participates in the publish
+        transaction; without it a standalone engine transaction is used.
+
+        Skips `ensure_pgvector_schema` entirely once `embedding` already has
+        the requested dimension - confirmed load-bearing, not an
+        optimisation: `ingest/worker.py` calls this once per chunk publish,
+        and every statement `ensure_pgvector_schema` issues past the first
+        is an `IF NOT EXISTS` no-op *in content* but still takes a real
+        table-level lock to make that determination (`CREATE INDEX`, unlike
+        a plain `SELECT`, cannot skip lock acquisition just because it will
+        end up doing nothing). Two concurrent workers both re-acquiring that
+        lock on every single publish deadlocks in practice - reproduced
+        against the live dev database as `psycopg.errors.DeadlockDetected`
+        on the HNSW index's relation, both sides holding one lock and
+        waiting on the other's. Skipping the DDL once this dimension is
+        already confirmed present removes the lock request instead of just
+        shrinking the window.
         """
-        existing = get_pgvector_dimension(self._engine)
+        bind = session.connection() if session is not None else self._engine
+        existing = get_pgvector_dimension(bind)
         if existing is not None and existing != dim:
             raise KbError(
                 "chunk.embedding already exists with a different embedding dimension",
                 {"existing": existing, "requested": dim},
             )
-        ensure_pgvector_schema(self._engine, dim=dim)
+        if existing == dim:
+            self._dim = dim
+            return
+        ensure_pgvector_schema(bind, dim=dim)
         self._dim = dim
 
-    def recreate_collection(self, dim: int) -> None:
+    def recreate_collection(
+        self, dim: int, *, session: Session | None = None
+    ) -> None:
         """Drop and rebuild the `embedding` column and its HNSW index.
 
         Required on model/dimension change. Unlike `QdrantVectorStore` and
@@ -177,9 +204,10 @@ class PgVectorStore:
         lose their vectors (expected: a dimension change means re-embedding
         everyone anyway) but keep their metadata.
         """
-        drop_pgvector_embedding(self._engine)
+        bind = session.connection() if session is not None else self._engine
+        drop_pgvector_embedding(bind)
         self._dim = None
-        self.ensure_collection(dim)
+        self.ensure_collection(dim, session=session)
 
     def close(self) -> None:
         """No-op. The engine is shared and owned by `db.session`."""
@@ -307,7 +335,17 @@ class PgVectorStore:
         *,
         limit: int,
         flt: SearchFilter,
+        _force_exact_scan: bool = False,
     ) -> list[SearchHit]:
+        """KNN search.
+
+        `_force_exact_scan` forces the `enable_indexscan = off` planner
+        override regardless of filter shape, so the A/B harness (ADR-0008
+        ticket 10) can read the exact brute-force result set as ground truth
+        for the soft server-dense cell. It is private because the serving
+        path must keep using the HNSW index; only the harness has a reason to
+        pay the sequential-scan cost.
+        """
         if self._dim is None:
             return []
 
@@ -335,7 +373,7 @@ class PgVectorStore:
         #     unsafe even at a single tag (7/15 zero-row trials filtering
         #     for the ~10%-selectivity tag alone) - always forced, length
         #     is not a safe signal for this operator.
-        needs_exact_scan = False
+        needs_exact_scan = _force_exact_scan
         if flt.acl_any:
             # Array-overlap, pushed down - see db/pgvector_ddl.py's docstring
             # on why `acl` is `text[]` + GIN rather than scalar + btree.

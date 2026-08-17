@@ -511,3 +511,62 @@ kbsvc plagiarism cleanup      # 删过期任务、原文、结果、事件与停
 
 默认保留 30 天（`KB_PLAG_RETENTION_DAYS`）。停用投影只有在没有活动检测的快照
 引用它时才会被删。**这只管 `plag_*` 数据**——对象存储里的原始文件不受影响。
+
+## 10. 迁移到整合存储后端（ADR-0008）
+
+ADR-0008 把稠密 + 词法两个外部索引收进主数据库：local profile 用 SQLite 的
+sqlite-vec + FTS5，server profile 用 PostgreSQL/ParadeDB 的 pgvector + pg_search。
+旧后端（Qdrant / Tantivy）在确认新后端稳定前**不要删**——回滚只翻一个环境变量。
+
+### 10.1 稠密向量：导出，不要重嵌入
+
+```bash
+# local profile：嵌入式 Qdrant → sqlite-vec
+kbsvc migrate-vectors --from qdrant --to sqlite-vec --batch 1000
+
+# server profile：Qdrant Server → pgvector
+kbsvc migrate-vectors --from qdrant --to pgvector --batch 1000
+```
+
+这是**逐位导出**，不是 `reembed`：Qdrant 里已存的 float32 向量原样搬进新后端，
+top-k 集合保持一致。重嵌入会引入 ONNX 非确定性与批次效应，让「新旧 top-k 相等」
+的验收硬断言因为与存储无关的原因失败。维度从源 collection 配置读取，不读
+`KB_DENSE_DIM`（默认 384 与生产 bge-small-zh-v1.5 的 512 不一致）。
+
+迁移幂等（按 chunk_id upsert，重跑不产生重复），可断点续跑：
+
+```bash
+kbsvc migrate-vectors --from qdrant --to pgvector --batch 1000 \
+  --resume-after <last_point_id>
+```
+
+结束时命令会做两道校验，任一失败以非零码退出：
+
+- 两侧 `count()` 相等；
+- 抽样 100 个 chunk（`--sample` 可调）从目标回读，逐维比对源与目标的 float32
+  字节完全相等。
+
+命令末行打印 `in <秒数>s`——这就是全量迁移耗时，把它记入变更工单。
+
+### 10.2 词法索引：直接重建，不迁移
+
+```bash
+kbsvc rebuild-lexical --batch-size 512   # 22,659 段约 21 秒
+```
+
+正文与 `analyzed` 列都在主数据库的 `chunk` 表里，重建只需几十秒，没有为词法写
+迁移代码的必要。
+
+### 10.3 切换与回滚
+
+确认 `/v1/stats` 里 `chunks` / 向量点数 / 词法文档数三者相等、A/B 门（ADR-0008
+ticket 10/11）通过后，改配置指向新后端并重启：
+
+```bash
+export KB_VECTOR_BACKEND=sqlite-vec     # 或 pgvector
+export KB_LEXICAL_BACKEND=fts5          # 或 pg-search
+```
+
+**回滚 = 翻回环境变量后重启**（`KB_VECTOR_BACKEND=qdrant`、
+`KB_LEXICAL_BACKEND=tantivy`）。旧 collection 与旧词法目录在整个观察期内保留，
+不删；它们是回滚的唯一依据。等观察期结束、确认不再回滚，再单独清理旧数据。

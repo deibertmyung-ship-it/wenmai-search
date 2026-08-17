@@ -10,9 +10,28 @@ FTS5 lives in ``init_db`` because it has no dimension dependency.
 
 from __future__ import annotations
 
-from sqlalchemy import Engine, text
+from contextlib import contextmanager
+
+from sqlalchemy import Connection, Engine, text
 
 from .session import get_engine
+
+Bind = Engine | Connection
+
+
+@contextmanager
+def _begin(bind: Bind):
+    """Run DDL on *bind*: if it is a live Connection, use it as-is (the caller
+    owns the transaction - ticket 08's publish needs the vec0 table created
+    inside the worker's existing transaction, otherwise SQLite sees a second
+    connection blocking on the write lock the first already holds); if it is an
+    Engine, open a short transaction the way this module always did."""
+    if isinstance(bind, Connection):
+        yield bind
+    else:
+        with bind.begin() as conn:
+            yield conn
+
 
 _VEC0_DDL_TEMPLATE = (
     "CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vec USING vec0("
@@ -39,34 +58,38 @@ _PAYLOAD_DDL = (
 )
 
 
-def ensure_vec0_table(engine: Engine | None = None, *, dim: int) -> None:
+def ensure_vec0_table(
+    bind: Bind | None = None, *, dim: int
+) -> None:
     """Create the ``chunk_vec`` vec0 virtual table and ``chunk_vec_payload``
     if they do not exist.
 
     Idempotent via ``IF NOT EXISTS``.  The *dim* parameter is the embedding
-    dimension discovered at runtime from the dense embedder.
+    dimension discovered at runtime from the dense embedder. *bind* may be a
+    live ``Connection`` (the caller's transaction, used by ticket 08's
+    transactional publish) or an ``Engine`` (a short standalone transaction).
     """
-    if engine is None:
-        engine = get_engine()
+    if bind is None:
+        bind = get_engine()
     ddl = _VEC0_DDL_TEMPLATE.format(dim=dim)
-    with engine.begin() as conn:
+    with _begin(bind) as conn:
         conn.execute(text(ddl))
         conn.execute(text(_PAYLOAD_DDL))
 
 
-def drop_vec0_table(engine: Engine | None = None) -> None:
+def drop_vec0_table(bind: Bind | None = None) -> None:
     """Drop the ``chunk_vec`` and ``chunk_vec_payload`` tables.
 
     Used by ``recreate_collection``.
     """
-    if engine is None:
-        engine = get_engine()
-    with engine.begin() as conn:
+    if bind is None:
+        bind = get_engine()
+    with _begin(bind) as conn:
         conn.execute(text("DROP TABLE IF EXISTS chunk_vec"))
         conn.execute(text("DROP TABLE IF EXISTS chunk_vec_payload"))
 
 
-def get_vec0_dimension(engine: Engine | None = None) -> int | None:
+def get_vec0_dimension(bind: Bind | None = None) -> int | None:
     """Return the embedding dimension of an existing ``chunk_vec`` table.
 
     Returns ``None`` if the table does not exist.  Parses the ``embedding``
@@ -75,12 +98,17 @@ def get_vec0_dimension(engine: Engine | None = None) -> int | None:
     """
     import re
 
-    if engine is None:
-        engine = get_engine()
-    with engine.connect() as conn:
-        row = conn.execute(
+    if bind is None:
+        bind = get_engine()
+    if isinstance(bind, Connection):
+        row = bind.execute(
             text("SELECT sql FROM sqlite_master WHERE type='table' AND name='chunk_vec'")
         ).first()
+    else:
+        with bind.connect() as conn:
+            row = conn.execute(
+                text("SELECT sql FROM sqlite_master WHERE type='table' AND name='chunk_vec'")
+            ).first()
     if row is None:
         return None
     match = re.search(r"embedding\s+float\[(\d+)\]", row[0])

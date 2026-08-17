@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 @dataclass
@@ -43,17 +46,37 @@ class SearchFilter:
 
 
 class VectorStore(Protocol):
-    def ensure_collection(self, dim: int) -> None: ...
+    def ensure_collection(
+        self, dim: int, *, session: Session | None = None
+    ) -> None: ...
 
-    def recreate_collection(self, dim: int) -> None: ...
+    def recreate_collection(
+        self, dim: int, *, session: Session | None = None
+    ) -> None: ...
 
-    def upsert(self, points: list[VectorPoint]) -> None: ...
+    def upsert(
+        self, points: list[VectorPoint], *, session: Session | None = None
+    ) -> None: ...
 
-    def delete_by_ids(self, ids: list[str]) -> None: ...
+    def delete_by_ids(
+        self, ids: list[str], *, session: Session | None = None
+    ) -> None: ...
 
-    def delete_by_document(self, tenant_id: str, document_id: str) -> None: ...
+    def delete_by_document(
+        self,
+        tenant_id: str,
+        document_id: str,
+        *,
+        session: Session | None = None,
+    ) -> None: ...
 
-    def delete_by_versions(self, tenant_id: str, version_ids: list[str]) -> None: ...
+    def delete_by_versions(
+        self,
+        tenant_id: str,
+        version_ids: list[str],
+        *,
+        session: Session | None = None,
+    ) -> None: ...
 
     def search_dense(
         self, vector: list[float], *, limit: int, flt: SearchFilter

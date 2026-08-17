@@ -96,29 +96,47 @@ def reembed_tenant(
     documents: set[str] = set()
     last_id = resume_after or ""
 
-    # Commit per batch, not once at the end.  The original reason for a single
-    # deferred commit was Tantivy segment-merge contention (Windows on-access
-    # scanner kills the writer with PermissionDenied on .pos/.fieldnorm files
-    # when merge threads race the writer).  Under the SQLite single-file store
-    # (ADR-0008) there are no segment merges, and a single large commit would
-    # hold the write lock and block job-status updates.  If reembed is
-    # interrupted, the dense side resumes from `last_chunk_id` and the lexical
-    # side is rebuilt with `rebuild_lexical`.
+    # Commit per batch, not once at the end - and within each batch the dense
+    # and lexical writes share one transaction (ADR-0008 ticket 08), so a crash
+    # mid-batch cannot leave a chunk dense-only or lexical-only.
+    #
+    # The original reason for a single deferred commit across the whole run was
+    # Tantivy segment-merge contention (Windows on-access scanner kills the
+    # writer with PermissionDenied on .pos/.fieldnorm files when merge threads
+    # race the writer). Under the in-database stores (ADR-0008) there are no
+    # segment merges, and a single large commit would hold the SQLite write
+    # lock and block job-status updates.
+    #
+    # The embedding call stays outside the write transaction on purpose: it is
+    # the slow part (GPU/CPU over `batch_size` texts), and holding the write
+    # lock while embedding would block every other writer for the whole batch.
+    # Rows are read in one transaction, embedded outside it, then the two index
+    # writes commit together in a short second transaction.
+    #
+    # If reembed is interrupted, the run resumes from `last_chunk_id` (the
+    # checkpoint is advanced only after a batch's transaction commits); any
+    # partial batch rolled back cleanly, so `--resume-after` stays correct and
+    # no separate lexical rebuild is needed.
     while True:
         with session_scope() as session:
             rows = _next_batch(session, tenant_id, last_id, batch_size)
-            if not rows:
-                break
-            points = _build_points(tenant_id, rows, dense)
-            last_id = rows[-1][0].id
+        if not rows:
+            break
+        points = _build_points(tenant_id, rows, dense)
+        last_id = rows[-1][0].id
 
-        store.upsert(points)
-        lexical.upsert(
-            [
-                LexicalDocument(id=point.id, text=point.payload["text"], payload=point.payload)
-                for point in points
-            ]
-        )
+        with session_scope() as session:
+            store.upsert(points, session=session)
+            lexical.upsert(
+                [
+                    LexicalDocument(
+                        id=point.id, text=point.payload["text"], payload=point.payload
+                    )
+                    for point in points
+                ],
+                session=session,
+            )
+
         done += len(points)
         documents.update(point.payload["document_id"] for point in points)
         if progress:

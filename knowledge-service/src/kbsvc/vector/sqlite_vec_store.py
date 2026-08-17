@@ -70,27 +70,39 @@ class SqliteVecStore:
 
     # --- lifecycle ------------------------------------------------------
 
-    def ensure_collection(self, dim: int) -> None:
+    def ensure_collection(
+        self, dim: int, *, session: Session | None = None
+    ) -> None:
         """Create the vec0 table if it does not exist.
 
         If the table already exists with a different dimension, raise so the
         caller can decide to ``recreate_collection`` instead of silently
         writing bad data.
+
+        When *session* is given (ticket 08's transactional publish), the
+        dimension check and DDL run on that session's connection - opening a
+        second connection to ``CREATE VIRTUAL TABLE`` while the caller already
+        holds SQLite's write lock deadlocks. With ``session=None`` a short
+        standalone transaction is used, as before.
         """
-        existing = get_vec0_dimension(self._engine)
+        bind = session.connection() if session is not None else self._engine
+        existing = get_vec0_dimension(bind)
         if existing is not None and existing != dim:
             raise KbError(
                 "chunk_vec already exists with a different embedding dimension",
                 {"existing": existing, "requested": dim},
             )
-        ensure_vec0_table(self._engine, dim=dim)
+        ensure_vec0_table(bind, dim=dim)
         self._dim = dim
 
-    def recreate_collection(self, dim: int) -> None:
+    def recreate_collection(
+        self, dim: int, *, session: Session | None = None
+    ) -> None:
         """Drop and rebuild the vec0 table.  Required on model / dimension change."""
-        drop_vec0_table(self._engine)
+        bind = session.connection() if session is not None else self._engine
+        drop_vec0_table(bind)
         self._dim = None
-        self.ensure_collection(dim)
+        self.ensure_collection(dim, session=session)
 
     def close(self) -> None:
         """No-op.  The engine is shared and owned by ``db.session``."""
@@ -362,15 +374,22 @@ class SqliteVecStore:
         return hits
 
     def count(self, tenant_id: str | None = None) -> int:
-        if tenant_id:
-            with self._engine.connect() as conn:
+        with self._engine.connect() as conn:
+            # The vec0 table is created lazily on the first publish, inside that
+            # publish's transaction (ticket 08). If no publish has ever
+            # committed - a fresh database, or one whose first publish rolled
+            # back - the table does not exist yet. That is an empty index, not
+            # an error: report 0 instead of "no such table".
+            exists = conn.execute(
+                text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='chunk_vec'")
+            ).first()
+            if exists is None:
+                return 0
+            if tenant_id:
                 result = conn.execute(
                     text("SELECT count(*) FROM chunk_vec WHERE tenant = :t"),
                     {"t": tenant_id},
                 ).scalar()
-        else:
-            with self._engine.connect() as conn:
-                result = conn.execute(
-                    text("SELECT count(*) FROM chunk_vec")
-                ).scalar()
+            else:
+                result = conn.execute(text("SELECT count(*) FROM chunk_vec")).scalar()
         return int(result or 0)
