@@ -15,6 +15,7 @@ from threading import RLock
 from ..config import get_settings
 from ..errors import KbError
 from .base import SearchFilter, SearchHit, VectorPoint, VectorStore
+from .pgvector_store import PgVectorStore
 from .qdrant_store import QdrantVectorStore
 from .sqlite_vec_store import SqliteVecStore
 
@@ -37,9 +38,11 @@ def _build_store() -> VectorStore:
         return QdrantVectorStore()
     if backend == "sqlite-vec":
         return SqliteVecStore()
+    if backend == "pgvector":
+        return PgVectorStore()
     raise KbError(
         f"KB_VECTOR_BACKEND={backend!r} is not implemented yet; "
-        f"set it to 'qdrant' or 'sqlite-vec'"
+        f"set it to 'qdrant', 'sqlite-vec', or 'pgvector'"
     )
 
 
@@ -70,6 +73,7 @@ def reset_vector_store() -> None:
 
 
 __all__ = [
+    "PgVectorStore",
     "QdrantVectorStore",
     "SearchFilter",
     "SearchHit",

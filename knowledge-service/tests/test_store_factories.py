@@ -1,9 +1,9 @@
 """The two store factories dispatch on KB_VECTOR_BACKEND / KB_LEXICAL_BACKEND.
 
 ADR-0008 keeps the old and new implementations side by side so the A/B gate can
-load both. ``sqlite-vec`` (ticket 03) and ``fts5`` (ticket 04) are now
-implemented; backends that are not yet implemented must fail loudly at the
-factory rather than at the first query.
+load both. ``sqlite-vec`` (ticket 03), ``fts5`` (ticket 04) and ``pgvector``
+(ticket 06) are now implemented; backends that are not yet implemented must
+fail loudly at the factory rather than at the first query.
 """
 
 from __future__ import annotations
@@ -18,7 +18,13 @@ from kbsvc.lexical import (
     get_lexical_store,
     reset_lexical_store,
 )
-from kbsvc.vector import QdrantVectorStore, SqliteVecStore, get_vector_store, reset_vector_store
+from kbsvc.vector import (
+    PgVectorStore,
+    QdrantVectorStore,
+    SqliteVecStore,
+    get_vector_store,
+    reset_vector_store,
+)
 
 _PG_URL = "postgresql+psycopg://kbsvc:secret@localhost:5432/kbsvc"
 
@@ -65,6 +71,16 @@ def test_sqlite_vec_backend_builds_sqlite_vec_store(select_backend) -> None:
     assert isinstance(store, SqliteVecStore)
 
 
+def test_pgvector_backend_builds_pgvector_store(select_backend) -> None:
+    """pgvector is implemented (ticket 06): the factory must return a
+    PgVectorStore, not raise. Construction never opens a connection (the
+    underlying `Engine` is lazy), so this needs no reachable PostgreSQL -
+    unlike `ensure_collection`, which does."""
+    select_backend(KB_VECTOR_BACKEND="pgvector", KB_PROFILE="server", KB_DATABASE_URL=_PG_URL)
+    store = get_vector_store()
+    assert isinstance(store, PgVectorStore)
+
+
 def test_fts5_backend_builds_fts5_lexical_store(select_backend) -> None:
     """fts5 is implemented (ticket 04): the factory must return a
     Fts5LexicalStore, not raise."""
@@ -76,11 +92,6 @@ def test_fts5_backend_builds_fts5_lexical_store(select_backend) -> None:
 @pytest.mark.parametrize(
     ("env", "getter"),
     [
-        pytest.param(
-            {"KB_VECTOR_BACKEND": "pgvector", "KB_PROFILE": "server", "KB_DATABASE_URL": _PG_URL},
-            get_vector_store,
-            id="pgvector",
-        ),
         pytest.param(
             {"KB_LEXICAL_BACKEND": "pg-search", "KB_PROFILE": "server", "KB_DATABASE_URL": _PG_URL},
             get_lexical_store,
@@ -98,17 +109,25 @@ def test_backends_without_an_implementation_fail_at_the_factory(
 
 
 def test_reset_rebuilds_the_vector_store_against_the_current_switch(select_backend) -> None:
+    """pgvector is implemented (ticket 06), so this no longer demonstrates
+    recovery from a failed build (see
+    `test_a_failed_build_leaves_no_half_initialised_singleton` for that,
+    covered via the lexical store's remaining unimplemented backend
+    instead) - it now just proves a genuine backend swap rebuilds the
+    singleton, qdrant -> pgvector -> qdrant."""
     original = get_vector_store()
 
     select_backend(KB_VECTOR_BACKEND="pgvector", KB_PROFILE="server", KB_DATABASE_URL=_PG_URL)
-    with pytest.raises(KbError):
-        get_vector_store()
+    swapped = get_vector_store()
+    assert isinstance(swapped, PgVectorStore)
+    assert swapped is not original
 
     select_backend(KB_VECTOR_BACKEND="qdrant", KB_PROFILE="local")
     rebuilt = get_vector_store()
 
     assert isinstance(rebuilt, QdrantVectorStore)
     assert rebuilt is not original
+    assert rebuilt is not swapped
 
 
 def test_reset_rebuilds_the_lexical_store_against_the_current_switch(select_backend) -> None:
@@ -129,13 +148,17 @@ def test_reset_rebuilds_the_lexical_store_against_the_current_switch(select_back
 
 
 def test_a_failed_build_leaves_no_half_initialised_singleton(select_backend) -> None:
-    select_backend(KB_VECTOR_BACKEND="pgvector", KB_PROFILE="server", KB_DATABASE_URL=_PG_URL)
+    """pgvector (vector) is implemented as of ticket 06, so this now exercises
+    the property through the lexical store's remaining unimplemented backend,
+    pg-search - same `_build_store` shape, same guarantee: a failed build
+    must not cache a broken singleton."""
+    select_backend(KB_LEXICAL_BACKEND="pg-search", KB_PROFILE="server", KB_DATABASE_URL=_PG_URL)
 
     with pytest.raises(KbError):
-        get_vector_store()
+        get_lexical_store()
 
     # A second call must retry the build, not hand back a store that was never
     # constructed - and reset must stay callable with nothing cached.
     with pytest.raises(KbError):
-        get_vector_store()
-    reset_vector_store()
+        get_lexical_store()
+    reset_lexical_store()
