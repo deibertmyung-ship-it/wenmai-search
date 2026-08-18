@@ -276,6 +276,34 @@ def _verify_bit_exact(
     return len(expected), all_equal
 
 
+def _pgvector_floats(value) -> list[float]:
+    """Decode a `chunk.embedding` read as either a `pgvector.Vector`/numpy
+    array (the normal path, when `register_vector` has run on the physical
+    connection this query happened to land on) or the raw wire text
+    `"[1,2,3]"` (when it has not).
+
+    `pgvector.psycopg.register_vector` is registered per physical DBAPI
+    connection via a SQLAlchemy `"connect"` event
+    (`pgvector_store.py::_ensure_vector_adapter_registered`), fired only on
+    connections opened *after* the first `PgVectorStore()` is constructed.
+    This CLI's `migrate_vectors_command` calls `init_db()` - which can open
+    and pool a connection through the shared engine - before
+    `migrate_vectors()` ever builds a `PgVectorStore` target, so the
+    verification read here can land on an earlier, unregistered connection
+    and get the driver's default (undecoded) text representation instead.
+    Confirmed against the live dev database: writes are unaffected (the
+    write path never reads a `vector` column back), and the real serving
+    path (`search_dense`) is unaffected too (`<=>` distance is computed
+    server-side and returned as `double precision`, never as a `vector`) -
+    only this migration-only verification read can hit it. Parsing the text
+    form defensively here is simpler and more targeted than restructuring
+    when the adapter gets registered.
+    """
+    if isinstance(value, str):
+        return [float(x) for x in value.strip("[]").split(",")]
+    return [float(x) for x in value]
+
+
 def _read_target_vectors(
     target, target_backend: str, ids: list[str], dim: int
 ) -> dict[str, bytes]:
@@ -307,5 +335,5 @@ def _read_target_vectors(
                 # register_vector decodes the `vector` column to a numpy
                 # float32 array; repack to canonical bytes so the comparison
                 # is against the stored float32 width, not Python float64.
-                out[point_id] = _f32_bytes([float(x) for x in row[1]], dim)
+                out[point_id] = _f32_bytes(_pgvector_floats(row[1]), dim)
     return out
