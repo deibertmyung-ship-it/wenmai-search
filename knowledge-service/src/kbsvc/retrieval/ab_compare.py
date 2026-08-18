@@ -385,7 +385,28 @@ def load_stacks(profile: str) -> tuple[Stack, Stack]:
     Qdrant and Tantivy each take a lock, but those locks do not conflict with
     the SQLite/Postgres engine the new in-database stores share. The four
     stores coexist for the duration of the run.
+
+    Calls `ensure_collection(dim)` on the new dense store before handing it
+    back - load-bearing, not idempotent housekeeping. `PgVectorStore`/
+    `SqliteVecStore.search_dense` both start with `if self._dim is None:
+    return []` (a real store, freshly constructed by this function, has
+    never had `ensure_collection` called on it - the *data* was written by
+    an earlier `migrate-vectors` run in a different process, but this
+    Python object's own `_dim` starts unset). Skipping this call does not
+    raise anywhere - it makes every `new.dense`/`new.exact_dense` query
+    silently return `[]`. For the server profile's *soft* cell that is
+    doubly dangerous: both `new_dense` and `exact_dense` (the ground truth)
+    come from the same under-initialised `pg` instance, so every query's
+    "relevant" set and "retrieved" set are both empty - `_recall_at_k`
+    defines an empty-vs-empty comparison as a pass - and the cell reports a
+    perfect `Recall@10 1.0000` while never having executed a real query.
+    Confirmed against the live dev database: this is exactly what produced
+    `旧 0.0000 → 新 1.0000` on a first real run - Qdrant genuinely searched
+    and came back with results (scored against an empty ground truth, so
+    `_recall_at_k` counted it as a miss), while pgvector's "perfect" score
+    was two empty sets agreeing with each other.
     """
+    from ..embedding import get_dense_embedder
     from ..lexical.fts5_store import Fts5LexicalStore
     from ..lexical.pg_search_store import PgSearchLexicalStore
     from ..lexical.tantivy_store import TantivyLexicalStore
@@ -396,12 +417,14 @@ def load_stacks(profile: str) -> tuple[Stack, Stack]:
     old = Stack()
     new = Stack()
     stores = []
+    dim = get_dense_embedder().dim
 
     if profile == "local":
         q = QdrantVectorStore()
         t = TantivyLexicalStore()
         s = SqliteVecStore()
         f = Fts5LexicalStore()
+        s.ensure_collection(dim)
         stores = [q, t, s, f]
         old.dense = _dense_ids(q)
         old.lexical = _lexical_ids(t)
@@ -414,6 +437,7 @@ def load_stacks(profile: str) -> tuple[Stack, Stack]:
         t = TantivyLexicalStore()
         pg = PgVectorStore()
         ps = PgSearchLexicalStore()
+        pg.ensure_collection(dim)
         stores = [q, t, pg, ps]
         old.dense = _dense_ids(q)
         old.lexical = _lexical_ids(t)
