@@ -78,6 +78,20 @@ class Settings(BaseSettings):
     qdrant_collection: str = "kb_chunks"
     qdrant_timeout: float = 30.0
 
+    # pgvector's own HNSW query-time search breadth. pgvector's extension
+    # default (40) is tuned for uniformly-distributed synthetic vectors, not
+    # semantically clustered real text - measured against the real 22k-chunk
+    # corpus (ADR-0008 ticket 11), ef_search=40 gave a bare 0.6674 average
+    # Recall@10 against pgvector's own exact brute-force ground truth (i.e.
+    # HNSW approximation error alone, nothing to do with Qdrant). 200 was
+    # chosen from that same measurement: recall climbs to 0.8930 there
+    # (0.9372 at 400) while added latency stays small and flattens out past
+    # 100 (21.0ms at 40 -> 31.2ms at 100 -> 34.0ms at 200 -> 35.2ms at 400) -
+    # each doubling of ef_search buys much less latency than the recall
+    # curve's early climb costs, past this point diminishing enough that 200
+    # is a defensible default rather than chasing the last few points at 400.
+    pgvector_ef_search: int = 200
+
     # --- lexical store (tantivy inverted index) --------------------------
     # Empty -> data_dir/lexical. Writers need a heap; tantivy's floor is 15 MB.
     lexical_dir: Path | None = None

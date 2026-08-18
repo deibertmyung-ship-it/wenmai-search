@@ -419,6 +419,16 @@ class PgVectorStore:
         with self._engine.begin() as conn:
             if needs_exact_scan:
                 conn.execute(_DISABLE_INDEXSCAN_SQL)
+            else:
+                # `SET`/`SET LOCAL` cannot take a bind parameter (Postgres
+                # requires a literal there, not `$1`) - safe to inline
+                # because this is deployment config (Settings), never
+                # caller/request-controlled, and `int()` guarantees a plain
+                # number reaches the string. See `Settings.pgvector_ef_search`
+                # for why 40's extension default is wrong for this corpus.
+                conn.execute(
+                    text(f"SET LOCAL hnsw.ef_search = {int(self.settings.pgvector_ef_search)}")
+                )
             rows = conn.execute(stmt, params).fetchall()
 
         hits: list[SearchHit] = []
