@@ -64,16 +64,21 @@ a single `with_index` Tantivy query; a filter expressed as an ordinary SQL
 top - `tests/test_pg_search_store.py::TestFilteringInsideDSL` asserts this
 structurally via `EXPLAIN`. `build_query` mirrors
 `lexical/tantivy_store.py:302-332`'s Occur.Must/Should structure: the body
-terms form a Should-wrapped-in-Must clause (pg_search's `paradedb.term_set`
-*is* that Should-of-terms-against-one-field shape, confirmed empirically to
-be OR - not AND/superset - semantics; see `_term_set`'s docstring), tenant_id
-and (if `flt.current_only`) is_current are Must, and each of
-`acl_any`/`source_ids`/`document_ids`/`kinds` present becomes its own
-Must-wrapped `term_set` "any of these values" clause - the same shape
-`tantivy_store.py`'s `_any_of` builds, and `term_set` handles a multi-valued
-array column (`acl`) exactly like a scalar column: "row matches if any of
-its values is in this set" (also confirmed empirically - a chunk with
-`acl = {public, internal}` matches `acl_any=["internal"]`).
+terms form a real Should-of-terms-against-one-field clause built from
+individual `paradedb.term('body', ...)` calls (see `_body_should`'s
+docstring for why - `paradedb.term_set` also expresses OR/any-of semantics
+but, confirmed against the real corpus, does not carry real per-term BM25
+weight past a coarse match-count tier, which wrecks ranking on any query
+containing a common character), tenant_id and (if `flt.current_only`)
+is_current are Must, and each of `acl_any`/`source_ids`/`document_ids`/
+`kinds` present becomes its own Must-wrapped `term_set` "any of these
+values" clause - the same shape `tantivy_store.py`'s `_any_of` builds, and
+`term_set` handles a multi-valued array column (`acl`) exactly like a
+scalar column: "row matches if any of its values is in this set" (also
+confirmed empirically - a chunk with `acl = {public, internal}` matches
+`acl_any=["internal"]`). The distinction: those fields are exact-value
+filters with no relevance to rank by, so `term_set`'s coarse scoring costs
+nothing; body is free text where relevance ranking is the entire point.
 
 Score sign: same-family engine, no negation
 ---------------------------------------------
@@ -162,6 +167,48 @@ def _term_set(field: str, param: str) -> str:
     return f"paradedb.term_set('{field}', (:{param})::text[])"
 
 
+def _body_should(terms: list[str]) -> tuple[str, dict]:
+    """`paradedb.boolean(should => ARRAY[paradedb.term('body', :p0), ...])` -
+    "matches if any term is present in body", scored by real per-term BM25
+    relevance.
+
+    `term_set` (used for every other field in `build_query`) is deliberately
+    NOT used here even though it also expresses OR/any-of semantics for a
+    list of values - confirmed empirically against the real 22k-chunk
+    corpus that `term_set`'s score does not carry real BM25 weight past a
+    coarse "how many of the terms matched" tier: a real query's actual
+    scores came back as 4.0000277 / 2.0000281 / 1.0000281 for chunks
+    matching 4 / 2 / 1 of its terms - constant modulo a near-zero remainder,
+    not a smoothly varying relevance score. On this corpus that silently
+    wrecks ranking: a query containing any single common character (e.g.
+    "系", alone present in 13.6% of chunks here) collapses ranking to "how
+    many terms matched" and drowns out which chunks are actually relevant -
+    reproduced as the ADR-0008 ticket 11 A/B run's `df<50%` bucket passing
+    only 3/53 queries against production data, something no earlier
+    unit-test corpus (small, synthetic) was ever large enough to surface.
+
+    A `should` boolean of individual single-value `paradedb.term` clauses is
+    the form that produces a real BM25 union score: confirmed by switching
+    to it on the same failing query, which recovered smoothly varying
+    scores (37.39, 37.36, 37.27, ...) and reproduced 5 of Tantivy's real
+    top-5 results on the same corpus, where the `term_set` form reproduced
+    none. `term_set` remains the right choice for every other field this
+    module builds a clause for (`document_id`/`source_id`/`acl`/`kind`,
+    `tenant_id`, `is_current`) - those are genuinely "equals one of these
+    values" filters with no relevance ranking to preserve, the distinction
+    `_term_set`'s own docstring draws. Each term gets its own bind
+    parameter (`paradedb.term` takes one scalar value, unlike `term_set`),
+    so this cannot reuse `_term_set`'s single-array-parameter shape.
+    """
+    params: dict = {}
+    clauses = []
+    for i, term in enumerate(terms):
+        key = f"body_term_{i}"
+        clauses.append(f"paradedb.term('body', :{key})")
+        params[key] = term
+    return "paradedb.boolean(should => ARRAY[" + ", ".join(clauses) + "])", params
+
+
 def build_query(terms: list[str], flt: SearchFilter) -> tuple[str, dict]:
     """The whole `paradedb.boolean(must => ARRAY[...])` DSL expression for
     `search()`'s `@@@` predicate, plus its bind parameters.
@@ -171,8 +218,9 @@ def build_query(terms: list[str], flt: SearchFilter) -> tuple[str, dict]:
     (not underscore-prefixed) so tests can inspect the expression
     structurally, mirroring `fts5_store.py::build_match`.
     """
-    params: dict = {"terms": terms, "tenant_id": flt.tenant_id}
-    clauses = [_term_set("body", "terms"), "paradedb.term('tenant_id', :tenant_id)"]
+    body_dsl, body_params = _body_should(terms)
+    params: dict = {**body_params, "tenant_id": flt.tenant_id}
+    clauses = [body_dsl, "paradedb.term('tenant_id', :tenant_id)"]
     if flt.current_only:
         clauses.append("paradedb.term('is_current', :is_current)")
         params["is_current"] = True

@@ -596,7 +596,11 @@ class TestFilteringInsideDSL:
         assert dsl.startswith("paradedb.boolean(must => ARRAY[")
         assert dsl.endswith("])")
         # Each clause is a paradedb call - none escape into SQL AND/WHERE.
-        assert "paradedb.term_set('body'" in dsl
+        # body is a should-of-terms (real BM25 union scoring), not term_set
+        # (whose scoring collapses to a match-count tier - see
+        # `_body_should`'s docstring) - every other field below is a genuine
+        # exact-value filter, where term_set's OR semantics are correct.
+        assert "paradedb.boolean(should => ARRAY[paradedb.term('body'" in dsl
         assert "paradedb.term('tenant_id'" in dsl
         assert "paradedb.term('is_current'" in dsl
         assert "paradedb.term_set('acl'" in dsl
@@ -610,7 +614,10 @@ class TestFilteringInsideDSL:
         assert params["source_id_values"] == ["s1"]
         assert params["kind_values"] == ["section"]
         assert params["is_current"] is True
-        assert params["terms"] == ["hello", "world"]
+        # Each body term gets its own bind parameter (paradedb.term takes a
+        # single scalar, unlike term_set's array parameter).
+        assert params["body_term_0"] == "hello"
+        assert params["body_term_1"] == "world"
 
     def test_search_sql_has_no_filter_outside_the_dsl(
         self, store, pg_engine, tenant
@@ -690,11 +697,12 @@ class TestFilteringInsideDSL:
             plan = _explain(
                 pg_engine,
                 "SELECT id FROM chunk WHERE id @@@ paradedb.boolean("
-                "must => ARRAY[paradedb.term_set('body', (:terms)::text[]), "
+                "must => ARRAY[paradedb.boolean(should => "
+                "ARRAY[paradedb.term('body', :term0)]), "
                 "paradedb.term('tenant_id', :tenant_id), "
                 "paradedb.term_set('document_id', (:docs)::text[])])",
                 {
-                    "terms": ["token1"],
+                    "term0": "token1",
                     "tenant_id": tenant,
                     "docs": ["doc7"],
                 },
