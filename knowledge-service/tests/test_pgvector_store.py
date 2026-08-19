@@ -762,6 +762,52 @@ class TestSearchDense:
         assert {h.id for h in hits} == {p1.id, p2.id}
 
 
+class TestReadOnlyProcessSelfSufficiency:
+    """A store that never had `ensure_collection` called must still search.
+
+    Regression test for the production bug found on 2026-08-19, during ticket
+    12's cutover: the whole dense half of hybrid search silently returned
+    nothing, while sparse kept working and covered for it, so results looked
+    plausible and nothing errored.
+
+    `_dim` caches a fact about the *database*, but only `ensure_collection`
+    sets it, and the API process calls that exactly once - inside
+    `if settings.run_api_worker:` (`api/app.py`), which is False for the whole
+    server profile (`KB_API_WORKER_ENABLED=false` in `deploy/`). So every
+    read-only process - the API, `kbsvc search` - searched with `_dim is None`
+    and took the `return []` early exit without ever querying Postgres.
+
+    `QdrantVectorStore.search_dense` has no such precondition (the collection
+    lives on the server), which is why this stayed invisible until the backend
+    switch, and `PgSearchLexicalStore.search` has none either, which is why
+    only the dense half broke.
+
+    Every other test in this file goes through the `store` fixture, which
+    calls `ensure_collection` - so the suite baked in the very ritual
+    production does not perform. This one deliberately does not use it.
+    """
+
+    def test_search_dense_without_ensure_collection(self, _fast_schema, pg_engine, tenant):
+        from kbsvc.vector.pgvector_store import PgVectorStore
+
+        point = _seed_point(pg_engine, tenant, dense=_vec(1.0, 0.0))
+        # The writer is always initialised in production - `ingest/worker.py`
+        # calls `ensure_collection` on every publish.
+        writer = PgVectorStore()
+        writer.ensure_collection(FAST_DIM)
+        writer.upsert([point])
+
+        # The reader is not. This is the API process under
+        # KB_API_WORKER_ENABLED=false, verbatim.
+        reader = PgVectorStore()
+        assert reader._dim is None
+
+        hits = reader.search_dense(
+            _vec(1.0, 0.0), limit=10, flt=SearchFilter(tenant_id=tenant)
+        )
+        assert [h.id for h in hits] == [point.id]
+
+
 # ---------------------------------------------------------------------------
 # 6. Regression: multi-valued/array filters must force the planner off the
 # HNSW-ignores-the-filter path (discovered via the ticket's own required

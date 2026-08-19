@@ -239,6 +239,37 @@ class TestDeletes:
 # 4. search_dense
 # ---------------------------------------------------------------------------
 
+class TestReadOnlyProcessSelfSufficiency:
+    """A store that never had `ensure_collection` called must still search.
+
+    Sibling of `tests/test_pgvector_store.py`'s class of the same name, added
+    with it: the two stores carried the identical `if self._dim is None:
+    return []` early exit, and the pgvector one shipped a silently dense-less
+    production during ADR-0008 ticket 12's cutover. Here the reachable caller
+    is `kbsvc search` (`cli.py` runs `init_db()` and goes straight to the
+    retrieval pipeline, never calling `ensure_collection`); the API happens to
+    escape it because `run_api_worker` derives True for a fully in-process
+    local profile - a coincidence of that derivation, not a property this
+    store should depend on.
+    """
+
+    def test_search_dense_without_ensure_collection(self, tmp_path, monkeypatch):
+        _setup_store_env(monkeypatch, tmp_path)
+        from kbsvc.vector.sqlite_vec_store import SqliteVecStore
+
+        writer = SqliteVecStore()
+        writer.ensure_collection(dim=4)
+        writer.upsert([_make_point("c1", [1.0, 0.0, 0.0, 0.0])])
+
+        reader = SqliteVecStore()
+        assert reader._dim is None
+
+        hits = reader.search_dense(
+            [1.0, 0.0, 0.0, 0.0], limit=3, flt=SearchFilter(tenant_id="t")
+        )
+        assert [h.id for h in hits] == ["c1"]
+
+
 class TestSearchDense:
     def test_returns_sorted_by_distance(self, tmp_path, monkeypatch):
         _setup_store_env(monkeypatch, tmp_path)

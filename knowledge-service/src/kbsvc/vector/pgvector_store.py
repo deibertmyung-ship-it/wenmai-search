@@ -347,7 +347,21 @@ class PgVectorStore:
         pay the sequential-scan cost.
         """
         if self._dim is None:
-            return []
+            # `_dim` caches a fact about the *database*, but only
+            # `ensure_collection` ever writes it - so a process that only
+            # reads never sets it and would take this early exit forever,
+            # reporting an empty dense half of every hybrid query without an
+            # error anywhere. That is not hypothetical: the API calls
+            # `ensure_collection` exactly once, inside `if run_api_worker`
+            # (`api/app.py`), which is False for the entire server profile,
+            # so the 2026-08-19 cutover shipped a silently dense-less
+            # production until `TestReadOnlyProcessSelfSufficiency` pinned it.
+            # Resolve it from the catalog instead of trusting instance state:
+            # `PgSearchLexicalStore.search` needs no such ritual either, which
+            # is exactly why the sparse half kept working and masked this.
+            self._dim = get_pgvector_dimension(self._engine)
+            if self._dim is None:
+                return []  # `chunk.embedding` genuinely does not exist yet
 
         # `embedding IS NOT NULL` is technically implied by the HNSW index
         # (it never contains NULL entries), but it is spelled out anyway: a

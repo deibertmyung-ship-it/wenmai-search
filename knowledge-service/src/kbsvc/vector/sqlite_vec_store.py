@@ -302,7 +302,16 @@ class SqliteVecStore:
         flt: SearchFilter,
     ) -> list[SearchHit]:
         if self._dim is None:
-            return []
+            # Resolve from `sqlite_master` rather than trusting instance
+            # state - see `PgVectorStore.search_dense` for the full story.
+            # Same defect, and it reached production there: `_dim` records a
+            # fact about the database but only `ensure_collection` writes it,
+            # so a read-only process (`kbsvc search`, which goes straight from
+            # `init_db()` to the retrieval pipeline) silently reported an
+            # empty dense half instead of querying.
+            self._dim = get_vec0_dimension(self._engine)
+            if self._dim is None:
+                return []  # `chunk_vec` genuinely does not exist yet
         vec_blob = _vector_to_blob(vector)
 
         # Build the KNN query with push-down filters.
