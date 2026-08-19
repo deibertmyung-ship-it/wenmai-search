@@ -4,10 +4,13 @@ services:
   postgres:
     # ParadeDB: standard PostgreSQL 17 plus pg_search and pgvector, both
     # pre-installed and already wired into shared_preload_libraries (ADR-0008
-    # ticket 05). `latest-pg17` is dev-only - production must pin a specific
-    # tag; see docs/04-runbook.md section 2 for why and for the PG16->17
-    # upgrade procedure (section 6).
-    image: paradedb/paradedb:latest-pg17
+    # ticket 05). Pinned by digest rather than a tag: this is the exact image
+    # tested throughout tickets 05-09 and used for the 2026-08-18 production
+    # PG16->17 cutover (pg_search 0.25.2, pgvector 0.8.4). Re-derive with
+    # `docker inspect paradedb/paradedb:latest-pg17 --format '{{json .RepoDigests}}'`
+    # before ever changing this - see docs/04-runbook.md section 2 for the
+    # PG16->17 upgrade procedure (section 6).
+    image: paradedb/paradedb@sha256:dca046b8a0ddd070c368d5254cbb7f596b3b7bc67bc2efa7c0fbe881087883bb
     # Docker's default /dev/shm is 64MB. pgvector's parallel HNSW build fails
     # against that ceiling - only at index-build time, never on ordinary
     # queries. See docs/04-runbook.md section 2.
@@ -17,7 +20,14 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: kbsvc
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # pgdata_pg17 holds the post-cutover ParadeDB cluster (restored via
+      # pg_dump/pg_restore from the old PG16 volume on 2026-08-18, see ADR-0008
+      # ticket 12 Comments). The old `pgdata` volume is deliberately left
+      # declared below and NOT referenced by any service - it is the PG16
+      # rollback copy (paired with the `kbsvc-postgres-1-pg16-rollback`
+      # container). Do not `docker volume prune` until the observation window
+      # (ticket 12) is over and ticket 13 explicitly authorizes deletion.
+      - pgdata_pg17:/var/lib/postgresql/data
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
@@ -76,6 +86,13 @@ services:
       KB_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       KB_QDRANT_URL: http://qdrant:6333
       KB_QDRANT_API_KEY: ${QDRANT_API_KEY}
+      # Cutover to the ADR-0008 PG-native stack, 2026-08-19 (ticket 12; ticket 11's
+      # A/B report). qdrant/qdrant above is deliberately left wired and the
+      # container kept running - it is the rollback target. Flip both vars back
+      # to qdrant/tantivy to roll back; no rebuild needed, the old indexes are
+      # untouched.
+      KB_VECTOR_BACKEND: ${KB_VECTOR_BACKEND:-pgvector}
+      KB_LEXICAL_BACKEND: ${KB_LEXICAL_BACKEND:-pg-search}
       KB_API_WORKER_ENABLED: "false"
       KB_DENSE_PROVIDER: ${KB_DENSE_PROVIDER:-fastembed}
       KB_DENSE_MODEL: ${KB_DENSE_MODEL:-BAAI/bge-small-zh-v1.5}
@@ -152,11 +169,14 @@ services:
     # that check would report a healthy worker as permanently unhealthy.
     healthcheck:
       disable: true
-    # Jobs are leased, so the Postgres side scales freely - but tantivy takes an
-    # exclusive directory lock and every worker writes the lexical index inline
-    # (ingest/worker.py). A second replica fails to acquire the writer. Raising
-    # this needs the lexical writes moved behind a single writer first; until
-    # then the ceiling is one worker process.
+    # Jobs are leased, so the Postgres side scales freely - the single-writer
+    # ceiling below was a tantivy constraint (exclusive directory lock, every
+    # worker writing the lexical index inline in ingest/worker.py). Since the
+    # 2026-08-19 cutover to KB_LEXICAL_BACKEND=pg-search that lock no longer
+    # applies - pg_search indexes through Postgres, not a shared directory.
+    # Replicas still default to 1 pending ticket 12's throughput verification
+    # during the 14-day observation window; raise KB_WORKER_REPLICAS once that
+    # confirms multi-worker ingestion actually scales as ADR-0008 intended.
     deploy:
       replicas: ${KB_WORKER_REPLICAS:-1}
     depends_on:
@@ -224,7 +244,11 @@ services:
       api: {condition: service_started}
 
 volumes:
+  # PG16 data, preserved as the rollback target for the 2026-08-18 cutover
+  # (see the `postgres` service comment above and ADR-0008 ticket 12). Not
+  # mounted by any service.
   pgdata:
+  pgdata_pg17:
   qdrantdata:
   miniodata:
   kbdata:
