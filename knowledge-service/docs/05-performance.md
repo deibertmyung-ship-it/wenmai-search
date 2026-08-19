@@ -326,6 +326,121 @@ api / worker / mcp 共享一个卷承载词法索引。只读进程按 1 秒节�
 启动那一刻的段集合上。代价是每秒至多一次段元数据重读，实测 `sparse_search` 中位数 12.5ms
 （含与导入的争抢），未见可归因于 reload 的开销。
 
+### ADR-0008 A/B 验收：新旧检索栈对比（真实语料，2026-08-18）
+
+这是本项目第一次拿到旧栈（Qdrant Server + Tantivy）在真实语料上的召回率数字——此前从无
+评测集（ADR-0002/0003/0007 共同指向的缺口），全靠 A/B 框架跑真实数据才第一次量出来。
+
+语料：208 篇 / 22,389 段（与上文 202 篇 / 22,350 段同一批语料，计数口径略有差异，量级一致）。
+方法：真实数据安全复制（`pg_dump`/`pg_restore`，不改动生产库）到独立 ParadeDB 实例，真实
+`migrate-vectors`（Qdrant → pgvector，22,389 点，389.1s，抽样 100 点逐位比对全部一致）+
+真实 `rebuild-lexical`（→ pg_search），四个真实 store（Qdrant/Tantivy 旧栈，pgvector/
+pg_search 新栈）同进程对比，1000 条合成查询集（`kbsvc ab-compare --profile server`）。
+
+```
+硬断言   server 词法   21/53 通过  (df<50% 桶)
+                       668 条分歧       (df≥50% 桶，预期内)
+软断言   server 稠密   Recall@10  旧 0.8801 → 新 0.9571   （Δ均值 +0.0772）
+                       无过滤: 991 查询，回退 38 条
+                       窄过滤: 1 查询，回退 0 条
+                       宽过滤: 1 查询，回退 0 条
+```
+
+**稠密向量（pgvector）质量已明显反超 Qdrant**（0.9571 对 0.8801）——但这是调过
+`hnsw.ef_search`（默认 40 → 200，见上文「pgvector HNSW 参数」相关记录）之后的结果；未调参
+前默认值下新栈是落后旧栈的（约 0.76–0.82），足以说明这一参数此前从未针对真实规模数据验证过。
+
+**词法（pg_search）打分修复后大幅改善但未达票面「集合完全相等」的硬指标**：从最初 3/53
+（一个把全文检索误用「精确值过滤」原语 `term_set` 导致打分完全失真的 bug，已修，见
+issue tracker 07 号票）提升到 21/53。对全部 32 条未通过的低频桶查询逐条复核（同一 seed=42，
+与正式跑同一批查询，非重新抽样）：top-10 重合度全部 ≥ 70%（9/10 重合 22 条、8/10 重合 7 条、
+7/10 重合 3 条），没有一条低重合或零重合——不是结构性错误，是 top-10 边界的排名互换，
+看起来是 pg_search 与 Tantivy 两个独立 BM25 实现间正常的数值差异（同源不同码），不是分词或
+过滤逻辑失效。**这条 32/32 全部可归因，满足票据 11 的红线要求**（无法归因的分歧为零）。
+
+**这个结果按票面标准判定是 FAIL**（票面要求硬断言 100% 通过、软断言零回退，不允许为了
+让结果好看而放宽阈值）——但「新栈整体检索质量是否优于旧栈」和「是否满足这条写死的验收线」
+是两个不同的问题：前者的答案是「是」（稠密更好，词法从灾难性提升到大部分一致），后者的答案
+是「否」。是否要因此调整验收线本身（比如词法格改成软断言、或允许一定比例的边界分歧），还是
+维持严格标准、继续在打分细节上追平，是产品/架构层面的判断，不在这份实测记录的范围内。
+
+**local profile（sqlite-vec + FTS5 vs. 嵌入式 Qdrant + Tantivy）同一批真实语料的结果**：
+
+```
+硬断言   local lexical  442/993 通过  (df<50% 桶 31/53，df≥50% 桶 411/940 预期内)
+硬断言   local dense    992/993 通过  (top-k 集合完全相等)
+```
+
+两个词法桶的低频段分歧（22 条）逐条核实全部可归因（重合度 9/10 或 8/10，无一低于 8/10），
+比 server 侧还干净。稠密 993 条里唯一 1 条分歧也已定位：不是空结果探针一类边界查询，是
+旧栈（嵌入式 Qdrant，HNSW 近似搜索）与新栈（sqlite-vec，本文档上一节实测确认的严格线性
+暴力扫描）在候选相似度接近时于 top-10 最后一名产生的边界差异——比较一个近似索引与一个
+精确索引，这类边界漂移是检索方式的内在原理决定的，不是实现问题，理论上无法在维持两种索引
+策略不变的前提下消除到真正的 0。完整归因过程见
+`.scratch/storage-consolidation/11-ab-report.md`。
+
+### ADR-0008 延迟基准：新旧栈各半侧对比（真实语料，2026-08-19）
+
+A/B 框架只测召回/等价性，不测延迟。本节补齐票据 11 的欠账。方法：复用 `ab_compare`
+的 `load_stacks` / `generate_queries`，四个真实 store 同进程存活，同一批合成查询的
+查询向量只嵌入一次并**排除在计时外**（两栈共享同一个 embedder，嵌入不是存储层差异）。
+275 条无过滤随机查询 + 80 条窄过滤（单 document）+ 40 条宽过滤（单 source），前 25 条
+预热不计入，热态。语料同上（208 篇 / 22,389 段）。
+
+**跑在安全副本上，未碰生产库。** 新栈连 `kbsvc-server-realdata`（pg_restore 副本，
+端口 55434）；旧栈稠密连真实 `kbsvc-qdrant-1` 只读，词法用从 docker 卷 `kbsvc_kbdata`
+只读复制出来的 Tantivy 索引。原始输出见
+`.scratch/storage-consolidation/bench_latency_server_300.log`，脚本
+`.scratch/storage-consolidation/bench_latency.py`。
+
+| 半侧 / 过滤 | 旧栈 median | 旧栈 p95 | 新栈 median | 新栈 p95 | median 新/旧 |
+|---|---|---|---|---|---|
+| 稠密 / 无过滤 | 64.0 ms | 149.2 ms | **45.8 ms** | 107.5 ms | **0.71×（更快）** |
+| 稠密 / 窄（单 document，n=80） | 60.6 ms | 138.3 ms | **47.9 ms** | 188.4 ms | 0.79× |
+| 稠密 / 宽（单 source，n=40） | 72.5 ms | 193.0 ms | **51.6 ms** | 121.1 ms | 0.71× |
+| 词法 / 无过滤 | **13.3 ms** | 28.0 ms | 78.8 ms | 191.0 ms | **5.92×（更慢）** |
+
+参照：embedder（bge-small-zh-v1.5，fastembed CPU）自身 median 14.2 ms / p95 37.6 ms，
+与存储无关、两栈都要付。
+
+**稠密一路变快**：pgvector HNSW（`hnsw.ef_search=200`）在三档过滤上 median 都比 Qdrant
+Server 低约 20–30%，无过滤 p95 也更低（108 vs 149 ms）。窄过滤 p95 有一条 551 ms 的
+离群（pgvector 那次），median 不受影响——观察期需留意窄过滤尾延迟，但样本里仅 1/80。
+
+**词法一路变慢，是本次切换唯一明确的性能回退**：pg_search median 79 ms 对 Tantivy
+13 ms，约 6 倍；p95 191 ms 对 28 ms。量级仍在「亚秒、可交互」范围，但相对旧栈是实打实
+的回退，且混合检索目前两路是**串行**执行（见 `retrieval/pipeline.py` 的 `_run_retrievers`：
+dense 段跑完才进 sparse 段，没有用线程/协程并行），所以词法这 ~66 ms 增量直接叠加到 hybrid
+端到端，而不是被稠密一路掩盖。若改成并行，hybrid 端到端由较慢的一路决定，词法回退的影响
+会从「相加」变成「封顶」——这是观察期内一个低风险、高收益的优化项。
+
+**一个重要的运维前提：BM25 索引必须合并段。** 这个副本最初测出来 pg_search 慢到
+~1500 ms（63× Tantivy），`EXPLAIN ANALYZE` 显示 `Segment Count: 10`——它经
+`pg_restore` 物理复制 + 批量灌库而来，Tantivy 段从未合并。对 `chunk_bm25` 做一次
+`REINDEX`（80 秒，段数 10→4）后降到表中的 ~79 ms。生产索引由 `rebuild-lexical`/增量
+写入正常构建、段数应健康，不应出现这个量级，但**这条进观察期 runbook**：若线上词法延迟
+异常飙到秒级，先查 `EXPLAIN` 里的 `Segment Count`，必要时 `REINDEX INDEX CONCURRENTLY
+chunk_bm25`。这也是为什么不能直接拿 pg_restore 副本的冷数字判断生产性能。
+
+### ADR-0008 后，「嵌入式 Qdrant 外推到 10 万段」一节的去向
+
+上文「嵌入式 Qdrant 没有 HNSW 意味着什么」中按 N 外推到 10 万 / 50 万段的那张表
+（~1.4 s / ~7 s）描述的是**迁移前 local profile 的嵌入式 Qdrant**——纯 Python 逐点
+O(N) 扫描。迁移后：
+
+- local profile 的稠密一路换成 sqlite-vec，仍是精确暴力 KNN（`spike_01_sqlite_vec.py`
+  已确认严格线性、无 ANN），斜率特征与旧嵌入式 Qdrant 同类，但 KNN 在 sqlite-vec 的
+  Rust 扩展里执行，而非旧的 `local/sparse_distances.py` 纯 Python 逐点点积；
+- **server profile 的稠密一路是 pgvector HNSW，O(log N)，不再随语料规模线性劣化**，
+  「10 万段触发 1.4 秒」这个预警对 server profile 不再成立。扩容信号表中
+  「chunk 数接近 10 万 → 稠密 1.4 秒」一条仅对旧嵌入式 local 栈有效，该栈在票据 13
+  删除旧实现后随之移除。
+
+local profile 端到端（含嵌入/融合/重排，而非 spike 的净向量基准）本次未重测——票据 11
+用的 local 真实语料副本（SQLite + 嵌入式 Qdrant 副本）在复测前已被清理，重建需
+~10 分钟向量迁移外加嵌入式 Qdrant 冷缓存建 HNSW 图。server 是本次实际切换的目标 profile，
+延迟基准以上表为准；local 端到端数字留待有需要时补测。
+
 ## 抄袭检测的性能约束
 
 仅 PostgreSQL。见 [ADR-0001](adr/0001-selectively-port-noplag-into-kbsvc.md)。
