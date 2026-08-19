@@ -92,16 +92,10 @@ if self._dim is None:
 - CLI 路径同样修复。
 - postgres 容器 ID `7c5ba7099de1` 在整个切换过程中保持不变。
 
-## 五、未决事项（不自行决定）
+## 五、后续事项
 
-1. **提交**：本次 5 个文件（+136/-12）仍在工作树，尚未 `git commit`：
-   - `knowledge-service/src/kbsvc/vector/pgvector_store.py`
-   - `knowledge-service/src/kbsvc/vector/sqlite_vec_store.py`
-   - `knowledge-service/tests/test_pgvector_store.py`
-   - `knowledge-service/tests/test_sqlite_vec_store.py`
-   - `knowledge-service/deploy/docker-compose.yml`
-   - 建议拆两个提交：(a) `fix: pgvector dense search silently returned empty for read-only processes (ADR-0008 ticket 12)`；(b) `chore: cut production over to pgvector/pg-search (ADR-0008 ticket 12)`。**不得**加入 QA/*、`docs/05-performance.md`、`.codebase-memory/`、`out/`、`{const` 等无关文件。
-2. **flaky 计时测试 `TestNarrowFilterFaster`**：是否接受现状 / 把新测试挪到它之后 / 重新校准——留待人判，不单方面放宽阈值。
+1. **提交（已完成）**：本次改动分三个提交入库——`be56eef`（fix：稠密检索只读进程静默返回空，2 源码 + 2 测试）、`31af8ca`（chore：生产切到 pgvector/pg-search，compose）、`e3bdf24`（docs：本会话总结）。无关的既有改动（QA/*、`docs/05-performance.md`、`.codebase-memory/`、`out/`、`{const` 等）均未带入。
+2. **flaky 计时测试 `TestNarrowFilterFaster`（人已决定：接受现状）**：不放宽 1.5x 阈值、不挪动新增的只读回归测试。`--deselect` 对照证明修复代码仍生效时该用例通过，故非本次修复引入的回归；该断言贴阈值边缘、有 commit `4fa39d5` 同类前科，10 万级基准才是真正的性能守门。若日后频繁误报，再单独开票重新校准该计时断言本身。
 3. **14 天观察期（自 2026-08-19 起）**：盯标题级查询、P95 延迟、摄入吞吐、磁盘。
 4. **多 worker 吞吐验证**：`KB_WORKER_REPLICAS` 仍为 1；pg_search 下 Tantivy 单写者锁已消失，提升副本并测量是 ADR 的核心承诺，在观察期内完成。
 5. **清理（不是现在）**：`kbsvc-dev-paradedb` 测试容器与 `kbsvc_test` 库可留作重跑测试；旧 PG16 卷/容器与 Qdrant 数据保留到 13 号票。
