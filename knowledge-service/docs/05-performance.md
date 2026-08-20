@@ -398,29 +398,77 @@ A/B 框架只测召回/等价性，不测延迟。本节补齐票据 11 的欠�
 | 稠密 / 无过滤 | 64.0 ms | 149.2 ms | **45.8 ms** | 107.5 ms | **0.71×（更快）** |
 | 稠密 / 窄（单 document，n=80） | 60.6 ms | 138.3 ms | **47.9 ms** | 188.4 ms | 0.79× |
 | 稠密 / 宽（单 source，n=40） | 72.5 ms | 193.0 ms | **51.6 ms** | 121.1 ms | 0.71× |
-| 词法 / 无过滤 | **13.3 ms** | 28.0 ms | 78.8 ms | 191.0 ms | **5.92×（更慢）** |
+| 词法 / 无过滤 | **13.3 ms** | 28.0 ms | 78.8 ms | 191.0 ms | 5.92×（见下节修正） |
 
 参照：embedder（bge-small-zh-v1.5，fastembed CPU）自身 median 14.2 ms / p95 37.6 ms，
 与存储无关、两栈都要付。
+
+> **绝对值只在本机内部可比，不要外推。** 测量主机是 Intel i5-5300U（2015 年双物理核
+> 移动 CPU，4 线程），Postgres 跑在 Docker Desktop 的 WSL2 虚拟机里，Tantivy 跑在
+> Windows 原生进程内。容器里 `SELECT count(*) FROM generate_series(1,2e7)` 要 24–40 秒
+> （常见服务器约 2 秒）。这些数字对容量规划没有参考价值，只有**同一次循环里交叉测出的
+> 比值**是可信的。下节的复核也说明：本机后台负载会让同一份代码的比值在 4.08× 到 7.45×
+> 之间浮动。
 
 **稠密一路变快**：pgvector HNSW（`hnsw.ef_search=200`）在三档过滤上 median 都比 Qdrant
 Server 低约 20–30%，无过滤 p95 也更低（108 vs 149 ms）。窄过滤 p95 有一条 551 ms 的
 离群（pgvector 那次），median 不受影响——观察期需留意窄过滤尾延迟，但样本里仅 1/80。
 
-**词法一路变慢，是本次切换唯一明确的性能回退**：pg_search median 79 ms 对 Tantivy
-13 ms，约 6 倍；p95 191 ms 对 28 ms。量级仍在「亚秒、可交互」范围，但相对旧栈是实打实
-的回退，且混合检索目前两路是**串行**执行（见 `retrieval/pipeline.py` 的 `_run_retrievers`：
-dense 段跑完才进 sparse 段，没有用线程/协程并行），所以词法这 ~66 ms 增量直接叠加到 hybrid
-端到端，而不是被稠密一路掩盖。若改成并行，hybrid 端到端由较慢的一路决定，词法回退的影响
-会从「相加」变成「封顶」——这是观察期内一个低风险、高收益的优化项。
+**词法一路变慢，是本次切换唯一明确的性能回退**，但上表那个 5.92× **不是 pg_search 的
+固有性能**——见下节的根因复核。量级始终在「亚秒、可交互」范围。一个与配置无关、会放大
+影响的结构性事实：混合检索目前两路是**串行**执行（见 `retrieval/pipeline.py` 的
+`_run_retrievers`：dense 段跑完才进 sparse 段，没有用线程/协程并行），所以词法的增量直接
+叠加到 hybrid 端到端，而不是被稠密一路掩盖。若改成并行，hybrid 端到端由较慢的一路决定，
+词法回退的影响会从「相加」变成「封顶」——这是观察期内一个低风险、高收益的优化项。
 
-**一个重要的运维前提：BM25 索引必须合并段。** 这个副本最初测出来 pg_search 慢到
-~1500 ms（63× Tantivy），`EXPLAIN ANALYZE` 显示 `Segment Count: 10`——它经
-`pg_restore` 物理复制 + 批量灌库而来，Tantivy 段从未合并。对 `chunk_bm25` 做一次
-`REINDEX`（80 秒，段数 10→4）后降到表中的 ~79 ms。生产索引由 `rebuild-lexical`/增量
-写入正常构建、段数应健康，不应出现这个量级，但**这条进观察期 runbook**：若线上词法延迟
-异常飙到秒级，先查 `EXPLAIN` 里的 `Segment Count`，必要时 `REINDEX INDEX CONCURRENTLY
-chunk_bm25`。这也是为什么不能直接拿 pg_restore 副本的冷数字判断生产性能。
+### ADR-0008 词法回退的根因复核（2026-08-20）
+
+上节的 5.92× 是黑盒单值。复核把 pg_search 路径拆成分层计时 + 同环境交叉实验，结论是
+**这个数字测的是一份可修复的配置，不是引擎能力**。脚本在
+`.scratch/storage-consolidation/diag_*.py`，全部只跑安全副本，生产库未碰。
+
+先说**排除**掉的假设，避免以后重复排查：top-N 已正确下推进索引
+（`Exec Method: TopKScanExecState`、`Heap Fetches: 10`，不是全量物化再排序）；无磁盘 I/O
+（`Buffers: shared hit=460`，bm25 索引 77 MB 远小于 `shared_buffers` 1974 MB）；连接池确实
+在复用（30 次 checkout 拿到同一个 backend pid，`engine.connect()` 仅约 2 ms）；jsonb /
+TOAST 取回无影响（`SELECT` 去掉 `lexical_payload` 后执行时间不变）；也不是缓存预热——把
+两栈顺序随机化并分离「首次触碰 / 重复」后差距反而更大。段数假设方向还测反了：旧栈
+Tantivy 的真实索引是 **6 段**，比 pg_search 的 4 段还多。
+
+真正成立的是三项，安静主机上同一循环交叉测得（100 条随机查询，n=291 的等价性覆盖
+`generate_queries` 的全部类别）：
+
+| # | 差异 | 延迟 | 对检索结果的影响 |
+|---|---|---|---|
+| — | Tantivy（旧栈基准） | 10.9 ms | — |
+| — | **现状**：活 `chunk` 4 段 + `record: position` + 19×`term` | **44.4 ms（4.08×）** | — |
+| f1 | 段合并 4 → 1（重建索引） | −1.5× | **不中性**：287/291 集合相同、282/291 顺序相同 |
+| f3 | `body` 的 `record: position` → `freq` | −1.1× | **完全中性**：291/291 集合与顺序全同 |
+| f2 | 单个 `paradedb.match` 替代 19 个 `paradedb.term` | −1.5× | **完全中性**：291/291 集合与顺序全同 |
+| — | **三项全修** | **19.7 ms（1.82×）** | — |
+
+**f3 `record` 选项是纯浪费。** `paradedb.schema('chunk_bm25')` 显示 `body` 是 ParadeDB 的
+默认 `position`，而 `TantivyLexicalStore` 用的是 `index_option="freq"`。`build_query` 从不
+发短语查询，位置信息一次也用不到，代价是索引大一倍（57 MB → 28 MB）、建索引慢四倍
+（66 s → 16 s）。改 `pg_search_ddl.py` 的 `_TEXT_FIELDS_CONFIG` 即可，需重建索引。
+
+**f2 的子句形状。** `_body_should` 为每个词元发一个 `paradedb.term`，中文 unigram+bigram
+下每查询中位 19 个、最多 32 个；planning 时间随子句数近似线性增长（1 个词 2.5 ms，
+40 个词 70 ms），执行时间也一样。`paradedb.match` 用一次函数调用表达同一个「任一词元命中、
+按真实 BM25 打分」的并集。注意 `_body_should` 的 docstring 记着 `term_set` 曾「看起来等价」
+却毁了排序，所以这里是按真实 id 逐类别验的，不是假设的。
+
+**f1 段合并不是结果中性的，这点必须单独强调。** Tantivy 的 IDF 按段局部统计，段数变了打平
+附近的排序就会动——291 条里 4 条 top-10 集合变化、9 条顺序变化。这意味着对生产做
+`REINDEX INDEX CONCURRENTLY chunk_bm25` 会轻微改变少数查询的结果，属于要人判的动作，不是
+纯运维优化。（同理，旧栈 6 段与新栈 4 段本来也不在同一套 IDF 上打分，这是既有性质，不是本次
+迁移引入的。）
+
+**保留的观察期 runbook。** 这个副本最初测出 pg_search 慢到 ~1500 ms（63× Tantivy），
+`EXPLAIN ANALYZE` 显示 `Segment Count: 10`——它经 `pg_restore` 物理复制而来、段从未合并。
+`REINDEX` 后（10 → 4 段）降到 ~79 ms。所以线上词法延迟若异常飙到秒级，**先查 `EXPLAIN` 里的
+`Segment Count`**。但要注意本次复核的修正：一次 `REINDEX` 只把段数压到 4，重建才到 1，两者
+之间还有约 1.5× 的差距。
 
 ### ADR-0008 后，「嵌入式 Qdrant 外推到 10 万段」一节的去向
 

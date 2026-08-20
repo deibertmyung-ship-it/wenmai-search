@@ -110,12 +110,16 @@ _ADD_SHARED_METADATA_COLUMNS_SQL: tuple[str, ...] = (
 # hand-escaped literal so the WITH clause's embedded JSON can never drift out
 # of sync with a typo'd quote.
 _TEXT_FIELDS_CONFIG = {
-    "body": {"tokenizer": {"type": "whitespace"}},
-    "tenant_id": {"tokenizer": {"type": "raw"}, "fast": True},
-    "document_id": {"tokenizer": {"type": "raw"}, "fast": True},
-    "source_id": {"tokenizer": {"type": "raw"}, "fast": True},
-    "kind": {"tokenizer": {"type": "raw"}, "fast": True},
-    "acl": {"tokenizer": {"type": "raw"}, "fast": True},
+    # `record: "freq"` omits positions (this query path never issues phrase
+    # queries) and is measurably faster than the default `"position"` while
+    # keeping term-frequency BM25 scoring intact. Filter fields use `"basic"`
+    # because they are exact-value matches with no ranking role.
+    "body": {"tokenizer": {"type": "whitespace"}, "record": "freq"},
+    "tenant_id": {"tokenizer": {"type": "raw"}, "fast": True, "record": "basic"},
+    "document_id": {"tokenizer": {"type": "raw"}, "fast": True, "record": "basic"},
+    "source_id": {"tokenizer": {"type": "raw"}, "fast": True, "record": "basic"},
+    "kind": {"tokenizer": {"type": "raw"}, "fast": True, "record": "basic"},
+    "acl": {"tokenizer": {"type": "raw"}, "fast": True, "record": "basic"},
 }
 _BOOLEAN_FIELDS_CONFIG = {"is_current": {"fast": True}}
 
@@ -123,7 +127,7 @@ _BM25_INDEX_NAME = "chunk_bm25"
 _CREATE_BM25_INDEX_SQL = (
     f"CREATE INDEX IF NOT EXISTS {_BM25_INDEX_NAME} ON chunk "
     "USING bm25 (id, body, tenant_id, document_id, source_id, kind, acl, is_current) "
-    "WITH (key_field = 'id', "
+    "WITH (key_field = 'id', target_segment_count = 1, "
     f"text_fields = '{json.dumps(_TEXT_FIELDS_CONFIG)}', "
     f"boolean_fields = '{json.dumps(_BOOLEAN_FIELDS_CONFIG)}')"
 )

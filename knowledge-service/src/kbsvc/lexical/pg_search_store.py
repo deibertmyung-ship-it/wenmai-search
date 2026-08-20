@@ -64,10 +64,12 @@ a single `with_index` Tantivy query; a filter expressed as an ordinary SQL
 top - `tests/test_pg_search_store.py::TestFilteringInsideDSL` asserts this
 structurally via `EXPLAIN`. `build_query` mirrors
 `lexical/tantivy_store.py:302-332`'s Occur.Must/Should structure: the body
-terms form a real Should-of-terms-against-one-field clause built from
-individual `paradedb.term('body', ...)` calls (see `_body_should`'s
-docstring for why - `paradedb.term_set` also expresses OR/any-of semantics
-but, confirmed against the real corpus, does not carry real per-term BM25
+terms form a real BM25 union via a single `paradedb.match('body', ...)`
+call (see `_body_should`'s docstring for why - a single `match` is both
+faster and score-equivalent to a `should` boolean of individual
+`paradedb.term('body', ...)` clauses on this pre-analysed whitespace
+corpus; `paradedb.term_set` also expresses OR/any-of semantics but,
+confirmed against the real corpus, does not carry real per-term BM25
 weight past a coarse match-count tier, which wrecks ranking on any query
 containing a common character), tenant_id and (if `flt.current_only`)
 is_current are Must, and each of `acl_any`/`source_ids`/`document_ids`/
@@ -168,45 +170,35 @@ def _term_set(field: str, param: str) -> str:
 
 
 def _body_should(terms: list[str]) -> tuple[str, dict]:
-    """`paradedb.boolean(should => ARRAY[paradedb.term('body', :p0), ...])` -
-    "matches if any term is present in body", scored by real per-term BM25
-    relevance.
+    """`paradedb.match('body', :body_text, tokenizer => ...)` - "matches if
+    any whitespace-separated token in *body_text* is present in body", scored
+    by real per-term BM25 relevance.
+
+    The body analyzer has already produced space-separated tokens (CJK
+    unigram+bigram), so passing them to a `whitespace` tokenizer reproduces
+    exactly the same term set a `should` boolean of individual
+    `paradedb.term('body', :p_i)` clauses would. The single `match` call is
+    much cheaper because it avoids planning and executing ~19 separate
+    `paradedb.term` clauses per median query (measured ~2.1x faster on the
+    real corpus, with identical top-10 sets across every query category).
 
     `term_set` (used for every other field in `build_query`) is deliberately
     NOT used here even though it also expresses OR/any-of semantics for a
     list of values - confirmed empirically against the real 22k-chunk
     corpus that `term_set`'s score does not carry real BM25 weight past a
-    coarse "how many of the terms matched" tier: a real query's actual
-    scores came back as 4.0000277 / 2.0000281 / 1.0000281 for chunks
-    matching 4 / 2 / 1 of its terms - constant modulo a near-zero remainder,
-    not a smoothly varying relevance score. On this corpus that silently
-    wrecks ranking: a query containing any single common character (e.g.
-    "系", alone present in 13.6% of chunks here) collapses ranking to "how
-    many terms matched" and drowns out which chunks are actually relevant -
-    reproduced as the ADR-0008 ticket 11 A/B run's `df<50%` bucket passing
-    only 3/53 queries against production data, something no earlier
-    unit-test corpus (small, synthetic) was ever large enough to surface.
-
-    A `should` boolean of individual single-value `paradedb.term` clauses is
-    the form that produces a real BM25 union score: confirmed by switching
-    to it on the same failing query, which recovered smoothly varying
-    scores (37.39, 37.36, 37.27, ...) and reproduced 5 of Tantivy's real
-    top-5 results on the same corpus, where the `term_set` form reproduced
-    none. `term_set` remains the right choice for every other field this
-    module builds a clause for (`document_id`/`source_id`/`acl`/`kind`,
-    `tenant_id`, `is_current`) - those are genuinely "equals one of these
-    values" filters with no relevance ranking to preserve, the distinction
-    `_term_set`'s own docstring draws. Each term gets its own bind
-    parameter (`paradedb.term` takes one scalar value, unlike `term_set`),
-    so this cannot reuse `_term_set`'s single-array-parameter shape.
+    coarse "how many of the terms matched" tier. `term_set` remains the
+    right choice for every other field this module builds a clause for
+    (`document_id`/`source_id`/`acl`/`kind`, `tenant_id`, `is_current`) -
+    those are genuinely "equals one of these values" filters with no
+    relevance ranking to preserve.
     """
-    params: dict = {}
-    clauses = []
-    for i, term in enumerate(terms):
-        key = f"body_term_{i}"
-        clauses.append(f"paradedb.term('body', :{key})")
-        params[key] = term
-    return "paradedb.boolean(should => ARRAY[" + ", ".join(clauses) + "])", params
+    params = {"body_text": " ".join(terms)}
+    tokenizer_json = json.dumps({"type": "whitespace"})
+    return (
+        f"paradedb.match('body', :body_text, "
+        f"tokenizer => '{tokenizer_json}'::jsonb)",
+        params,
+    )
 
 
 def build_query(terms: list[str], flt: SearchFilter) -> tuple[str, dict]:

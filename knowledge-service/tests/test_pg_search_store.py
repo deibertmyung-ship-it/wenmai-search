@@ -34,6 +34,7 @@ do (same convention as `tests/test_pgvector_store.py`).
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 import uuid
@@ -596,11 +597,11 @@ class TestFilteringInsideDSL:
         assert dsl.startswith("paradedb.boolean(must => ARRAY[")
         assert dsl.endswith("])")
         # Each clause is a paradedb call - none escape into SQL AND/WHERE.
-        # body is a should-of-terms (real BM25 union scoring), not term_set
-        # (whose scoring collapses to a match-count tier - see
-        # `_body_should`'s docstring) - every other field below is a genuine
-        # exact-value filter, where term_set's OR semantics are correct.
-        assert "paradedb.boolean(should => ARRAY[paradedb.term('body'" in dsl
+        # body is a single paradedb.match (real BM25 union scoring, faster than
+        # a should-of-terms) - every other field below is a genuine exact-value
+        # filter, where term_set's OR semantics are correct.
+        assert "paradedb.match('body', :body_text" in dsl
+        assert "tokenizer => '{\"type\": \"whitespace\"}'::jsonb" in dsl
         assert "paradedb.term('tenant_id'" in dsl
         assert "paradedb.term('is_current'" in dsl
         assert "paradedb.term_set('acl'" in dsl
@@ -614,10 +615,9 @@ class TestFilteringInsideDSL:
         assert params["source_id_values"] == ["s1"]
         assert params["kind_values"] == ["section"]
         assert params["is_current"] is True
-        # Each body term gets its own bind parameter (paradedb.term takes a
-        # single scalar, unlike term_set's array parameter).
-        assert params["body_term_0"] == "hello"
-        assert params["body_term_1"] == "world"
+        # Body terms are space-joined so a single `whitespace` tokenizer sees
+        # exactly the same term set that individual `paradedb.term` calls did.
+        assert params["body_text"] == "hello world"
 
     def test_search_sql_has_no_filter_outside_the_dsl(
         self, store, pg_engine, tenant
@@ -694,15 +694,16 @@ class TestFilteringInsideDSL:
             )
             conn.execute(text("ANALYZE chunk"))
         try:
+            tokenizer_json = json.dumps({"type": "whitespace"})
             plan = _explain(
                 pg_engine,
                 "SELECT id FROM chunk WHERE id @@@ paradedb.boolean("
-                "must => ARRAY[paradedb.boolean(should => "
-                "ARRAY[paradedb.term('body', :term0)]), "
+                f"must => ARRAY[paradedb.match('body', :body_text, "
+                f"tokenizer => '{tokenizer_json}'::jsonb), "
                 "paradedb.term('tenant_id', :tenant_id), "
                 "paradedb.term_set('document_id', (:docs)::text[])])",
                 {
-                    "term0": "token1",
+                    "body_text": "token1",
                     "tenant_id": tenant,
                     "docs": ["doc7"],
                 },
