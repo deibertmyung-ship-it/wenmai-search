@@ -1,0 +1,11 @@
+{
+    "schema_version": 2,
+    "commit": "6895412dc3ec06e48984f29bf389fa96b22a18b3",
+    "indexed_at": "2026-08-21T01:13:12Z",
+    "project": "wenmai-search",
+    "nodes": 4811,
+    "edges": 19211,
+    "original_size": 11141120,
+    "compressed_size": 1609151,
+    "compression_level": 3
+}
