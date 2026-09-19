@@ -2,7 +2,7 @@
 
 `docker-compose.yml` 是生产部署配置：源码复制进镜像，便于审计、回滚和复现。
 `docker-compose.dev.yml` 是开发覆盖配置：源码以只读 bind mount 挂载进容器，数据库、
-Qdrant、MinIO 和 Tantivy 数据仍使用生产配置中的命名卷。
+Postgres 和 MinIO 数据仍使用生产配置中的命名卷。
 
 开发覆盖会开启 Flask/Uvicorn debug reload，只适用于受信任的本机开发环境；不要把这套
 覆盖文件或端口直接暴露到公网生产环境。

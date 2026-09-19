@@ -39,7 +39,7 @@ Those three columns are *shared* with `PgVectorStore` (both stores' schema-
 ensure add them idempotently - see `db/pg_search_ddl.py`), but ownership of
 the *data* is not implied by ownership of the *schema*. `config.py`'s
 backend validator lets `KB_LEXICAL_BACKEND=pg-search` run with
-`KB_VECTOR_BACKEND` set to `qdrant` or `tantivy` - a deployment where
+`KB_VECTOR_BACKEND=sqlite-vec` - a deployment where
 `PgVectorStore.upsert` never runs against `chunk` at all. If this store only
 wrote `body`/`lexical_payload` on the assumption pgvector's upsert already
 populated `source_id`/`acl`/`is_current` from the same payload, those three

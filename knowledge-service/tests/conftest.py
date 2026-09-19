@@ -1,8 +1,8 @@
 """Test fixtures.
 
-Everything runs against a throwaway data dir: SQLite + local object store +
-embedded Qdrant. The API-owned worker is disabled so tests can control queue
-timing explicitly. No network, Docker or model downloads.
+Everything runs against a throwaway data dir: SQLite (metadata + sqlite-vec
++ fts5) + local object store. The API-owned worker is disabled so tests can
+control queue timing explicitly. No network, Docker or model downloads.
 """
 
 from __future__ import annotations
@@ -36,8 +36,6 @@ def _isolated_environment() -> None:
             "KB_WORKER_BACKOFF_BASE": "0",
             "KB_AUTH_REQUIRED": "false",
             "KB_API_WORKER_ENABLED": "false",
-            "KB_QDRANT_URL": "",
-            "KB_QDRANT_COLLECTION": "kb_test_chunks",
         }
     )
 

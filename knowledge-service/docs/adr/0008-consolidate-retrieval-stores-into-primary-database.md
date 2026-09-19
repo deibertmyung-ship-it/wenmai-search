@@ -1,10 +1,11 @@
 # ADR-0008：检索存储收敛进各 profile 的主数据库
 
-- 状态：Proposed
+- 状态：Accepted
 - 日期：2026-08-14
 - 决策者：项目维护者
 - 影响范围：`vector/`、`lexical/`、`config.py`、`ingest/worker.py`、`ingest/reembed.py`、`db/session.py`、`docker-compose.yml`
 - 触发事件：Tantivy 目录锁把 server profile 永久限制在一个写 worker
+- 实现提交：PR #7（双实现与生产切换）；ticket 13 删除 Qdrant/Tantivy（2026-09-19，人决定放弃剩余观察期与回滚）
 
 ## 背景
 

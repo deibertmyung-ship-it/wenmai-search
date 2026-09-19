@@ -34,8 +34,8 @@ Two columns are genuinely new here:
 already adds them - but this module adds them again, idempotently.
 `config.py`'s backend validator checks `vector_backend` and `lexical_backend`
 independently, so nothing stops a deployment running `KB_LEXICAL_BACKEND=
-pg-search` while `KB_VECTOR_BACKEND` stays `qdrant`/`tantivy` (or the
-reverse) - in the "pg-search without pgvector" shape, `PgVectorStore` is
+pg-search` while `KB_VECTOR_BACKEND` stays `sqlite-vec` (or the reverse)
+- in the "pg-search without pgvector" shape, `PgVectorStore` is
 never constructed and never adds these columns, so this module's own
 schema-ensure must be self-sufficient regardless of which store (or both, or
 neither, in either order) runs first in a given process. Deliberately

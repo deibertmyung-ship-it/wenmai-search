@@ -20,8 +20,8 @@ from ..schemas import JobOut, StatsOut
 
 router = APIRouter(tags=["admin"])
 
-# Simple TTL cache for vector/lexical counts: these trigger full scans on
-# Qdrant/Tantivy and are called on every /stats and /readyz hit.
+# Simple TTL cache for vector/lexical counts: these can be expensive
+# and are called on every /stats and /readyz hit.
 _count_cache: dict[str, tuple[float, int]] = {}
 _COUNT_TTL = 30.0
 

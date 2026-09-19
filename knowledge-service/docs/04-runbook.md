@@ -1,6 +1,6 @@
 # 运维手册
 
-## 1. 本地起步（SQLite + LocalFS + Embedded Qdrant）
+## 1. 本地起步（SQLite + LocalFS + sqlite-vec + fts5）
 
 本地模式不需要 Docker。完成 Python 环境后，从仓库根目录使用统一脚本：
 
@@ -14,29 +14,25 @@ uv venv --python 3.11 .venv
 uv pip install --python .venv -e ".[dev,prod]"
 
 cd ..
-run.bat               # API（嵌入式 Qdrant + worker）→ Web
+run.bat               # API（sqlite-vec + fts5 + worker）→ Web
 run.bat status
 run.bat stop
 ```
 
-`run.bat` 首次启动会创建 SQLite 和嵌入式 Qdrant 集合。应用数据位于 `KB_DATA_DIR`：
+`run.bat` 首次启动会创建 SQLite（元数据 + sqlite-vec + fts5）。应用数据位于 `KB_DATA_DIR`：
 ```
 .kbdata/
-├── kbsvc.db        # SQLite 元数据
+├── kbsvc.db        # SQLite：元数据 + vec0 + fts5
 ├── objects/        # 原始文件（按 hash 派生 key）
-├── models/         # 本地 embedding / parser 模型
-├── qdrant/         # 嵌入式 Qdrant 数据（稠密向量）
-└── lexical/        # Tantivy 倒排索引（词法检索）
+└── models/         # 本地 embedding / parser 模型
 ```
 
-API 生命周期会启动一个后台 worker 线程，并与请求线程共享同一个 Qdrant 客户端和同一个
-Tantivy 索引。停止 API 会同时停止 worker。不要在 API 运行期间另开 `kbsvc worker`、
-`kbsvc search` 或本地 stdio MCP 进程访问同一 `.kbdata/`，否则第二个进程会因目录独占锁
-失败——**Qdrant 与 Tantivy 都持锁**。
+API 生命周期会启动一个后台 worker 线程，并与请求线程共享同一个 SQLite 文件。停止 API
+会同时停止 worker。不要在 API 运行期间另开 `kbsvc worker` 争用同一写锁。
 
 ## 2. 服务端 Profile
 
-compose 栈包含 postgres、qdrant、minio、api、worker、mcp 与 web 七个服务。
+compose 栈包含 postgres、minio、api、worker、mcp 与 web。
 
 ```bash
 cd deploy
@@ -81,7 +77,7 @@ ERROR: could not resize shared memory segment "/PostgreSQL.xxx" to 2144375424 by
 会先插值整个文件**，`${VAR:?}` 缺失就直接报错。所以这两项先填占位串，签发后再替换：
 
 ```bash
-docker compose up -d postgres qdrant minio
+docker compose up -d postgres minio
 docker compose run --rm api kbsvc init                              # 建表 + 租户 + 空词法索引
 docker compose run --rm api kbsvc issue-key mcp-agent --acl public  # 明文只显示这一次
 docker compose run --rm api kbsvc issue-key kbweb --acl public
@@ -96,32 +92,18 @@ docker compose run --rm api python -c "from kbsvc.embedding import get_dense_emb
 docker compose up -d api worker mcp web
 ```
 
-### worker 数量的上限是 1
+### worker 副本
 
-任务表的租约机制本身支持水平扩展，但**词法索引挡在前面**：Tantivy 是进程内库、持目录独占锁，
-而 worker 在 `ingest/worker.py` 里内联写词法索引。第二个 worker 副本抢不到 writer 会失败。
+pg_search 走 Postgres，不再有目录锁。`KB_WORKER_REPLICAS` 可以大于 1。
 
-```bash
-docker compose up -d --scale worker=4      # 今天会挂，不要这么做
-```
+### 共享卷
 
-要真正扩 worker，得先把词法写入收敛到单一写入者背后（独立的 lexical-writer 服务或一个
-专门的任务类型），在那之前 `KB_WORKER_REPLICAS` 只能是 1。
-
-### 共享卷不是可选项
-
-api / worker / mcp 三类容器挂同一个 `kbdata` 卷到 `/data`（`KB_DATA_DIR`），里面是词法索引和
-模型缓存。**不挂共享卷时不会报错**：每个容器各自在自己的层里建一个空的 Tantivy 索引，worker
-写它自己那份，api 读它自己那份空的，于是 hybrid 静默退化成纯 dense，`mode=sparse` 恒返回空。
-`/v1/stats` 的 `lexical_docs` 与 `chunks` 对不上是这个故障的信号。
-
-只读容器（api / mcp）按秒级节流 reload 索引来看见 worker 的提交，见
-`lexical/tantivy_store.py` 的 `_refresh_reader`。
+api / worker / mcp 挂同一个 `kbdata` 卷到 `/data`，主要是模型缓存。检索索引在 Postgres 里。
 
 ### 语料导入
 
-`book/` 以 `/corpus:ro` 挂进 api 与 worker。用 CLI 导入时**必须加 `--no-run-worker`**——
-CLI 自带的 drain 会去抢 worker 容器已持有的 Tantivy 写锁：
+`book/` 以 `/corpus:ro` 挂进 api 与 worker。用 CLI 导入时加 `--no-run-worker`，让 worker
+容器消费队列：
 
 ```bash
 docker compose run --rm api kbsvc ingest /corpus --source guji \
@@ -171,9 +153,8 @@ curl -X POST localhost:8077/v1/jobs/<id>/retry
 3. 只有 dense 有结果 → 查询词在语料里不以原字出现，属正常。
 4. 两路都为空 → 检查 `filter`：`current_only` 与 `acl` 是最常见的误杀。
 
-**索引目录被占用** — 嵌入式 Qdrant 与 Tantivy 各自只允许一个进程持有 `.kbdata/qdrant`、
-`.kbdata/lexical`。先执行 `run.bat stop`，并关闭仍在运行的 `kbsvc search`、`kbsvc worker`
-或 stdio MCP 进程，再重新启动。
+**SQLite 被占用** — local profile 下第二个写进程会卡住。先执行 `run.bat stop`，并关闭
+仍在运行的 `kbsvc worker`，再重新启动。
 
 **换了 embedding 模型** — 见第 8 节，使用 `run.bat reembed` 或 `kbsvc reembed`，不需要
 删除原始文件或重新解析文档。
@@ -185,19 +166,13 @@ curl -X POST localhost:8077/v1/jobs/<id>/retry
 `kbsvc backfill-analyzed`（22,345 段约 42 秒），只写元数据库，不动两个索引。改了
 `lexical/tokenizer.py` 之后要加 `--force`，否则存量值仍是旧分词器的产物。
 
-**Windows 上词法索引写入报 `PermissionDenied`（`.pos` / `.fieldnorm`）** — Tantivy 多线程
-写入与按访问扫描的安全软件抢文件句柄。默认 `KB_LEXICAL_WRITER_THREADS=1` 已规避；若被改大
-过，调回 1，或给 `KB_DATA_DIR` 加杀软排除目录。
-
 ## 5. 一致性保证
 
 - 更新：新版本索引成功后，旧版本 chunk 从元数据库与向量库同时删除，并写 `version_superseded` 事件。
 - 删除：软删 document + 物理删 chunk/向量 + `document_deleted` 事件。
 - 中断：worker 崩溃 → 租约到期 → 另一 worker 接管；chunk_id 幂等，重跑不产生重复点。
-- 两个索引：稠密（Qdrant）与词法（Tantivy）在同一次 worker 执行里一起写、一起删。词法侧
-  在写入前先按 `version_id` 整版本删除，与 SQL 侧 `replace_chunks` 同语义，重跑不残留旧
-  切分。语料统计由 Tantivy 自己持有——**统计与索引同源，不会漂移**（旧版本用两张表手工
-  维护，是可能对不上的）。
+- 两个索引：稠密与词法在同一次 worker 事务里一起写、一起删。词法侧在写入前先按
+  `version_id` 整版本删除，与 SQL 侧 `replace_chunks` 同语义，重跑不残留旧切分。
 - 校验：`/v1/stats` 的 `chunks` / `vector_points` / `lexical_docs` 三者应相等。
 
 ## 6. 备份
@@ -206,8 +181,7 @@ curl -X POST localhost:8077/v1/jobs/<id>/retry
 |---|---|
 | 元数据 | `pg_dump` / 复制 `kbsvc.db` |
 | 原始文件 | S3 bucket / `objects/` 目录 |
-| 稠密向量 | server 使用 Qdrant snapshot；local 停止 API 后复制 `qdrant/` |
-| 词法索引 | 停止 API 后复制 `lexical/`，或干脆不备份 |
+| 检索索引 | 已在主数据库里：备份 `kbsvc.db` / `pg_dump` 即可 |
 
 原始文件是唯一不可再生的部分——向量与 chunk 都能从它重建。优先保它。
 
@@ -270,7 +244,6 @@ docker compose up -d api worker plagiarism-worker
       "args": ["-m", "kbsvc.cli", "mcp", "--transport", "stdio"],
       "env": {
         "KB_DATA_DIR": "C:/path/to/knowledge-service/.kbdata",
-        "KB_QDRANT_URL": "",
         "PYTHONIOENCODING": "utf-8"
       }
     }
@@ -278,8 +251,8 @@ docker compose up -d api worker plagiarism-worker
 }
 ```
 
-嵌入式目录不能跨进程共享：运行上述 stdio MCP 前必须先 `run.bat stop`。若需要 Web/API 与
-stdio MCP 同时在线，应改用 server profile 的 Qdrant Server，或让客户端连接远程 MCP。
+local profile 下 stdio MCP 与 API 不要同时写同一个 SQLite 文件。若需要 Web/API 与
+stdio MCP 同时在线，用 server profile，或让客户端连接远程 MCP。
 
 **远程 streamable-http**：
 ```json
@@ -307,7 +280,7 @@ kbsvc reembed --batch-size 256
 ```
 
 `reembed` 从**已存的 chunk 表**重新计算向量：chunk_id、字符偏移、heading_path 都与模型
-无关，因此不需要重跑解析与切分。耗时取决于模型、CPU 和 Qdrant 写入速度。它同时重建词法
+无关，因此不需要重跑解析与切分。耗时取决于模型、CPU 和向量写入速度。它同时重建词法
 索引，让两路始终描述同一份语料。
 
 只有改了切分参数（`KB_CHUNK_*`）才需要走 `reindex`——那会从对象存储里的原始文件重新解析。
@@ -321,15 +294,13 @@ kbsvc reembed --batch-size 256
 
 ### 只重建词法索引
 
-词法索引与嵌入模型无关。从旧版本（自研 BM25 + Qdrant 稀疏向量）升级，或 `/v1/stats` 显示
-`lexical_docs` 与 `chunks` 不一致时，用：
+词法索引与嵌入模型无关。`/v1/stats` 显示 `lexical_docs` 与 `chunks` 不一致时，用：
 
 ```bash
 kbsvc rebuild-lexical --batch-size 512      # 22,659 段约 21 秒
 ```
 
-它不碰稠密向量——为了修一个倒排索引而把整个语料重新过一遍嵌入模型是几分钟的浪费。同样
-需要先 `run.bat stop`：Tantivy 持目录锁。
+它不碰稠密向量。local profile 下先 `run.bat stop`，避免与 API 内置 worker 争用 SQLite。
 
 ### 模型下载受限时
 
@@ -357,7 +328,7 @@ Hub，在受限网络上会挂住数分钟而不是快速失败。
 
 ### 换模型必须重建
 
-向量维度与向量空间在建集合时就固定了。`reembed` 默认会重建当前 Qdrant 集合；
+向量维度与向量空间在建集合时就固定了。`reembed` 默认会重建当前向量集合；
 `--keep-collection` 仅在维度不变且执行断点续跑时使用。只改模型配置而不重建，会导致
 语义空间不一致或在 upsert 时出现维度不匹配。
 
@@ -500,7 +471,7 @@ worker 先排空语料任务再处理检测任务——没有投影的文档会�
 按钮，只保留不可访问提示。
 
 该定位接口复用现有文档版本与 chunk 查询，不新增数据库表、向量点或全文索引；上线
-本功能不需要重建 Qdrant/Tantivy/GIN。只有重新切分、规范化或指纹配置变更时，才按上文
+本功能不需要重建检索索引或 GIN。只有重新切分、规范化或指纹配置变更时，才按上文
 运行 `kbsvc plagiarism rebuild`。
 
 ### 清理
@@ -512,61 +483,14 @@ kbsvc plagiarism cleanup      # 删过期任务、原文、结果、事件与停
 默认保留 30 天（`KB_PLAG_RETENTION_DAYS`）。停用投影只有在没有活动检测的快照
 引用它时才会被删。**这只管 `plag_*` 数据**——对象存储里的原始文件不受影响。
 
-## 10. 迁移到整合存储后端（ADR-0008）
+## 10. 检索存储（ADR-0008）
 
-ADR-0008 把稠密 + 词法两个外部索引收进主数据库：local profile 用 SQLite 的
-sqlite-vec + FTS5，server profile 用 PostgreSQL/ParadeDB 的 pgvector + pg_search。
-旧后端（Qdrant / Tantivy）在确认新后端稳定前**不要删**——回滚只翻一个环境变量。
+稠密 + 词法都在主数据库里：local 用 sqlite-vec + fts5，server 用 pgvector + pg_search。
+Qdrant 与 Tantivy 实现已删除。本版本没有「翻环境变量回旧栈」的回滚；回滚 = 部署上一版
+镜像。磁盘上若仍留着旧 Qdrant 卷或 Tantivy 目录，那是数据残留，代码不再读取。
 
-### 10.1 稠密向量：导出，不要重嵌入
-
-```bash
-# local profile：嵌入式 Qdrant → sqlite-vec
-kbsvc migrate-vectors --from qdrant --to sqlite-vec --batch 1000
-
-# server profile：Qdrant Server → pgvector
-kbsvc migrate-vectors --from qdrant --to pgvector --batch 1000
-```
-
-这是**逐位导出**，不是 `reembed`：Qdrant 里已存的 float32 向量原样搬进新后端，
-top-k 集合保持一致。重嵌入会引入 ONNX 非确定性与批次效应，让「新旧 top-k 相等」
-的验收硬断言因为与存储无关的原因失败。维度从源 collection 配置读取，不读
-`KB_DENSE_DIM`（默认 384 与生产 bge-small-zh-v1.5 的 512 不一致）。
-
-迁移幂等（按 chunk_id upsert，重跑不产生重复），可断点续跑：
+词法索引从 `chunk` 表重建：
 
 ```bash
-kbsvc migrate-vectors --from qdrant --to pgvector --batch 1000 \
-  --resume-after <last_point_id>
+kbsvc rebuild-lexical --batch-size 512
 ```
-
-结束时命令会做两道校验，任一失败以非零码退出：
-
-- 两侧 `count()` 相等；
-- 抽样 100 个 chunk（`--sample` 可调）从目标回读，逐维比对源与目标的 float32
-  字节完全相等。
-
-命令末行打印 `in <秒数>s`——这就是全量迁移耗时，把它记入变更工单。
-
-### 10.2 词法索引：直接重建，不迁移
-
-```bash
-kbsvc rebuild-lexical --batch-size 512   # 22,659 段约 21 秒
-```
-
-正文与 `analyzed` 列都在主数据库的 `chunk` 表里，重建只需几十秒，没有为词法写
-迁移代码的必要。
-
-### 10.3 切换与回滚
-
-确认 `/v1/stats` 里 `chunks` / 向量点数 / 词法文档数三者相等、A/B 门（ADR-0008
-ticket 10/11）通过后，改配置指向新后端并重启：
-
-```bash
-export KB_VECTOR_BACKEND=sqlite-vec     # 或 pgvector
-export KB_LEXICAL_BACKEND=fts5          # 或 pg-search
-```
-
-**回滚 = 翻回环境变量后重启**（`KB_VECTOR_BACKEND=qdrant`、
-`KB_LEXICAL_BACKEND=tantivy`）。旧 collection 与旧词法目录在整个观察期内保留，
-不删；它们是回滚的唯一依据。等观察期结束、确认不再回滚，再单独清理旧数据。

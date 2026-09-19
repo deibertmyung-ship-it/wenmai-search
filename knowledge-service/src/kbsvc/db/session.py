@@ -88,7 +88,7 @@ def _load_sqlite_vec_extension(dbapi_conn) -> None:
         import sqlite_vec
     except ImportError as exc:
         raise RuntimeError(
-            "sqlite-vec extension is required for KB_VECTOR_BACKEND=sqlite-vec "
+            "sqlite-vec extension is required for the local profile "
             "but the Python package 'sqlite-vec' is not installed. "
             "Install it with:  pip install sqlite-vec  "
             f"(original error: {exc})"
@@ -105,13 +105,6 @@ def _make_engine(url: str) -> Engine:
         kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
     engine = create_engine(url, **kwargs)
     if is_sqlite:
-        # Whether to load sqlite-vec on each connection.  The extension is
-        # needed for KB_VECTOR_BACKEND=sqlite-vec; loading it unconditionally
-        # would make sqlite-vec a hard dependency for every local deployment,
-        # including those still on qdrant.  Read the switch once at engine
-        # creation - the listener runs per-connection and must stay cheap.
-        _load_vec = get_settings().vector_backend == "sqlite-vec"
-
         @event.listens_for(engine, "connect")
         def _set_sqlite_pragmas(dbapi_conn, _record):  # pragma: no cover - driver hook
             cursor = dbapi_conn.cursor()
@@ -119,8 +112,7 @@ def _make_engine(url: str) -> Engine:
             cursor.execute("PRAGMA synchronous=NORMAL")
             cursor.execute("PRAGMA busy_timeout=30000")
             cursor.close()
-            if _load_vec:
-                _load_sqlite_vec_extension(dbapi_conn)
+            _load_sqlite_vec_extension(dbapi_conn)
 
     return engine
 

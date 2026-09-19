@@ -3,8 +3,8 @@
 自托管知识检索系统 —— 多格式文档批量导入、可追溯切分、混合检索，通过 **REST** 与 **MCP** 暴露统一查询能力。
 
 ```
-文件 ──▶ 导入控制面 ──▶ 解析(Docling/可插拔) ──▶ 结构化切分 ──┬─▶ 稠密向量 ──▶ Qdrant
-                │                                          └─▶ 词法倒排 ──▶ Tantivy
+文件 ──▶ 导入控制面 ──▶ 解析(Docling/可插拔) ──▶ 结构化切分 ──┬─▶ 稠密向量 ──▶ sqlite-vec / pgvector
+                │                                          └─▶ 词法倒排 ──▶ fts5 / pg_search
                 └── source/document/version/job 状态机、重试、索引事件                 │
                                                                                      ▼
                                           REST /v1/search  ◀── 检索管线 ──▶  MCP search_knowledge
@@ -19,16 +19,12 @@
 |---|---|---|
 | 元数据 | SQLite | PostgreSQL |
 | 对象存储 | 本地文件系统 | S3 / MinIO |
-| 向量库（稠密） | API 进程内嵌 Qdrant | Qdrant Server |
-| 词法索引 | 嵌入式 Tantivy | 嵌入式 Tantivy |
+| 向量库（稠密） | sqlite-vec（同一 kbsvc.db） | pgvector |
+| 词法索引 | fts5（同一 kbsvc.db） | pg_search |
 | 队列 | SQLite + 租约 + API 内置 worker 线程 | PostgreSQL + 租约，可水平扩 worker |
 
 根目录 `run.bat` 启动 API 与 Web；API 生命周期负责启动和停止内置 worker，并与请求线程
-共享同一个嵌入式 Qdrant 客户端与同一个 Tantivy 索引。完整 server profile 仍使用
-`deploy/docker-compose.yml`。
-
-> Tantivy 是进程内的 Rust 库，没有服务端形态，两种 profile 相同。它持有目录锁，所以多个
-> worker 进程不能共写同一个词法索引目录。
+共享同一个 SQLite 文件。完整 server profile 仍使用 `deploy/docker-compose.yml`。
 
 ## 60 秒上手
 
@@ -42,7 +38,7 @@ run.bat
 
 `run.bat` 会自动初始化数据库并在 API 内启动常驻 worker，随后可通过 Web 上传文档。若要在
 `knowledge-service` 目录运行 `python -m kbsvc.cli ingest ...`，请先停止 API，避免第二个进程
-争用嵌入式 Qdrant 与 Tantivy 目录（两者都持目录锁）。
+与内置 worker 争用同一 SQLite 写锁。
 
 ```
 [1] 六壬存验-清-吴师青 › 一、断例
@@ -105,11 +101,11 @@ local 与 server 行为因此完全一致，并且每一路的原始命中都能
 
 Docling、Unstructured 与 Marker 随后端默认安装；它们在当前本地解析链中不需要第三方 API。
 可选基础设施依赖：`pip install '.[fastembed]' '.[postgres,s3]'`。
-存储收敛（ADR-0008）新增后端开关 `KB_VECTOR_BACKEND` / `KB_LEXICAL_BACKEND`；`sqlite-vec` 后端需要 `pip install '.[sqlite-vec]'`，`pgvector` / `pg-search` 复用 `.[postgres]` 里的 `psycopg`。
+`pgvector` / `pg-search` 复用 `.[postgres]` 里的 `psycopg`。
 部分 PDF/OCR 首次解析会下载本地模型权重，因此生产环境应允许首次下载或预热模型缓存。
 
 > `hash` 稠密嵌入不是语义模型，是字符 n-gram 的确定性随机投影。它保证零配置可跑通、
-> 可测试；语义召回由 `fastembed`/`openai` 提供。词法侧无论如何都是真实 BM25（Tantivy）。
+> 可测试；语义召回由 `fastembed`/`openai` 提供。词法侧无论如何都是真实 BM25。
 
 切换模型后用 `kbsvc reembed` 重建向量——chunk_id、字符偏移、heading_path 都与模型无关，
 所以**不重新解析原文件**。词法索引与嵌入模型无关，若只需重建它（例如从旧版本升级，或

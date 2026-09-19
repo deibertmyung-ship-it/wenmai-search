@@ -13,8 +13,8 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 Profile = Literal["local", "server"]
 DenseProvider = Literal["hash", "fastembed", "openai"]
 Reranker = Literal["none", "lexical", "cross-encoder"]
-VectorBackend = Literal["qdrant", "sqlite-vec", "pgvector"]
-LexicalBackend = Literal["tantivy", "fts5", "pg-search"]
+VectorBackend = Literal["sqlite-vec", "pgvector"]
+LexicalBackend = Literal["fts5", "pg-search"]
 
 DEFAULT_DATA_DIR = Path.cwd() / ".kbdata"
 
@@ -23,10 +23,7 @@ DEFAULT_DATA_DIR = Path.cwd() / ".kbdata"
 # serve a switch at all.
 _SQLITE_EMBEDDED_BACKENDS = frozenset({"sqlite-vec", "fts5"})
 _POSTGRES_BACKENDS = frozenset({"pgvector", "pg-search"})
-# Stores this process opens itself instead of reaching over the network.
-# Embedded Qdrant belongs here too, but only when `qdrant_url` is empty, so it
-# is decided separately.
-_IN_PROCESS_BACKENDS = frozenset({"sqlite-vec", "fts5", "tantivy"})
+_IN_PROCESS_BACKENDS = frozenset({"sqlite-vec", "fts5"})
 
 
 def _is_postgres_url(url: str) -> bool:
@@ -65,18 +62,12 @@ class Settings(BaseSettings):
     s3_region: str = "us-east-1"
 
     # --- retrieval backends ---------------------------------------------
-    # Which implementation backs each half of retrieval (ADR-0008). Both
-    # default to the pre-migration store: an environment that does not set
-    # these keeps today's behaviour exactly.
-    vector_backend: VectorBackend = "qdrant"
-    lexical_backend: LexicalBackend = "tantivy"
-
-    # --- vector store ---------------------------------------------------
-    # Empty -> embedded mode under data_dir/qdrant. A URL selects Qdrant Server.
-    qdrant_url: str = ""
-    qdrant_api_key: str = ""
-    qdrant_collection: str = "kb_chunks"
-    qdrant_timeout: float = 30.0
+    # ADR-0008: both halves live in the profile's primary database.
+    # local -> sqlite-vec + fts5; server -> pgvector + pg-search.
+    # Explicit KB_* values override; a pairing this deployment cannot
+    # serve is refused at startup.
+    vector_backend: VectorBackend | None = None
+    lexical_backend: LexicalBackend | None = None
 
     # pgvector's own HNSW query-time search breadth. pgvector's extension
     # default (40) is tuned for uniformly-distributed synthetic vectors, not
@@ -91,17 +82,6 @@ class Settings(BaseSettings):
     # curve's early climb costs, past this point diminishing enough that 200
     # is a defensible default rather than chasing the last few points at 400.
     pgvector_ef_search: int = 200
-
-    # --- lexical store (tantivy inverted index) --------------------------
-    # Empty -> data_dir/lexical. Writers need a heap; tantivy's floor is 15 MB.
-    lexical_dir: Path | None = None
-    lexical_writer_heap_mb: int = 64
-    # 0 lets tantivy pick. Multiple indexing threads create and replace segment
-    # files concurrently, which on Windows can collide with an on-access virus
-    # scanner and kill the writer with PermissionDenied on a .pos/.fieldnorm
-    # file. Serialising costs ~2x on a full rebuild and nothing on incremental
-    # ingest, so it is the safe default; raise it on Linux or with an exclusion.
-    lexical_writer_threads: int = 1
 
     # --- embedding ------------------------------------------------------
     dense_provider: DenseProvider = "hash"
@@ -225,6 +205,17 @@ class Settings(BaseSettings):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
+    @model_validator(mode="before")
+    @classmethod
+    def _default_backends_by_profile(cls, values: dict) -> dict:
+        """local keeps a single SQLite file; server uses PostgreSQL/ParadeDB."""
+        profile = values.get("profile", "local")
+        if values.get("vector_backend") is None:
+            values["vector_backend"] = "sqlite-vec" if profile == "local" else "pgvector"
+        if values.get("lexical_backend") is None:
+            values["lexical_backend"] = "fts5" if profile == "local" else "pg-search"
+        return values
+
     @model_validator(mode="after")
     def _backends_are_reachable_from_this_deployment(self) -> Settings:
         """Reject a switch this deployment cannot serve, at startup.
@@ -264,21 +255,7 @@ class Settings(BaseSettings):
         return self.model_cache_dir or (self.data_dir / "models")
 
     @property
-    def qdrant_local_path(self) -> Path:
-        return self.data_dir / "qdrant"
-
-    @property
-    def resolved_lexical_dir(self) -> Path:
-        return self.lexical_dir or (self.data_dir / "lexical")
-
-    @property
-    def use_embedded_qdrant(self) -> bool:
-        return not self.qdrant_url
-
-    @property
     def vector_store_is_in_process(self) -> bool:
-        if self.vector_backend == "qdrant":
-            return self.use_embedded_qdrant
         return self.vector_backend in _IN_PROCESS_BACKENDS
 
     @property
@@ -289,14 +266,9 @@ class Settings(BaseSettings):
     def run_api_worker(self) -> bool:
         """Whether the API process also runs the ingest worker.
 
-        Derived from store ownership, and deliberately conservative: the API
-        takes the worker in only when it owns *every* store, because a store
-        opened in-process is locked to that process and a separate worker
-        could not write it. A mixed deployment - one store in-process, one
-        over the network - keeps the worker external and leaves the in-process
-        store to whichever process the operator points at it. That is already
-        today's behaviour for `local` + `KB_QDRANT_URL`, where tantivy is
-        in-process and the worker still runs outside the API.
+        The API takes the worker only when it owns every store. sqlite-vec
+        and fts5 live in the process; pgvector and pg-search live in
+        PostgreSQL and keep the worker as a separate process.
         """
         if self.api_worker_enabled is not None:
             return self.api_worker_enabled

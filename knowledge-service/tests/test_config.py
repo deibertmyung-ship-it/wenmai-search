@@ -15,38 +15,39 @@ def settings_env(monkeypatch):
     reset_settings_cache()
 
 
-def test_local_default_uses_embedded_qdrant() -> None:
-    assert Settings.model_fields["qdrant_url"].default == ""
-
-
 def test_local_embedded_mode_runs_worker_inside_api(tmp_path) -> None:
     settings = Settings(
         data_dir=tmp_path,
         profile="local",
-        qdrant_url="",
         api_worker_enabled=None,
     )
 
-    assert settings.use_embedded_qdrant
+    assert settings.vector_backend == "sqlite-vec"
+    assert settings.lexical_backend == "fts5"
     assert settings.run_api_worker
-    assert settings.qdrant_local_path == tmp_path / "qdrant"
 
 
-def test_server_mode_keeps_api_worker_external(tmp_path) -> None:
+def test_server_profile_keeps_api_worker_external(tmp_path) -> None:
     settings = Settings(
         data_dir=tmp_path,
         profile="server",
-        qdrant_url="http://qdrant:6333",
+        database_url=_PG_URL,
         api_worker_enabled=None,
     )
 
-    assert not settings.use_embedded_qdrant
+    assert settings.vector_backend == "pgvector"
+    assert settings.lexical_backend == "pg-search"
     assert not settings.run_api_worker
 
 
-def test_backend_switches_default_to_the_pre_migration_stores() -> None:
-    assert Settings.model_fields["vector_backend"].default == "qdrant"
-    assert Settings.model_fields["lexical_backend"].default == "tantivy"
+def test_backend_defaults_follow_profile(tmp_path) -> None:
+    local = Settings(data_dir=tmp_path, profile="local")
+    assert local.vector_backend == "sqlite-vec"
+    assert local.lexical_backend == "fts5"
+
+    server = Settings(data_dir=tmp_path, profile="server", database_url=_PG_URL)
+    assert server.vector_backend == "pgvector"
+    assert server.lexical_backend == "pg-search"
 
 
 def test_env_vars_select_the_backends(settings_env) -> None:
@@ -60,38 +61,22 @@ def test_env_vars_select_the_backends(settings_env) -> None:
 
 
 @pytest.mark.parametrize(
-    ("profile", "vector_backend", "lexical_backend", "qdrant_url", "database_url", "expected"),
+    ("profile", "vector_backend", "lexical_backend", "database_url", "expected"),
     [
-        # Every combination reachable before the switches existed. These four
-        # rows are the regression fence: their values may not move.
-        pytest.param("local", "qdrant", "tantivy", "", "", True, id="local-embedded"),
-        pytest.param(
-            "local", "qdrant", "tantivy", "http://qdrant:6333", "", False, id="local-qdrant-server"
-        ),
-        pytest.param(
-            "server", "qdrant", "tantivy", "http://qdrant:6333", _PG_URL, False, id="server"
-        ),
-        pytest.param("server", "qdrant", "tantivy", "", "", False, id="server-embedded"),
-        # Stores this process opens itself keep the worker inside the API.
-        pytest.param("local", "sqlite-vec", "fts5", "", "", True, id="local-single-file"),
-        pytest.param("local", "sqlite-vec", "tantivy", "", "", True, id="local-sqlite-vec-only"),
-        pytest.param("local", "qdrant", "fts5", "", "", True, id="local-fts5-only"),
-        # Anything reached over the network takes concurrent writers, so the
-        # worker stays an independently scalable process.
-        pytest.param("local", "pgvector", "fts5", "", _PG_URL, False, id="local-pgvector"),
-        pytest.param("local", "sqlite-vec", "pg-search", "", _PG_URL, False, id="local-pg-search"),
-        pytest.param("server", "pgvector", "pg-search", "", _PG_URL, False, id="server-paradedb"),
+        pytest.param("local", "sqlite-vec", "fts5", "", True, id="local-single-file"),
+        pytest.param("local", "pgvector", "fts5", _PG_URL, False, id="local-pgvector"),
+        pytest.param("local", "sqlite-vec", "pg-search", _PG_URL, False, id="local-pg-search"),
+        pytest.param("server", "pgvector", "pg-search", _PG_URL, False, id="server-paradedb"),
     ],
 )
 def test_run_api_worker_follows_which_process_owns_the_stores(
-    tmp_path, profile, vector_backend, lexical_backend, qdrant_url, database_url, expected
+    tmp_path, profile, vector_backend, lexical_backend, database_url, expected
 ) -> None:
     settings = Settings(
         data_dir=tmp_path,
         profile=profile,
         vector_backend=vector_backend,
         lexical_backend=lexical_backend,
-        qdrant_url=qdrant_url,
         database_url=database_url,
         api_worker_enabled=None,
     )
@@ -101,7 +86,10 @@ def test_run_api_worker_follows_which_process_owns_the_stores(
 
 @pytest.mark.parametrize(("profile", "override"), [("local", False), ("server", True)])
 def test_api_worker_enabled_overrides_the_derivation(tmp_path, profile, override) -> None:
-    settings = Settings(data_dir=tmp_path, profile=profile, api_worker_enabled=override)
+    kwargs = {"data_dir": tmp_path, "profile": profile, "api_worker_enabled": override}
+    if profile == "server":
+        kwargs["database_url"] = _PG_URL
+    settings = Settings(**kwargs)
 
     assert settings.run_api_worker is override
 

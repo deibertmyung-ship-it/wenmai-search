@@ -98,25 +98,6 @@ class TestExtensionLoading:
         finally:
             reset_settings_cache()
 
-    def test_extension_not_loaded_for_qdrant_backend(self, tmp_path, monkeypatch):
-        """When KB_VECTOR_BACKEND=qdrant (default), sqlite-vec is not loaded.
-        This ensures sqlite-vec is not a hard dependency for existing users."""
-        url = _make_fresh_sqlite(tmp_path)
-        monkeypatch.setenv("KB_VECTOR_BACKEND", "qdrant")
-        from kbsvc.config import reset_settings_cache
-        reset_settings_cache()
-        try:
-            engine = _make_engine(url)
-            with engine.connect() as conn, pytest.raises(Exception, match="no such module"):
-                conn.execute(text(
-                    "CREATE VIRTUAL TABLE IF NOT EXISTS _t "
-                    "USING vec0(v float[2])"
-                ))
-            engine.dispose()
-        finally:
-            reset_settings_cache()
-
-
 # ---------------------------------------------------------------------------
 # 2. Startup self-check
 # ---------------------------------------------------------------------------
