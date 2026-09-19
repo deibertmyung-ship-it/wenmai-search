@@ -46,4 +46,8 @@ A spec that has been accepted and is being implemented belongs in the package's 
 
 ## Is `.scratch/` committed?
 
-Not decided yet. Nothing under `.scratch/` exists at the time of writing. Decide the first time a ticket is created, and record the answer here — an undecided `.gitignore` status is how scratch trackers quietly diverge between machines.
+**No.** `.scratch/` is in `.gitignore` as of 2026-08-14, decided when the first directory (`.scratch/storage-consolidation/`) was created.
+
+This follows directly from why the tracker is local in the first place: the repo is public, and committing `.scratch/` would put in-flight specs and tickets on it — the exact outcome choosing local Markdown over GitHub Issues was meant to avoid.
+
+The consequence to plan around: **nothing under `.scratch/` survives a fresh clone, and it does not sync between machines.** Anything that must outlive the work has to graduate to one of the permanent homes in the table above before the branch is done. A spike whose numbers an ADR cites is the common case — cite the numbers in the ADR itself, not by reference to a `.scratch/` path that no one else will have.

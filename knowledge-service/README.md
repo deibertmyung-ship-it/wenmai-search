@@ -105,6 +105,7 @@ local 与 server 行为因此完全一致，并且每一路的原始命中都能
 
 Docling、Unstructured 与 Marker 随后端默认安装；它们在当前本地解析链中不需要第三方 API。
 可选基础设施依赖：`pip install '.[fastembed]' '.[postgres,s3]'`。
+存储收敛（ADR-0008）新增后端开关 `KB_VECTOR_BACKEND` / `KB_LEXICAL_BACKEND`；`sqlite-vec` 后端需要 `pip install '.[sqlite-vec]'`，`pgvector` / `pg-search` 复用 `.[postgres]` 里的 `psycopg`。
 部分 PDF/OCR 首次解析会下载本地模型权重，因此生产环境应允许首次下载或预热模型缓存。
 
 > `hash` 稠密嵌入不是语义模型，是字符 n-gram 的确定性随机投影。它保证零配置可跑通、

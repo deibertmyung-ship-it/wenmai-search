@@ -248,6 +248,116 @@ def rebuild_lexical_command(
     typer.echo(f"indexed {count} chunks into {settings.resolved_lexical_dir}")
 
 
+@app.command("migrate-vectors")
+def migrate_vectors_command(
+    from_backend: str = typer.Option(
+        "qdrant", "--from", help="source vector backend (only 'qdrant' supported)"
+    ),
+    to_backend: str = typer.Option(
+        ..., "--to", help="target vector backend: sqlite-vec or pgvector"
+    ),
+    batch_size: int = typer.Option(1000, "--batch", help="points per scroll/upsert batch"),
+    resume_after: str = typer.Option(
+        "",
+        "--resume-after",
+        help="continue an interrupted run after this Qdrant point id (exclusive)",
+    ),
+    sample_size: int = typer.Option(
+        100, "--sample", help="chunks to re-read from the target for bit-exact verification"
+    ),
+    verbose: bool = False,
+) -> None:
+    """Export dense vectors bit-for-bit from Qdrant into a consolidated backend.
+
+    Exports, does not re-embed: the stored float32 vectors are copied as-is so
+    top-k results stay identical. Run this once during ADR-0008 cutover, then
+    rebuild the lexical index separately with `rebuild-lexical`. Rolls back by
+    flipping KB_VECTOR_BACKEND - the old Qdrant collection is never deleted.
+    """
+    from .db.session import init_db
+    from .errors import KbError
+    from .vector.migrate import migrate_vectors
+
+    _setup_logging(verbose)
+    init_db()
+    settings = get_settings()
+
+    if from_backend != "qdrant":
+        raise typer.BadParameter(f"only --from qdrant is supported, got {from_backend!r}")
+    if to_backend not in ("sqlite-vec", "pgvector"):
+        raise typer.BadParameter(
+            f"--to must be 'sqlite-vec' or 'pgvector', got {to_backend!r}"
+        )
+
+    state = {"last": -1}
+
+    def on_progress(done: int, total: int) -> None:
+        percent = int(done * 100 / total) if total else 100
+        if percent != state["last"]:
+            state["last"] = percent
+            typer.echo(f"  {done}/{total} points ({percent}%)")
+
+    try:
+        result = migrate_vectors(
+            settings=settings,
+            target_backend=to_backend,
+            batch_size=batch_size,
+            resume_after=resume_after or None,
+            sample_size=sample_size,
+            progress=on_progress,
+        )
+    except KbError as exc:
+        typer.echo(f"migration failed: {exc.message}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(
+        f"migrated {result.migrated} points, dim={result.dim}, "
+        f"in {result.elapsed_seconds:.1f}s"
+    )
+    typer.echo(f"count: source={result.source_count} target={result.target_count}")
+    typer.echo(
+        f"bit-exact sample: {result.sampled} chunks, "
+        f"{'match' if result.bit_exact else 'MISMATCH'}"
+    )
+    if result.last_point_id:
+        typer.echo(f"last_point_id={result.last_point_id}")
+
+    if not result.ok:
+        typer.echo(
+            "verification FAILED; target is not a faithful copy - investigate "
+            "before cutover",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+
+@app.command("ab-compare")
+def ab_compare_command(
+    query_count: int = typer.Option(1000, "--queries", help="synthetic queries to run"),
+    seed: int = typer.Option(42, "--seed", help="RNG seed for reproducible query synthesis"),
+    profile: str = typer.Option("", help="local or server (defaults to KB_PROFILE)"),
+    tenant: str = typer.Option("", help="tenant id (defaults to KB_DEFAULT_TENANT)"),
+    verbose: bool = False,
+) -> None:
+    """Run the ADR-0008 A/B acceptance gate: same queries against old and new
+    retrieval stacks, compare top-k. Exits non-zero if any hard cell fails or
+    the server dense recall regresses. Both stacks must be populated first
+    (migrate-vectors + rebuild-lexical for the new one)."""
+    from .db.session import init_db
+    from .retrieval.ab_compare import run
+
+    _setup_logging(verbose)
+    init_db()
+    settings = get_settings()
+    prof = profile or settings.profile
+    ten = tenant or settings.default_tenant
+
+    report = run(prof, ten, query_count=query_count, seed=seed)
+    typer.echo(report.render())
+    if not report.ok:
+        raise typer.Exit(code=1)
+
+
 plagiarism_app = typer.Typer(
     help="Plagiarism corpus lifecycle (PostgreSQL only, default-off)", no_args_is_help=True
 )

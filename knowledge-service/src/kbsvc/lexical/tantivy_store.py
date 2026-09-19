@@ -34,6 +34,7 @@ from pathlib import Path
 from threading import RLock
 
 import tantivy
+from sqlalchemy.orm import Session
 
 from ..config import Settings, get_settings
 from ..errors import KbError
@@ -87,7 +88,10 @@ class TantivyLexicalStore:
 
     # --- lifecycle ------------------------------------------------------
 
-    def ensure_ready(self) -> None:
+    def ensure_ready(self, *, session: Session | None = None) -> None:
+        # `session` accepted for Protocol/ADR-0008-ticket-08 parity; Tantivy
+        # owns its own index directory and cannot enlist in a SQL transaction,
+        # so it is ignored here. This legacy store is removed in ticket 13.
         with self._lock:
             self._open()
 
@@ -259,8 +263,18 @@ class TantivyLexicalStore:
             gc.collect()
 
     # --- writes ---------------------------------------------------------
+    #
+    # The `session` kwarg exists for Protocol/ADR-0008-ticket-08 signature
+    # parity (the ingest worker passes one transaction to every store), but
+    # Tantivy owns its own on-disk index and commits independently via
+    # `_commit()` - it cannot enlist in a SQL transaction. It is accepted and
+    # ignored here; the atomic-publish guarantee only holds for the in-database
+    # backends (fts5/pg-search), and this legacy store is removed in ADR-0008
+    # ticket 13.
 
-    def upsert(self, documents: list[LexicalDocument]) -> None:
+    def upsert(
+        self, documents: list[LexicalDocument], *, session: Session | None = None
+    ) -> None:
         if not documents:
             return
         with self._lock:
@@ -274,7 +288,9 @@ class TantivyLexicalStore:
                 writer.add_document(_to_document(item))
             self._commit()
 
-    def delete_by_ids(self, ids: list[str]) -> None:
+    def delete_by_ids(
+        self, ids: list[str], *, session: Session | None = None
+    ) -> None:
         if not ids:
             return
         with self._lock:
@@ -283,12 +299,24 @@ class TantivyLexicalStore:
                 writer.delete_documents_by_term("chunk_id", chunk_id)
             self._commit()
 
-    def delete_by_document(self, tenant_id: str, document_id: str) -> None:
+    def delete_by_document(
+        self,
+        tenant_id: str,
+        document_id: str,
+        *,
+        session: Session | None = None,
+    ) -> None:
         with self._lock:
             self._get_writer().delete_documents_by_term("document_id", document_id)
             self._commit()
 
-    def delete_by_versions(self, tenant_id: str, version_ids: list[str]) -> None:
+    def delete_by_versions(
+        self,
+        tenant_id: str,
+        version_ids: list[str],
+        *,
+        session: Session | None = None,
+    ) -> None:
         if not version_ids:
             return
         with self._lock:

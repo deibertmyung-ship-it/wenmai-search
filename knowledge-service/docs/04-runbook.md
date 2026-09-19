@@ -46,6 +46,37 @@ cp ../.env.example .env
 `.env` 至少要填 `POSTGRES_PASSWORD` / `QDRANT_API_KEY` / `MINIO_ROOT_PASSWORD` /
 `KBWEB_SECRET_KEY`。密码会被插值进 `postgresql://` URL，用十六进制串，别带 `@` `:` `/`。
 
+### ParadeDB 镜像（ADR-0008 ticket 05）
+
+`postgres` 服务实际跑的是 `paradedb/paradedb:latest-pg17`——标准 PostgreSQL 17 加
+**pg_search 0.25.2** 与 **pgvector 0.8.4**，两个扩展随镜像预装，`shared_preload_libraries`
+已配好。`kbsvc init`（走 `db/session.py` 的 `init_db()` → `ensure_postgres_extensions`）建表前
+会对 Postgres 执行一次 `CREATE EXTENSION IF NOT EXISTS pg_search` / `vector`，幂等、可重复
+执行；这一步按 `engine.dialect.name` 判断，对 SQLite（本地 profile）完全不触发。
+
+`latest-pg17` **只适合本地开发**。ParadeDB 是单一厂商镜像，PostgreSQL 的安全补丁要等它重新
+打镜像才能拿到——升级节奏不受本项目控制，不能假设跟上游 PG 的 CVE 发布节奏一致。生产部署
+必须把 `docker-compose.yml` 里的 `image:` 钉到一个具体 tag（而不是 `latest-pg17`），并把选定
+的 tag 和当时验证过的扩展版本记在这份 runbook 里，便于下次升级时对比。
+
+现有部署如果还在 `postgres:16-alpine` 上，换到 ParadeDB 前请先看本文档第 6 节「PostgreSQL
+16 → 17 大版本升级」——这是一次大版本跨越，不能直接把旧数据卷挂给新镜像。若想避免跨大版本，
+可以改用 `paradedb/paradedb:latest-pg16`，但上线前需自行确认该 tag 是否仍在维护。
+
+### `shm_size` 不能省
+
+Docker 默认 `/dev/shm` 只有 64 MB。pgvector 并行建 HNSW 索引会直接死在：
+
+```
+ERROR: could not resize shared memory segment "/PostgreSQL.xxx" to 2144375424 bytes:
+       No space left on device
+```
+
+这个错误**只在建索引时出现**，日常查询不报——很容易在小规模验证或评审时漏掉，等到有人真的
+在生产规模的表上建索引才发现。`docker-compose.yml` 的 `postgres` 服务已设 `shm_size: 2gb`；
+脱离 compose、直接 `docker run` 这个镜像做验证时，同样要加 `--shm-size=2g`，漏加不会在启动
+时报错，只会在建索引那一刻才炸。
+
 `KB_MCP_API_KEY` 与 `KBWEB_API_KEY` 要等数据库建好才能签发，但 **compose 在执行任何命令前
 会先插值整个文件**，`${VAR:?}` 缺失就直接报错。所以这两项先填占位串，签发后再替换：
 
@@ -182,6 +213,51 @@ curl -X POST localhost:8077/v1/jobs/<id>/retry
 
 词法索引优先级最低：它完全可以从 SQLite 的 chunk 表用 `kbsvc rebuild-lexical` 在几十秒内
 重建，备份它的性价比低于备份 `kbsvc.db`。
+
+### PostgreSQL 16 → 17 大版本升级
+
+现有 server profile 部署如果还在 `postgres:16-alpine` 上，换到 ParadeDB（PG17）镜像前必须
+清楚这是一次**大版本跨越**：新镜像的 `initdb` 认不出旧版本的数据目录格式，不能直接把旧的
+`pgdata` 卷原样挂给新镜像启动了事。以下记录做法，供实际有生产库要升级时参考——**这是本票
+唯一需要真实停机窗口的操作，本沙箱没有可升级的生产库，未执行，仅记录步骤**：
+
+**方案 A：`pg_dump` / `pg_restore`（推荐，逻辑备份，最简单可靠，代价是停机时间随数据量增长）**
+
+```bash
+# 1. 停止所有写入方，只留 postgres 自己在跑
+docker compose stop api worker plagiarism-worker
+
+# 2. 从旧容器（postgres:16-alpine）导出，自定义格式支持并行 restore
+docker compose exec postgres pg_dump -U kbsvc -d kbsvc -Fc -f /tmp/kbsvc-pre-upgrade.dump
+docker compose cp postgres:/tmp/kbsvc-pre-upgrade.dump ./kbsvc-pre-upgrade.dump
+
+# 3. 把 docker-compose.yml 的 postgres.image 换成 ParadeDB 的目标 tag，
+#    并把 pgdata 卷改名（例如 pgdata_pg17）——不要复用旧卷名，避免新镜像的
+#    initdb 在旧版本数据目录上启动失败
+docker compose up -d postgres   # 在新卷上 initdb，得到一个空的 PG17 + ParadeDB 集群
+
+# 4. 灌回数据
+docker compose cp ./kbsvc-pre-upgrade.dump postgres:/tmp/kbsvc-pre-upgrade.dump
+docker compose exec postgres pg_restore -U kbsvc -d kbsvc -j 4 /tmp/kbsvc-pre-upgrade.dump
+
+# 5. 建扩展 + 核对行数，再放开写入
+docker compose run --rm api kbsvc init          # 触发 ensure_postgres_extensions
+docker compose exec postgres psql -U kbsvc -d kbsvc -c "select count(*) from chunk"
+docker compose up -d api worker plagiarism-worker
+```
+
+**方案 B：`pg_upgrade`（数据量大、停机窗口紧张时更快，但需要旧、新两个大版本的 PG 二进制
+同时在场，操作细节和数据卷布局强相关）**——真正执行前查阅 PostgreSQL 官方 `pg_upgrade`
+文档并在预发环境演练一次，这里不展开成可以照抄的命令。不论走哪条路，方案 A 的 `pg_dump`
+都要留一份，作为升级失败时唯一的回退路径。
+
+两种方案共同的前提：
+
+- 提前核对关键表行数（`chunk`、`document`、启用了抄袭检测的话还有 `plag_corpus_chunk`），
+  恢复后逐一核对，数字对不上就不要放开写入；
+- 这不是滚动升级——`chunk` / `plag_*` 相关写入在整个窗口内必须停止；
+- 若暂时不想跨大版本，可以先只换镜像不跨版本：`paradedb/paradedb:latest-pg16`，但上线前
+  需自行确认 ParadeDB 是否仍在发布 PG16 系列镜像。
 
 ## 7. MCP 客户端接入
 
@@ -435,3 +511,62 @@ kbsvc plagiarism cleanup      # 删过期任务、原文、结果、事件与停
 
 默认保留 30 天（`KB_PLAG_RETENTION_DAYS`）。停用投影只有在没有活动检测的快照
 引用它时才会被删。**这只管 `plag_*` 数据**——对象存储里的原始文件不受影响。
+
+## 10. 迁移到整合存储后端（ADR-0008）
+
+ADR-0008 把稠密 + 词法两个外部索引收进主数据库：local profile 用 SQLite 的
+sqlite-vec + FTS5，server profile 用 PostgreSQL/ParadeDB 的 pgvector + pg_search。
+旧后端（Qdrant / Tantivy）在确认新后端稳定前**不要删**——回滚只翻一个环境变量。
+
+### 10.1 稠密向量：导出，不要重嵌入
+
+```bash
+# local profile：嵌入式 Qdrant → sqlite-vec
+kbsvc migrate-vectors --from qdrant --to sqlite-vec --batch 1000
+
+# server profile：Qdrant Server → pgvector
+kbsvc migrate-vectors --from qdrant --to pgvector --batch 1000
+```
+
+这是**逐位导出**，不是 `reembed`：Qdrant 里已存的 float32 向量原样搬进新后端，
+top-k 集合保持一致。重嵌入会引入 ONNX 非确定性与批次效应，让「新旧 top-k 相等」
+的验收硬断言因为与存储无关的原因失败。维度从源 collection 配置读取，不读
+`KB_DENSE_DIM`（默认 384 与生产 bge-small-zh-v1.5 的 512 不一致）。
+
+迁移幂等（按 chunk_id upsert，重跑不产生重复），可断点续跑：
+
+```bash
+kbsvc migrate-vectors --from qdrant --to pgvector --batch 1000 \
+  --resume-after <last_point_id>
+```
+
+结束时命令会做两道校验，任一失败以非零码退出：
+
+- 两侧 `count()` 相等；
+- 抽样 100 个 chunk（`--sample` 可调）从目标回读，逐维比对源与目标的 float32
+  字节完全相等。
+
+命令末行打印 `in <秒数>s`——这就是全量迁移耗时，把它记入变更工单。
+
+### 10.2 词法索引：直接重建，不迁移
+
+```bash
+kbsvc rebuild-lexical --batch-size 512   # 22,659 段约 21 秒
+```
+
+正文与 `analyzed` 列都在主数据库的 `chunk` 表里，重建只需几十秒，没有为词法写
+迁移代码的必要。
+
+### 10.3 切换与回滚
+
+确认 `/v1/stats` 里 `chunks` / 向量点数 / 词法文档数三者相等、A/B 门（ADR-0008
+ticket 10/11）通过后，改配置指向新后端并重启：
+
+```bash
+export KB_VECTOR_BACKEND=sqlite-vec     # 或 pgvector
+export KB_LEXICAL_BACKEND=fts5          # 或 pg-search
+```
+
+**回滚 = 翻回环境变量后重启**（`KB_VECTOR_BACKEND=qdrant`、
+`KB_LEXICAL_BACKEND=tantivy`）。旧 collection 与旧词法目录在整个观察期内保留，
+不删；它们是回滚的唯一依据。等观察期结束、确认不再回滚，再单独清理旧数据。

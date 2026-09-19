@@ -3,6 +3,11 @@
 .vscode/
 .idea/
 
+# In-flight specs and tickets (see docs/agents/issue-tracker.md).
+# Deliberately untracked: this repo is public and work-in-progress should not
+# appear on it by default.
+.scratch/
+
 # Environment files and secrets
 .env
 .env.*
@@ -34,3 +39,7 @@ test-results/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Local codebase-memory graph (do not commit the compressed DB)
+.codebase-memory/
+
