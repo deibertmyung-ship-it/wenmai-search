@@ -39,3 +39,7 @@ test-results/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Local codebase-memory graph (do not commit the compressed DB)
+.codebase-memory/
+
