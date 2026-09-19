@@ -2,7 +2,7 @@
 
 自托管的古籍混合检索系统。两个可独立部署的包：
 
-- `knowledge-service` — 后端。解析、切块、嵌入、Qdrant + Tantivy 混合检索、REST 与 MCP 接口。
+- `knowledge-service` — 后端。解析、切块、嵌入、sqlite-vec/pgvector + fts5/pg_search 混合检索、REST 与 MCP 接口。
 - `knowledge-web` — Web 前端。经由 REST 调用后端，不直连任何存储。
 
 ## Agent skills

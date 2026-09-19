@@ -23,7 +23,7 @@ Base: `/v1`。认证：`Authorization: Bearer <api_key>`（`KB_AUTH_REQUIRED=fal
 ```
 `mode`: `hybrid` | `dense` | `sparse`
 
-三种模式对应三条真实路径：`dense` 只查 Qdrant 稠密向量，`sparse` 只查 Tantivy 词法索引，
+三种模式对应三条真实路径：`dense` 只查稠密向量，`sparse` 只查词法倒排，
 `hybrid` 两路都跑再用 RRF 融合。非法值返回 422，不会静默回退。`debug.timings_ms` 里的
 `dense_search` / `sparse_search` 只在对应路跑过时出现。
 

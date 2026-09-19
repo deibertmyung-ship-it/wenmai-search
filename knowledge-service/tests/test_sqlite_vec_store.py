@@ -1,7 +1,7 @@
 """Tests for SqliteVecStore (ADR-0008 ticket 03).
 
 Covers all 8 VectorStore Protocol methods plus the acceptance criteria:
-- top-k set equality with QdrantVectorStore on the same data
+- top-k set equality with brute-force cosine on the same data
 - narrow filter (single document) is faster than no filter
 - 100k synthetic chunks search_dense < 150 ms
 - upsert rolls back when the caller's session rolls back
@@ -423,13 +423,13 @@ class TestTransactionalUpsert:
 
 
 # ---------------------------------------------------------------------------
-# 6. Acceptance: top-k set equality with Qdrant
+# 6. Acceptance: top-k set equals brute-force cosine
 # ---------------------------------------------------------------------------
 
 class TestTopKEquality:
-    """Same data, same query -> same top-k set (both are exact brute-force)."""
+    """Same data, same query -> same top-k set (sqlite-vec is exact brute-force)."""
 
-    def test_topk_set_equals_qdrant(self, tmp_path, monkeypatch):
+    def test_topk_set_equals_brute_force(self, tmp_path, monkeypatch):
         _setup_store_env(monkeypatch, tmp_path)
         from kbsvc.vector.sqlite_vec_store import SqliteVecStore
 

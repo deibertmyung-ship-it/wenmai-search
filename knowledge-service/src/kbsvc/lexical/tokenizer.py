@@ -42,5 +42,5 @@ def tokenize(text: str) -> list[str]:
 
 
 def analyze(text: str) -> str:
-    """Tokenize into the whitespace-joined form tantivy indexes."""
+    """Tokenize into the whitespace-joined form the lexical index stores."""
     return " ".join(tokenize(text))

@@ -31,42 +31,33 @@
    ▼          ▼              ▼              ▼
 ┌────────┐ ┌──────────┐ ┌─────────────┐ ┌─────────────┐
 │ 元数据  │ │ 对象存储  │ │ 向量库       │ │ 词法索引     │
-│PG/SQLite│ │ S3/MinIO │ │ Qdrant      │ │ Tantivy     │
-│         │ │ /LocalFS │ │ (dense)     │ │ (BM25)      │
+│PG/SQLite│ │ S3/MinIO │ │ sqlite-vec/ │ │ fts5 /      │
+│         │ │ /LocalFS │ │ pgvector    │ │ pg_search   │
 └────────┘ └──────────┘ └─────────────┘ └─────────────┘
 ```
 
-检索的两路各有其存储：稠密向量在 Qdrant，词法倒排在 Tantivy。两者都是嵌入式的，
+检索的两路都在主数据库里：local 是同一个 SQLite 文件，server 是 ParadeDB。
 `local` profile 因此仍然不需要 Docker。
 
 ## 2. 两套 Profile（同一份代码）
 
 | 组件 | `local`（默认） | `server`（生产） |
 |---|---|---|
-| 元数据库 | SQLite | PostgreSQL 16 |
+| 元数据库 | SQLite | PostgreSQL 17 / ParadeDB |
 | 对象存储 | 本地文件系统 | S3 / MinIO |
-| 向量库 | API 进程内嵌 Qdrant（本地目录） | Qdrant Server（HTTP） |
-| 词法索引 | 嵌入式 Tantivy（本地目录） | 嵌入式 Tantivy（本地目录） |
+| 向量库 | sqlite-vec（同一 kbsvc.db） | pgvector |
+| 词法索引 | fts5（同一 kbsvc.db） | pg_search |
 | 队列 | SQLite `ingest_job` + API 内置 worker 线程 | PostgreSQL `ingest_job` + 可水平扩 worker |
 
-词法索引两种 profile 相同——Tantivy 是进程内的 Rust 库，没有服务端形态。代价是
-`server` profile 下多个 worker 进程不能共写同一个索引目录（Tantivy 持有目录锁）。
-
-`local` 不依赖 Docker。SQLite、原始文件、Qdrant 与 Tantivy 数据均在 `KB_DATA_DIR`；
-根目录 `run.bat` 只需编排 API 与 Web：
+`local` 不依赖 Docker。SQLite 与原始文件均在 `KB_DATA_DIR`；根目录 `run.bat` 只需编排 API 与 Web：
 
 ```text
 Web ──HTTP──▶ API 进程
-              ├── SQLite / LocalFS
-              ├── embedded Qdrant（进程级单例）
-              ├── Tantivy 索引（进程级单例，持目录锁）
+              ├── SQLite（元数据 + sqlite-vec + fts5）/ LocalFS
               └── 常驻 worker 线程 ◀── ingest_job
 ```
 
-API 请求线程与 worker 线程共享进程级 Qdrant 单例；适配器允许跨线程访问并用可重入锁
-串行化嵌入式读写，因此只有一个进程持有目录锁，Web 上传后仍可自动处理。该模式只允许
-一个 API 进程，不支持本地多 worker；需要多进程或扩容时切换完整 `server` profile 的
-PostgreSQL、S3/MinIO、Qdrant Server 与独立 worker。
+API 请求线程与 worker 线程共享同一个 SQLite 文件。该模式只允许一个 API 进程；需要多进程或扩容时切换完整 `server` profile 的 ParadeDB、S3/MinIO 与独立 worker。
 
 选择"数据库即队列 + 租约"而不是 Redis/Celery：worker 崩溃后租约到期任务自动回收，无额外中间件，且 SQLite/PG 语义一致。
 
@@ -74,7 +65,7 @@ PostgreSQL、S3/MinIO、Qdrant Server 与独立 worker。
 
 1. **document_id 稳定**：`uuid5(NS_DOC, tenant_id|source_id|external_id)`。同一路径重复导入永远得到同一个 id。
 2. **content_hash 决定是否新版本**：文件 sha256 未变 → 跳过（幂等导入）；变了 → 新建 `document_version`，旧版本置 `superseded` 并产生删除事件。
-3. **chunk_id 幂等**：`uuid5(NS_CHUNK, document_id|version|ordinal|chunk_content_hash)`。Qdrant 以此为点 id upsert，重复执行不产生脏数据。
+3. **chunk_id 幂等**：`uuid5(NS_CHUNK, document_id|version|ordinal|chunk_content_hash)`。向量库以此为点 id upsert，重复执行不产生脏数据。
 4. **可追溯**：每个 chunk 必须携带 `page_from/page_to`、`heading_path`、`section_id`、`char_start/char_end`、`bbox`（若解析器提供）、`source_uri`、`parser`/`parser_version`。
 5. **租户与 ACL 前置**：所有查询强制注入 `tenant_id` 过滤；`acl` 为标签列表，查询侧传 `acl_any`，Qdrant 侧做过滤，不在应用层后过滤（避免 top_k 被吃掉）。
 
@@ -280,8 +271,8 @@ src/kbsvc/
   normalize.py                       # 繁简/旧字形折叠，两路共用
   chunking/   base.py  tokenizer.py  structural.py
   embedding/  base.py  dense_hash.py  dense_fastembed.py  dense_openai.py
-  vector/     base.py  qdrant_store.py          # 稠密
-  lexical/    base.py  tantivy_store.py  tokenizer.py   # 词法
+  vector/     base.py  sqlite_vec_store.py  pgvector_store.py
+  lexical/    base.py  fts5_store.py  pg_search_store.py  tokenizer.py
   retrieval/  rewrite.py  fusion.py  rerank.py  citation.py  pipeline.py
   ingest/     states.py  uploader.py  worker.py
   api/        app.py  deps.py  auth.py  schemas.py  routers/*.py

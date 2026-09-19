@@ -9,10 +9,9 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "sqlalchemy>=2.0.36",
-    "qdrant-client>=1.18,<1.19",
-    # Lexical half of retrieval. Not optional: without an inverted index the
-    # embedded profile falls back to scanning every chunk in Python.
-    "tantivy>=0.24",
+    # Local-profile dense half (ADR-0008). Lives in the same SQLite file as
+    # metadata; without it local retrieval has no vector index.
+    "sqlite-vec>=0.1.9",
     # Traditional/old-glyph folding. Pure Python, single dictionary, no build
     # step - the corpus is mixed script and without it 陰陽 and 阴阳 retrieve
     # disjoint results.
@@ -33,10 +32,6 @@ dependencies = [
 # connections so callers never hand-format a `'[1,2,3]'` string into SQL text.
 postgres = ["psycopg[binary]>=3.2", "pgvector>=0.3"]
 s3 = ["boto3>=1.35"]
-# KB_VECTOR_BACKEND=sqlite-vec (ADR-0008, local profile only). Optional so
-# deployments still on qdrant don't need it - see db/session.py's extension
-# loader for the runtime error a missing install produces.
-sqlite-vec = ["sqlite-vec>=0.1.9"]
 fastembed = ["fastembed>=0.4"]
 rerank = ["sentence-transformers>=3.3"]
 # Plagiarism detection (PostgreSQL-only, default-off - see ADR-0001).

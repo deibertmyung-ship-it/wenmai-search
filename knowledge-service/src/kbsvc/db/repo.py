@@ -149,8 +149,8 @@ def document_ids_by_title(
     after fusion would discard whatever the retrievers happened not to return,
     and one book among hundreds is usually not in the overfetched candidates at
     all - the search would look empty rather than narrow. `document_id` has a
-    payload index in Qdrant and a raw term in tantivy, so resolving the title to
-    ids here pushes the filter down into both stores instead.
+    btree/GIN index on `document_id` in both retrieval stores, so resolving
+    the title to ids here pushes the filter down instead.
     """
     stmt = select(Document.id).where(
         Document.tenant_id == tenant_id,

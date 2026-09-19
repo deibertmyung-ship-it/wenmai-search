@@ -1,7 +1,7 @@
 """Stable identifier and content-hash derivation.
 
 Every id in the system is derived, never random, so that re-running an import
-converges on the same rows and the same Qdrant point ids.
+converges on the same rows and the same vector point ids.
 """
 
 from __future__ import annotations

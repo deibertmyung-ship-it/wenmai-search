@@ -34,9 +34,8 @@ async def lifespan(app: FastAPI):
 
     app.state.ingest_worker_thread = None
     if settings.run_api_worker:
-        # Initialize expensive process-wide singletons before request and worker
-        # threads can race to create separate embedded Qdrant/model/index
-        # instances. Tantivy also takes a directory lock, so exactly one owner.
+        # Initialize process-wide singletons before request and worker threads
+        # race to open the stores and the embedder.
         embedder = get_dense_embedder()
         get_vector_store().ensure_collection(embedder.dim)
         get_lexical_store().ensure_ready()

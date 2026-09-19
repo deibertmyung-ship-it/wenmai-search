@@ -1,8 +1,9 @@
 # 性能特征与调优
 
-本文前半部分描述 `local` profile：SQLite + 本地 FS + 嵌入式 Qdrant（稠密）+ 嵌入式 Tantivy
-（词法）+ API 内置 worker。基线环境为 Windows 10、Python 3.11、204 部中文古籍 / 22,659 段
-（26 MB，主要为 UTF-16 txt）；它反映嵌入式模式的容量边界，不应直接外推到 server profile。
+本文前半部分的基线数字测于迁移前的 `local` profile（SQLite + 嵌入式 Qdrant + Tantivy）。
+当前 local 是 sqlite-vec + fts5，server 是 pgvector + pg_search（ADR-0008）。基线环境为
+Windows 10、Python 3.11、204 部中文古籍 / 22,659 段（26 MB，主要为 UTF-16 txt）；
+这些数字反映当时嵌入式模式的容量边界，不应直接外推到 server profile。
 
 server profile 的实测见文末「server profile 实测」一节。
 

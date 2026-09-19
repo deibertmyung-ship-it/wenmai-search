@@ -90,38 +90,36 @@ def test_analyze_is_the_whitespace_joined_token_stream():
     assert analyze("贼克") == " ".join(tokenize("贼克"))
 
 
-def test_a_read_only_store_sees_what_another_store_committed(tmp_path, settings):
-    """The server profile's api/worker split, in one process.
-
-    Tantivy has no server form, so the API and MCP containers read the same
-    index directory the worker container writes. A reader that opened the index
-    before the write - which is what a container that started first did - must
-    still return the document, or freshly ingested text never appears in sparse
-    results.
+def test_a_read_only_store_sees_what_another_store_committed(tmp_path, monkeypatch):
+    """Two Fts5LexicalStore instances share the SQLite engine: a writer
+    commit must be visible to a reader that was constructed first.
     """
+    from kbsvc.config import reset_settings_cache
+    from kbsvc.db.session import reset_engine_cache
     from kbsvc.lexical import LexicalDocument
-    from kbsvc.lexical.tantivy_store import TantivyLexicalStore
+    from kbsvc.lexical.fts5_store import Fts5LexicalStore
 
-    shared = settings.model_copy(update={"lexical_dir": tmp_path / "lexical"})
-    reader = TantivyLexicalStore(shared)
-    writer = TantivyLexicalStore(shared)
+    db = tmp_path / "kbsvc.db"
+    monkeypatch.setenv("KB_DATABASE_URL", f"sqlite:///{db.as_posix()}")
+    monkeypatch.setenv("KB_PROFILE", "local")
+    monkeypatch.setenv("KB_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("KB_LEXICAL_BACKEND", "fts5")
+    reset_settings_cache()
+    reset_engine_cache()
+
+    reader = Fts5LexicalStore()
+    writer = Fts5LexicalStore()
     reader.ensure_ready()
-
-    try:
-        writer.upsert(
-            [
-                LexicalDocument(
-                    id="chunk-1",
-                    text="贼克者，取用之首法也。",
-                    payload={"tenant_id": "test", "is_current": True},
-                )
-            ]
-        )
-        hits = reader.search("贼克", limit=5, flt=SearchFilter(tenant_id="test"))
-    finally:
-        writer.close()
-        reader.close()
-
+    writer.upsert(
+        [
+            LexicalDocument(
+                id="chunk-1",
+                text="贼克者，取用之首法也。",
+                payload={"tenant_id": "test", "is_current": True},
+            )
+        ]
+    )
+    hits = reader.search("贼克", limit=5, flt=SearchFilter(tenant_id="test"))
     assert [hit.id for hit in hits] == ["chunk-1"]
 
 

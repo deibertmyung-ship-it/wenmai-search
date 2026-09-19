@@ -143,9 +143,7 @@ class IngestWorker:
         # Metadata, dense and lexical writes all share the caller's
         # transaction (ADR-0008 ticket 08): if any step fails, the whole
         # version rolls back together, never leaving chunks dense-only or
-        # lexical-only. The in-database stores (sqlite-vec/fts5/pgvector/
-        # pg-search) enlist via `session=`; the external legacy stores
-        # (qdrant/tantivy) accept and ignore it and are removed in ticket 13.
+        # lexical-only.
         store.upsert(points, session=session)
 
         lexical = get_lexical_store()

@@ -172,8 +172,8 @@ def rebuild_lexical(
 ) -> int:
     """Rebuild only the lexical index from the persisted chunk rows.
 
-    The migration path onto tantivy, and the repair path if the two indexes ever
-    drift. Deliberately separate from `reembed_tenant`: the dense vectors are
+    Repair path if the lexical index disagrees with persisted chunks.
+    Deliberately separate from `reembed_tenant`: the dense vectors are
     unaffected by a lexical rebuild, and re-running the embedding model over the
     whole corpus to fix an inverted index would be minutes of wasted GPU/CPU.
     """

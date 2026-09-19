@@ -10,11 +10,8 @@ criteria:
 - delete_by_* null body/lexical_payload and never delete the row itself
 - search pushes every SearchFilter field down through pg_search's query DSL
   (paradedb.boolean), not an SQL WHERE
-- an EXPLAIN-based proof the DSL really compiles to a single Tantivy index
-  scan and does not degrade to a `heap_filter` step
-- top-k set equality with TantivyLexicalStore at small scale (the ticket's
-  own framing: same engine, different index location - this should pass
-  without the IDF-clamp divergence FTS5 has)
+- an EXPLAIN-based proof the DSL compiles to a single index scan and does
+  not degrade to a `heap_filter` step
 - two independent connections writing disjoint chunk ids concurrently do
   not error or lose writes
 - caller-managed sessions roll back and commit cleanly
@@ -767,27 +764,12 @@ class TestTransactionalWrites:
 
 
 # ---------------------------------------------------------------------------
-# 8. Top-k equality with Tantivy (ticket acceptance #3)
+# 8. Low-df query hits the matching documents
 # ---------------------------------------------------------------------------
 
 
-class TestTopKEqualityWithTantivy:
-    """Same data, same query, indexed into both engines -> same top-k id set.
-
-    The ticket's framing is that pg_search embeds Tantivy itself as a
-    Postgres index access method, so BM25 scoring is same-family - unlike
-    FTS5, where IDF-clamp divergence at df >= 50% is expected and asserted
-    separately. Here we assert equality without a df carve-out, on a corpus
-    deliberately shaped so every query term stays in the low-df regime.
-    """
-
-    def test_topk_set_equals_tantivy(self, store, pg_engine, tenant, tmp_path):
-        from kbsvc.config import Settings
-        from kbsvc.lexical.tantivy_store import TantivyLexicalStore
-
-        # 麒麟 appears in 2 of 6 documents (df = 33%); the other four are
-        # unrelated classical-poetry filler. Same corpus shape as the
-        # equivalent FTS5 test, minus that test's high-df divergence case.
+class TestLowDfHitsMatchingDocs:
+    def test_query_returns_only_matching_ids(self, store, pg_engine, tenant):
         docs = [
             _seed_doc(pg_engine, tenant, "麒麟出没于山林之间", document_id="d1"),
             _seed_doc(pg_engine, tenant, "凤凰麒麟皆为祥瑞之兽麒麟", document_id="d2"),
@@ -797,34 +779,8 @@ class TestTopKEqualityWithTantivy:
             _seed_doc(pg_engine, tenant, "会当凌绝顶一览众山小", document_id="d6"),
         ]
         store.upsert(docs)
-
-        tantivy_settings = Settings(
-            profile="local",
-            data_dir=tmp_path,
-            lexical_backend="tantivy",
-            dense_provider="hash",
-        )
-        tantivy = TantivyLexicalStore(settings=tantivy_settings)
-        tantivy.ensure_ready()
-        try:
-            # Tantivy gets the same payloads - no base-row/UPDATE distinction
-            # there, so build fresh LexicalDocuments with matching ids.
-            tantivy.upsert(
-                [
-                    LexicalDocument(id=d.id, text=d.text, payload=d.payload)
-                    for d in docs
-                ]
-            )
-            flt = SearchFilter(tenant_id=tenant)
-            pg_hits = store.search("麒麟", limit=6, flt=flt)
-            tan_hits = tantivy.search("麒麟", limit=6, flt=flt)
-            pg_ids = {h.id for h in pg_hits}
-            tan_ids = {h.id for h in tan_hits}
-            assert pg_ids == tan_ids == {docs[0].id, docs[1].id}, (
-                f"pg_search top-k {pg_ids} != tantivy top-k {tan_ids}"
-            )
-        finally:
-            tantivy.close()
+        hits = store.search("麒麟", limit=6, flt=SearchFilter(tenant_id=tenant))
+        assert {h.id for h in hits} == {docs[0].id, docs[1].id}
 
 
 # ---------------------------------------------------------------------------

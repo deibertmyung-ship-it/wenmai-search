@@ -1,9 +1,7 @@
 """Tests for Fts5LexicalStore (ADR-0008 ticket 04).
 
 Covers all 10 LexicalStore Protocol methods plus the acceptance criteria:
-- top-k set equality with TantivyLexicalStore, for df < 50% queries
-- divergence from Tantivy's BM25 is asserted to *exist* for df >= 50% queries
-  (FTS5 clamps IDF to 1e-06 at that threshold; this is expected, not a bug)
+- high-df queries collapse FTS5 bm25 scores (IDF clamp at df >= 50%)
 - filtering happens inside MATCH, not a separate SQL WHERE
 - 五行 stays a single token; a hyphenated UUID-shaped id filters as an exact
   match, not a fragment match
@@ -767,72 +765,25 @@ class TestBm25ScoreDirection:
 
 
 # ---------------------------------------------------------------------------
-# 11. Acceptance: top-k set equality with Tantivy (df < 50%), divergence
-#     asserted to exist (df >= 50%)
+# 11. High-df IDF clamp (FTS5 bm25)
 # ---------------------------------------------------------------------------
 
 
-class TestTopKEqualityWithTantivy:
-    """Same data, same query, indexed into both engines -> same top-k id set,
-    for queries where every term has df < 50% (the acceptance-gate hard
-    assertion). For df >= 50% queries, FTS5's bm25() clamps IDF to 1e-06 and
-    Tantivy's does not (ADR-0008, measured); this is expected divergence, not
-    a bug, and this class's second test asserts it exists rather than
-    silently relying on it."""
+class TestHighDfIdfClamp:
+    """FTS5 clamps IDF to 1e-06 once df >= 50%. Keep the clamp visible so a
+    future tokenizer change cannot silently undo it."""
 
-    def _shared_env(self, tmp_path, monkeypatch):
+    def test_scores_collapse_at_or_above_50_percent_df(self, tmp_path, monkeypatch):
         monkeypatch.setenv("KB_DATABASE_URL", _make_url(tmp_path))
         monkeypatch.setenv("KB_PROFILE", "local")
         monkeypatch.setenv("KB_DATA_DIR", str(tmp_path / "data"))
         monkeypatch.setenv("KB_LEXICAL_BACKEND", "fts5")
         from kbsvc.config import reset_settings_cache
+        from kbsvc.lexical.fts5_store import Fts5LexicalStore
 
         reset_settings_cache()
         reset_engine_cache()
 
-    def test_topk_set_equals_tantivy_below_50_percent_df(self, tmp_path, monkeypatch):
-        self._shared_env(tmp_path, monkeypatch)
-        from kbsvc.lexical.fts5_store import Fts5LexicalStore
-        from kbsvc.lexical.tantivy_store import TantivyLexicalStore
-
-        # 麒麟 appears in 2 of 6 documents (df = 33% < 50%); the other four are
-        # unrelated classical-poetry filler so 麒麟's own unigram/bigram terms
-        # don't leak into them.
-        docs = [
-            _make_doc("l1", "麒麟出没于山林之间", document_id="d1"),
-            _make_doc("l2", "凤凰麒麟皆为祥瑞之兽麒麟", document_id="d2"),
-            _make_doc("l3", "春风又绿江南岸", document_id="d3"),
-            _make_doc("l4", "明月几时有把酒问青天", document_id="d4"),
-            _make_doc("l5", "大江东去浪淘尽千古风流人物", document_id="d5"),
-            _make_doc("l6", "会当凌绝顶一览众山小", document_id="d6"),
-        ]
-
-        fts5 = Fts5LexicalStore()
-        fts5.ensure_ready()
-        fts5.upsert(docs)
-
-        tantivy = TantivyLexicalStore()
-        tantivy.ensure_ready()
-        tantivy.upsert(docs)
-        try:
-            flt = SearchFilter(tenant_id="t")
-            fts5_hits = fts5.search("麒麟", limit=6, flt=flt)
-            tantivy_hits = tantivy.search("麒麟", limit=6, flt=flt)
-
-            fts5_ids = {h.id for h in fts5_hits}
-            tantivy_ids = {h.id for h in tantivy_hits}
-            assert fts5_ids == tantivy_ids == {"l1", "l2"}, (
-                f"fts5 top-k {fts5_ids} != tantivy top-k {tantivy_ids} for a df<50% query"
-            )
-        finally:
-            tantivy.close()
-
-    def test_divergence_exists_at_or_above_50_percent_df(self, tmp_path, monkeypatch):
-        self._shared_env(tmp_path, monkeypatch)
-        from kbsvc.lexical.fts5_store import Fts5LexicalStore
-        from kbsvc.lexical.tantivy_store import TantivyLexicalStore
-
-        # faqiterm appears in all 4 of 4 documents (df = 100% >= 50%).
         docs = [
             _make_doc("h1", "faqiterm alpha content one", document_id="d1"),
             _make_doc("h2", "faqiterm beta content two extra words here", document_id="d2"),
@@ -845,32 +796,9 @@ class TestTopKEqualityWithTantivy:
         fts5 = Fts5LexicalStore()
         fts5.ensure_ready()
         fts5.upsert(docs)
-
-        tantivy = TantivyLexicalStore()
-        tantivy.ensure_ready()
-        tantivy.upsert(docs)
-        try:
-            flt = SearchFilter(tenant_id="t")
-            fts5_hits = fts5.search("faqiterm", limit=4, flt=flt)
-            tantivy_hits = tantivy.search("faqiterm", limit=4, flt=flt)
-            assert len(fts5_hits) == 4
-            assert len(tantivy_hits) == 4
-
-            # This is the divergence itself, not an incidental side effect:
-            # FTS5 clamps IDF to 1e-06 once df >= 50%, collapsing every score
-            # toward zero regardless of term frequency; Tantivy's IDF does
-            # not clamp and stays in a normal range. Measured contrast in the
-            # ADR's own spike: 0.000001 vs 0.109771 (5 orders of magnitude).
-            # Do not "fix" this by changing either engine's formula - ticket
-            # 10 encodes it as a stratification, not a bug.
-            assert all(score < 1e-3 for score in (h.score for h in fts5_hits)), (
-                "fts5 scores should have collapsed near zero under the df>=50% IDF clamp"
-            )
-            assert all(score > 0.05 for score in (h.score for h in tantivy_hits)), (
-                "tantivy scores should NOT have collapsed - its IDF does not clamp"
-            )
-        finally:
-            tantivy.close()
+        hits = fts5.search("faqiterm", limit=4, flt=SearchFilter(tenant_id="t"))
+        assert len(hits) == 4
+        assert all(score < 1e-3 for score in (h.score for h in hits))
 
 
 # ---------------------------------------------------------------------------

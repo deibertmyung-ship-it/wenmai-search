@@ -15,7 +15,7 @@
 | [0005](0005-pushdown-document-filter-instead-of-post-fusion.md) | 书名筛选先解析为 document_ids 再下推 | Accepted | 2026-08-07 |
 | [0006](0006-return-owner-query-text-in-plagiarism-report.md) | 报告接口向检测创建者回显查询侧原文（`ReportOut.query_text`） | Accepted | 2026-08-08 |
 | [0007](0007-vector-recall-for-plagiarism-candidate-retrieval.md) | 抄袭检测候选检索引入向量召回 | Proposed | 2026-08-09 |
-| [0008](0008-consolidate-retrieval-stores-into-primary-database.md) | 检索存储收敛进各 profile 的主数据库 | Proposed | 2026-08-14 |
+| [0008](0008-consolidate-retrieval-stores-into-primary-database.md) | 检索存储收敛进各 profile 的主数据库 | Accepted | 2026-08-14 |
 
 ## 关联
 
